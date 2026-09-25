@@ -1,0 +1,205 @@
+# Verso Coder
+
+VS Code tarzı, sade ve modern C++ (Qt6) kod editörü.
+
+## Özellikler
+- **Sol ActivityBar:** Dosya Gezgini (🗂) · Git (⑂) · AI (✦)
+- **Sol alt bağımsız ⚙ düğmesi:** dil (TR/EN), tema (dark/light), AI bağlantısı
+- **Sekmeli editör:** satır numarası, aktif satır vurgusu, C++/Python/JS renklendirme
+- **Git paneli:** branch, status, stage-all, commit, push, pull (`git` CLI üzerinden)
+- **AI paneli (Ollama):** model listesi (`/api/tags`), sohbet (`/api/chat`), açık dosyayı bağlama ekleme
+
+## AI / Ollama ayarları (⚙ → AI Bağlantısı)
+| Ayar | Ollama karşılığı | Açıklama |
+|---|---|---|
+| Ollama Adresi | host | örn. `http://localhost:11434` |
+| Model | model | örn. `llama3.1`, `codellama`, `qwen2.5-coder` |
+| Context Window | `num_ctx` | 512–131072 |
+| GPU Backend | bilgi + `num_gpu` anahtarı | **CUDA** (NVIDIA) · **ROCm** (AMD/Linux) · **Vulkan** (genel) · **CPU** (`num_gpu=0`) |
+| GPU Offload | `num_gpu` | 0=CPU, 999=tümü |
+| Temperature | `temperature` | 0.00–2.00 |
+| CPU Threads | `num_thread` | 1–128 |
+
+> Not: Ollama hangi GPU kütüphanesini (CUDA/ROCm/Vulkan) kullanacağını otomatik seçer.
+> Backend seçimi burada saklanır; `CPU` seçilirse `num_gpu=0` gönderilir.
+> Doğru derlemeyi kullandığını `ollama --version` ve `ollama serve` loglarından doğrula.
+
+## Kurulum
+
+```bash
+# Qt6 + derleyici (Arch/Manjaro örneği / Debian benzeri)
+sudo pacman -S qt6-base qt6-tools cmake gcc   # Arch
+# sudo apt install qt6-base-dev qt6-tools-dev cmake g++   # Debian/Ubuntu
+
+# Ollama (AI için)
+curl -fsSL https://ollama.com/install.sh | sh
+ollama serve &
+ollama pull llama3.1
+
+# Derle
+cmake -S . -B build -DCMAKE_PREFIX_PATH=/usr/lib/cmake
+cmake --build build -j
+./build/verso-coder
+```
+
+## Yol haritası (20 + 132 özellik, 19 stage — tamamlandı)
+
+- **Stage 1 — Editör temeli ✅ (yapıldı):** oturum geri yükleme (açık dosyalar + aktif sekme + imleç), otomatik kaydetme (2 sn) + crash yedekleme, harici değişiklik uyarısı, hızlı açma (Ctrl+P fuzzy), font boyutu + sekme genişliği ayarı, status bar'da Ln/Col + LF/CRLF + UTF-8, otomatik parantez kapatma.
+- **Stage 5 — Editör gücü ✅ (yapıldı):** çoklu imleç (Alt+tık, Ctrl+D, Esc), kod katlama (gutter ▸/▾, Ctrl+Shift+[/], oturumda kalıcı), akıllı girinti + `}` geri-girinti + blok Tab, bracket eşleşme (derinlik renkli) + girinti kılavuzları, aramada ±3 satır önizleme, split editör (2 grup + taşı/böl + grup oturumu), satır işlemleri (taşı/çoğalt/sırala/trim), .editorconfig, büyük-dosya önizleme modu, hunspell yazım denetimi (TR+EN, F7, sağ-tık öneri).
+- **Stage 2 — Navigasyon & Git ✅ (yapıldı):** global arama/değiştir paneli (düz metin/regex, Aa, `*.cpp` filtresi, önizlemeli ağaç, çift tıkla satıra git, toplu değiştir), breadcrumb (kök › klasör › dosya + sınıf/fonksiyon sembol kutusu), hafif minimap (satır çubukları + viewport + tıkla-kaydır, Görünüm'den aç/kapa), Git'te dosya bazlı Stage/Unstage + renkli Diff/Diff(staged) + branch listesi/oluştur/checkout + log grafiği, Ctrl+Shift+F kısayolu.
+- **Stage 3 — AI yükseltme ✅ (yapıldı):** streaming yanıt (token token canlı, ■ ile durdurma), bağlam modları (açık dosya / seçili kod / proje-RAG / bağlamsız), hazır komutlar (Açıkla, Düzelt, Test yaz, staged diff'ten Commit msg), yerel RAG (chunk+overlap indeks, anahtar kelime skoru, `İndeksle` + otomatik indeks), çoklu model profili (kaydet/sil/uygula, sıcaklık+num_ctx dahil), sohbet geçmişi (kaydet/yükle/temizle), diff onaylı ajan düzenlemesi (`Dosyaya uygula` → son ``` bloğu → eski/yeni onayı → seçim veya dosya, Ctrl+Z ile geri alınabilir).
+- **Stage 4 — Platform ✅ (yapıldı):** minimal LSP istemcisi (clangd/pylsp, JSON-RPC stdio; hover F12/Ctrl+K, tanım atlama, dalgalı kırmızı/sarı alt çizgi + ⚠ Sorunlar paneli), komut paleti (Ctrl+Shift+P, fuzzy) + ⚙ Kısayollar sekmesinde 12 eylem için QKeySequenceEdit ile özelleştirme, alt terminal dock (kalıcı bash + Derle & Çalıştır: cpp/c/py/sh/js şablonları, F5), tema içe aktarma (custom.qss), büyük-dosya modu (eşik üstü renklendirme kapalı + örneklemeli minimap + breadcrumb cap), arama ve RAG indeksleme arka planda (Qt Concurrent).
+- **Stage 6 — Proje & Git derinliği ✅ (yapıldı):** .gitignore dosya ağacı filtresi (`*`, `?`, `**`, `{}`, `!`, `/` kök çapası, `dizin/`), uzantıya göre renkli dosya ikonları, sürükle-bırak taşıma (açık sekmelerin yolu otomatik güncellenir), hunk bazlı diff (yan yana/birleşik görünüm + hunk stage/discard, `git apply` yaması), Git araç sekmeleri (geçmiş grafiği + cherry-pick/revert, stash push/apply/pop/drop, uzak depo ekleme/fetch/push + ahead/behind), TODO/FIXME/HACK tarama paneli (arka plan, çift tıkla satıra git), klasör karşılaştırma (yalnız/farklı/aynı + çift tıkla dosya diff'i), güvenli silme (çöp kutusu → geri yükle/temizle), proje bazlı oturum + adlandırılmış anlık görüntüler (kaydet/yükle).
+- **Stage 7 — AI Ajan 2.0 ✅ (yapıldı):** araç kullanan çok adımlı ajan döngüsü (plan → `<tool_call>` → gözlem → devam, adım limiti), güvenli araç yürütücü (read_file / write_file / list_dir / search / run_command / get_problems; proje kökü sandbox'ı, yazma+komut için onay), çoklu dosya düzenleme kuyruğu (`PatchQueue` + LCS tabanlı unified diff + `PatchReviewDialog` ile toplu onay/uygula/reddet), `@`-bağlam etiketleri (`@dosya`, `@dosya:10-25`, `@seçim`, `@sorunlar`, `@proje[:sorgu]`), çoklu sohbet oturumu (`ChatStore`: oluştur/yeniden adlandır/sil/geçiş + JSON kalıcılık), token/maliyet sayacı (Ollama `prompt_eval_count`/`eval_count` → oturum toplamı + ~$), Sorunlar panelinden "AI ile düzelt", komut paletinden `AI Ajan Modu`.
+- **Stage 8 — Platform & Dağıtım ✅ (yapıldı):** komut satırı argümanları (`--line N`, `--new`, `--command ID`, `--help`, `--version`, dosya/klasör) + tek örnek (single instance; ikinci çağrı dosyayı/komutu çalışan pencereye iletir, `--new` ile ayrı pencere), araç zinciri teşhisi (git/cmake/g++/clang/clangd/pylsp/python/ollama/bash tespiti + sürüm, arka planda tarama), performans profili (başlangıç/oturum/CLI işaretleri + RSS bellek, `PerfMonitor`), `tasks.json` görev çalıştırıcı (VS Code benzeri; alt panelde **Tasks** sekmesi, çalıştır/durdur/`tasks.json` oluştur, canlı çıktı), kısayol profilleri (Varsayılan / VS Code / JetBrains / Vim; Kısayollar sekmesinden tek tıkla uygula), ayarları JSON olarak dışa/içe aktarma (`SettingsIO`), proje çalışma alanı ayarları (`.verso/workspace.json` — font/sekme/büyük-dosya/kısayol profili/görev geçersiz kılmaları), zaman damgalı yedekler + kurtarma (`BackupManager`, 30 yedek sınırı, Sistem Teşhisi → Yedekler'den geri yükle/sil), Sistem Teşhisi / Hakkında diyaloğu (`F1`; sürüm + yenilikler + güncelleme manifesti denetimi) ve dağıtım (`CMake install` kuralları, `.desktop`, AppData metainfo, AppImage üretim betiği `packaging/build-appimage.sh`).
+- **Stage 9 — Tema Motoru & Modern Görsel Dil ✅ (yapıldı):** token tabanlı tema motoru (`ThemeTokens` JSON paleti → `QssBuilder` ile tüm uygulama QSS'i otomatik üretilir; elle QSS yok), 10 hazır tema (Dark+, Light, Nord, One Dark, Dracula, Monokai, Solarized Dark/Light, GitHub Light, Catppuccin Mocha) + tema galerisi (`Ctrl+K, Ctrl+T`; mini editör önizlemeli kartlar, çift tıkla anında uygula), vurgu rengi seçici (7 hazır + özel; hover/pressed/soft türevleri otomatik hesaplanır), SVG ikon sistemi (16 Feather-tarzı ikon, `IconTheme` ile temaya göre yeniden renklenir; emoji butonlar gitti), modern sekme çubuğu (accent alt çizgili aktif sekme, ● kirli göstergesi, sağ tıkla sekme listesi taşma menüsü), editör görsel ayarları (tema renkli aktif satır/gutter/parantez/diagnostic, sayı renklendirme, imleç genişliği 1-6px, satır yüksekliği 1.0-2.0x), tipografi sistemi (UI + editör fontu ayrı; aile/boyut/harf aralığı/ligature), yerleşim ölçü sistemi (`UiMetrics`: boşluk/yarıçap/ölçek tokenları), zengin durum çubuğu (tıklanabilir çipler: git dalı, sorun sayısı, Ln:Col→satıra git, dil/girinti, LF/CRLF, UTF-8) ve tema dışa/içe aktarma JSON (Galeri → İçe/Dışa Aktar).
+- **Stage 10 — Mikro-etkileşim & Cila ✅ (yapıldı):** toast bildirim sistemi (`ToastManager`: sağ altta yığılan, önem rengi kenarlıklı, aynı mesaj tekilleşen, otomatik kaybolan bildirimler — kaydetme, tema değişimi, zoom, profil aktarımı gibi olaylarda), animasyon altyapısı (`Animator`: fade/slide/geometri geçişleri; "azaltılmış hareket" tercihinde hepsi anında uygulanır — Ayarlar → Görünüm), yeniden tasarlanmış karşılama ekranı (`WelcomeView`: hızlı başlangıç kartları, son dosyalar listesi, kısayol ipuçları; tüm sekmeler kapanınca otomatik görünür), boş durum görünümü (`EmptyState`: ikon + başlık + eylem butonu; Sorunlar paneli temizken "Sorun yok" kartı), komut paleti cilası (son kullanılan komutlar ★ ile öne gelir ve kalıcıdır, sonuç sayacı, gelişilmiş yer tutucu), renkli minimap (çubuklar satır içeriğine göre sözdizimi renklerinde: yorum/dize/anahtar kelime) + kelime diff'i (Diff görünümünde değişen satırlarda yalnızca farklı kelimeler vurgulanır, LCS tabanlı), yerleşim ön ayarları + Zen modu (`LayoutPresets`: Standart/Editör/Zen; F11 ile geçiş, kalıcı), erişilebilirlik/ölçek (`Ctrl+=` / `Ctrl+-` / `Ctrl+0` yakınlaştırma; arayüz + editör fontu birlikte ölçeklenir) ve kişiselleştirme profili (`UiProfile`: tüm görünüm tercihleri tek JSON dosyasına dışa/içe aktarılır — komut paletinden).
+- **Stage 11 — Editör Görsel Derinliği ✅ (yapıldı):** gökkuşağı parantezler (`BracketDepth`: iç içelik seviyesine göre 6 renk, dize/yorum içi yok sayılır; koyu/açık tema paleti) + aktif girinti kılavuzu (imleç seviyesi vurgulu), zengin gutter (kalın aktif satır numarası, git diff şeritleri: yeşil eklenen/mavi değişen/kırmızı silinen, hover'da satır vurgusu + katlama oku), yapışkan kaydırma (`ScopeChain`: girinti tabanlı kapsam zinciri "class Foo › bar()", tıklayınca kapsama atlar), minimap 2.0 (diff + arama işareti şeritleri, hover'da gerçek metinli büyüteç), editör-içi bulma çubuğu (`Ctrl+F`: tüm eşleşmeler + aktif vurgu + "n/m" sayacı, F3/Shift+F3 gezinme; overview ruler + minimap senkron), zengin hover kartı (`HoverCard`: başlıklı, renkli, ``` kod bloklu temalı kart), boşluk görünümü + sütun cetveli (Ayarlar → Görünüm; CRLF satırlarında ␍ işareti), breadcrumb rafinesi (dosya ikonu, ▣ sınıf / ƒ fonksiyon önekleri, sınıflar önce), ince kaydırma çubukları (8px, hover'da belirginleşir), hedef satır flaşı (satıra git/LSP atlamada accent parlaması) + akıllı seçim genişletme (`Shift+Alt+Right`: kelime → satır → {} bloğu → belge).
+- **Stage 12 — Uyarlanabilir & Kişiselleştirilebilir Arayüz ✅ (yapıldı):** yoğunluk modu (`Density`: Kompakt/Rahat/Geniş — UiMetrics ölçeği + UI font farkı; komut paletinden döngüyle değişir), canlı tema editörü (`ThemeEditorDialog`: 26 renk alanı renk seçicilerle, anlık önizleme, doğrulanmış JSON kaydetme) + AI tema üretici (Ollama'ya tarif → şemalı istem → `ThemeValidator` doğrulaması → önizleme), otomatik tema (`AutoTheme`: sistem açık/koyu takibi + 07–19 zamanlanmış gündüz/gece, 60 sn denetim), çoklu görünüm profili (`ProfileStore`: isimli kayıt/yükle/sil + durum çubuğunda ●/○ hızlı değiştirici), durum çubuğu özelleştirme (6 çip aç/kapa, Ayarlar → Görünüm), odak/daktilo modu (imleç satırı ortalanır), erişilebilirlik paketi (`high-contrast` teması + `ColorBlind` deuteranopi/protanopi/tritanopi dönüşümü + odak halkaları), özel pencere başlığı (`TitleBar`: frameless sürükle/çift-tık/büyüt/kapat; ayarlardan kapatılabilir), panel sürükle-bırak düzeni (alt sekme sırası kalıcı + yan sayfa aç/kapa), görsel dışa aktarma (pencere PNG kaydı).
+- **Stage 13 — Dil Zekâsı ✅ (yapıldı):** `LspClient` genelleştirmesi (genel `request()`/`notify()`/`cancelRequest`, geniş istemci yetenekleri, sunucu yetenekleri `hasCap()` ile desteklenmeyen özellik otomatik pasif), otomatik tamamlama (`CompletionList` parse/filtre/sırala + `CompletionPopup`: kind ikonu, detay; Ctrl+Space + yazarken debounce), tüm referanslar (`LocationSet`: Location/LocationLink, dosyaya göre grup + `ReferencesDialog`, Shift+F12), yeniden adlandırma (`TextEdits` WorkspaceEdit + `RenamePreviewDialog` önizleme, çok dosyalı toplu uygula, F2), hızlı düzeltme (`CodeActionList` + 💡 menü, edit uygula / `workspace/executeCommand`, Ctrl+.), imza yardımı (`SignatureHelp` + otomatik `(` tetikleme, Ctrl+Shift+Space), belge simgeleri (`SymbolTree` + `SymbolPickerDialog` outline, Ctrl+Shift+O) + çalışma alanı simgeleri (Ctrl+T), biçimlendirme (`TextEdits::apply` + Shift+Alt+F + `editor/formatOnSave`), satır içi ipuçları (`InlayHintList` + `CodeEditor` overlay, ayarlanabilir), semantik renklendirme (`SemanticTokens` delta-decode + legend → tema renkleri katmanı, ayarlanabilir), çağrı hiyerarşisi (`CallHierarchyTree` + `CallHierarchyDialog`: gelen/giden, tembel alt seviye, çift tıkla atla).
+- **Stage 14 — Hata Ayıklama & Test ✅ (yapıldı):** GDB/MI2 sürücüsü (`GdbDriver`: tokenli komut kuyruğu, kesme/yürüt/adım/yığın/değişken/değerlendir; `MiParser` saf çözümleyici), gutter'dan kesme noktası (kırmızı nokta, sol 16px katlama oku korunur; F9 + `BreakpointStore` kalıcılık + koşullu/log noktası alanı), çalışan çerçeve oku (sarı satır + ➤, dosyaya atlar), `DebugPanel` (Başlat/Durdur/Devam/AdımÜstü/Adımİçi/Bitir + Yığın/Değişkenler/KesmeNoktaları/Konsol sekmeleri; ifade değerlendirme + ham gdb konsolu), `launch.json` (`.verso/launch.json`: program/args/cwd/preBuild/stopAtEntry; yoksa şablon oluşturup açar), test gezgini (`TestExplorer` + `TestDiscovery`: ctest/gtest/pytest/unittest bulur, listeler, tekli/tümlü çalıştırır, ✓/✗/○ + süre + günlük; çöken test fail sayılır), kapsama (`GcovParser`: `gcov --stdout` → yeşil/kırmızı satır ısı haritası + yüzde), problem eşleştiriciler (`ProblemMatcher`: gcc/clang + python traceback + genel dosya:satır → Sorunlar paneli; test çıktıları otomatik taranır), sunucu hazır-değil kuyruğu (`withLspReady`: 12 LSP komutu gdb/LSP ısınırken bekleyip otomatik çalışır).
+- **Stage 15 — AI Hattı ✅ (yapıldı):** hayalet tamamlama (`GhostCompletion` FIM istemi + yanıt temizliği + tetik kuralları; `CodeEditor` soluk italik hayalet, Tab kabul / Esc vazgeç, 800 ms debounce, bayat yanıt eleme; varsayılan kapalı, Ayarlar → AI), satır içi yeniden yazma (`InlineEdit` tarif + seçim → `ApplyEditDialog` onaylı uygula) + tek tuşla düzelt, fonksiyona belge yorumu (`DocGen`: imleç üstü tanım bulma, dile göre yorum öneki), test üretimi (`TestGen`: `tests/test_*.cpp` / `test_*.py` hedef çözümleyici, üzerine yazma onayı, yeni sekmede açma), AI commit mesajı (`CommitMsg` Conventional doğrana + `GitPanel` mesaj kutusunu doldurma), sembol açıklama balonu (temalı `HoverCard`), özel istem kitaplığı (`PromptLibrary` + diyalog: kaydet/çalıştır/sil, AI paneline gönderir), son AI kodunu uygula (komut paletinden), Ollama model indirme (`OllamaClient::pull`: akışlı ilerleme + durum çubuğu yüzdesi), bağlam bütçesi (`ContextBudget`: kaba token tahmini + dengeli kırpma, tüm AI akışlarında otomatik).
+- **Stage 16 — Uzaktan Geliştirme ✅ (yapıldı):** SSH oturumu (`SshSession`: OpenSSH CLI tabanlı, port/anahtar/jump-host keep-alive, BatchMode + katı host-key varsayılanı ve profil başına TOFU (`trustNewHosts`); CMake'te libssh2 varsa `VERSO_HAVE_LIBSSH2` ile native yola hazır), bağlantı profilleri (`ConnectionProfile` + `RemoteConnectDialog`: kaydet/seç/sil, parola kalıcı yazılmaz), uzak dosya gezgini (`RemoteExplorer`: `command ls` ile kabuk takma adlarına dayanıklı listeleme, aç/yeni/sil/yükle/indir), uzak dosyayı editörde aç/kaydet (`ssh://` belgeler + mtime çakışma sorusu, toplu kayıtta sessiz atlama), uzak terminal (`RemoteTerminal`: pty `-t`, TOFU/parolaya izinli etkileşimli kabuk, `\x03` → Ctrl+C), uzak LSP (`LspTransport` + `LspClient::startRemote`: `ssh hedef -- clangd` stdio köprüsü, tanılar `ssh://` URI ile Sorunlar panelinde), uzakta derle (`RemoteTaskRunner`: gcc/clang çıktısı → uzak kök eşlemeli sorunlar), uzak git (`GitRunner`: yerel/uzak aynı arayüz, `git -C kök`), uzak hata ayıklama (`GdbDriver::targetRemote/launchRemote` + SSH tüneli üzerinden `gdbserver`, sembol dosyası yerel aynadan), port yönlendirme (`PortForwarder` + `PortForwardPanel`: `ssh -N -L`, aktif tünel tablosu).
+- **Stage 17 — Editör Deneyimi ✅ (yapıldı):** snippet motoru (`SnippetEngine`: `$1/${2:varsayılan}/$0` + ayna + `$$` kaçışı + `$TM_FILENAME/$TM_SELECTED_TEXT/$CLIPBOARD`; `SnippetManager`: dile göre gömülü set + özel set, önek puanlı eşleşme; `SnippetDialog` palet; Tab/Shift-Tab durak gezme, düzenledikçe kayan duraklar, Esc çıkış), LSP katlama aralıkları (`FoldingRanges`: normalize/kırp/birleştir + girinti algısıyla `merge`, `CodeEditor` sunucu bitişlerini saklar), dikey blok seçim (`BlockSelect`: sekme-bilinçli görsel sütun; Alt+sürükle dikdörtgen, Alt+Shift+Yukarı/Aşağı sütun-korumalı imleç), otomatik çift kapatma (`AutoPairs`: kelime-sonrası/dize/yorum korumalı, kapanıştan atlama, seçim sarma, kapanış-öncesi akıllı Enter; `editor/autoClose` ayarı), özel yapıştır (`PasteTransform`: birleştir/virgüllü/tekilleştir/sırala/büyük-küçük/tırnakla/kırp menüsü), outline paneli (`OutlinePanel`: LSP documentSymbol ağacı + `OutlineFallback` regex taraması, süzme, tıkla-git, yazarken debounce tazeleme), yerel geçmiş (`LocalHistory`: kaydetmede zaman damgalı anlık görüntü, mtime-sıralı liste, budama, günü-kurtaran geri yükleme + `TimelinePanel`: önizleme/fark/geri yükle/temizle), değiştirme derinleştirme (`ReplaceEngine`: dahil+hariç glob, dosya-başı önizlemeli `Dosyada` uygulama, durum koruma, regex `$1` uyumluluğu; `SearchPanel` hariç kutusu), minimap tanı çizgileri (hata/uyarı sağ şeridi), git hunk menüsü (imleç satırında fark göster/hunk geri al/hunk stage'le — `DiffEngine` yama üretimi, geri almadan önce otomatik anlık görüntü), kelime tamamlaması (`WordComplete`: açık belgelerden sıklıklı adaylar, `CompletionPopup` ile sunum).
+- **Stage 18 — Canlı İşbirliği & Görev Zinciri ✅ (yapıldı):** görev zinciri (`TaskChain`: `dependsOn` topolojik sıra + döngü hatası, `${input:ad}/${workspaceFolder}/${file}` genişletme, `inputs` varsayılanları, `$gcc` problemMatcher; `TaskRunner` ile `tasks.json` uyumlu), eklenti API v1 (`PluginEngine` + `VersoApi`: `QJSEngine` betikleri, `// @permission fs.read|fs.write` bildirimi, izinsiz erişimde `permissionDenied`, `registerCommand` + `callCommand`), canlı işbirliği (`CollabMerge`: hello/cursor/edit/sync/bye/term protokolü, önek-sonek diff, basit OT konum kaydırma; `CollabSession`: `QWebSocketServer` host + zamanuyumsuz peer join, imleç/metin/terminal yayını, rev uyuşmazlığında sync), görünüm profili (`UiProfile`: tema/accent/tipografi/düzen dışa-içe aktarma, yalnızca görsel alanlar), karşılama ekranında canlı demo kartı (`WelcomeView::buildDemoMode`).
+- **Stage 19 — Süreklilik & Bakım ✅ (yapıldı):** sürüm takibi (`GitVersionManager`: `git describe`/kısa-hash sürüm, `lastCommitMessage`, opt-in `createTag`, `SettingsManager`'da `app/version` + `app/firstRun`), önbellek temizleyici (`CacheCleaner`: `~/.cache/clangd` + proje `.clangd` + `*.swp/*.bak/*.tmp`; `.git`'e dokunmaz), iş parçacığı izleyici (`ThreadMonitor`: `QFutureWatcherBase` tabanlı calisiyor/bitti/iptal + `cancelAll`), dil desteği (`LanguageSupport`: uzantı→dil, klasör taramada baskın dil, geçerli boş `compile_commands.json` üretimi), `test_stage19` (55 kontrol: zincir/birleştirme/eklenti-izini/canlılık + localhost WebSocket turu).
+
+## Proje yapısı
+```
+src/main.cpp  src/MainWindow.*        → activity bar + side panel + sekmeler + status
+src/core/SettingsManager.*            → QSettings kalıcılığı
+src/core/ThemeManager.*               → token hattı: palet + accent + tipografi → QSS
+src/core/ThemeTokens.*                → JSON tema paleti + renk yardımcıları
+src/core/ThemeStore.*                 → gömülü/özel tema deposu + içe/dışa aktarma
+src/core/QssBuilder.*                 → token'lardan tam uygulama QSS'i üretir
+src/core/AccentColor.*                → vurgu rengi presetleri + hover/pressed/soft türevleri
+src/core/UiMetrics.*                  → boşluk/yarıçap/ölçek ölçü tokenları
+src/core/Typography.*                 → UI+editör fontu, satır yüksekliği, ligature
+src/core/IconTheme.*                  → SVG ikonları temaya göre renklendirir (Qt6::Svg)
+src/widgets/ThemeGalleryDialog.*      → tema galerisi + accent seçici + JSON aktarım
+src/core/Animator.*                   → fade/slide/geometri animasyonları + azaltılmış hareket
+src/core/ToastManager.*               → sağ altta yığılan toast bildirim overlay'i
+src/core/LayoutPresets.*              → Standart/Editör/Zen yerleşim şablonları
+src/core/UiProfile.*                  → görünüm profili JSON dışa/içe aktarma
+src/core/WordDiff.*                   → LCS tabanlı kelime diff vurgusu
+src/widgets/WelcomeView.*             → karşılama ekranı: hızlı eylem + son dosyalar
+src/widgets/EmptyState.*              → yeniden kullanılabilir boş durum görünümü
+src/core/BracketDepth.*               → gökkuşağı parantez derinlik analizi + palet
+src/core/ScopeChain.*                 → yapışkan kaydırma için kapsam zinciri
+src/core/SearchMarks.*                → editör-içi arama isabetleri (FindHit)
+src/core/DiffGutter.*                 → git diff satır durumları (gutter + minimap)
+src/core/HoverCard.*                  → zengin LSP hover kartı HTML üretici
+src/core/SelectionGrow.*              → akıllı seçim genişletme mantığı
+src/core/CompletionList.*              → LSP tamamlama parse + filtre/sırala
+src/core/SymbolTree.*                 → document/workspace sembol ağacı + düzleştirme
+src/core/LocationSet.*                → referans konumları parse + dosyaya göre grup
+src/core/TextEdits.*                  → TextEdit/WorkspaceEdit uygula + önizleme
+src/core/CodeActionList.*             → code action parse + kind filtre
+src/core/SignatureHelp.*              → imza yardımı parse + render
+src/core/InlayHintList.*              → satır içi ipucu parse
+src/core/SemanticTokens.*             → semantik token delta-decode + rol eşleme
+src/core/CallHierarchyTree.*          → prepare/incoming/outgoing çağrı ağacı
+src/widgets/CompletionPopup.*         → imleç altı tamamlama listesi
+src/widgets/SymbolPickerDialog.*      → outline + çalışma alanı sembol seçici
+src/widgets/ReferencesDialog.*        → gruplu referans ağacı + atlama
+src/widgets/RenamePreviewDialog.*     → yeniden adlandırma önizleme + onay
+src/widgets/CallHierarchyDialog.*     → gelen/giden çağrı ağacı
+src/core/MiParser.*                   → GDB/MI kayıt çözümleyici
+src/core/BreakpointStore.*            → kesme noktaları kalıcılık (dosya:satır)
+src/core/TestParser.*                 → ctest/gtest/pytest çıktı çözümleyici
+src/core/TestDiscovery.*              → çalıştırıcı bulma + listeleme komutları
+src/core/GcovParser.*                 → .gcov kapsama çözümleyici
+src/core/ProblemMatcher.*             → derleme/test çıktısı → tanı listesi
+src/core/LaunchConfig.*               → .verso/launch.json yükle/kaydet
+src/core/GdbDriver.*                  → GDB/MI2 sürücü (kesme/adım/yığın/değişken)
+src/widgets/DebugPanel.*              → hata ayıklama araç çubuğu + 4 sekme
+src/widgets/TestExplorer.*            → test ağacı + çalıştır + günlük
+src/core/GhostCompletion.*            → FIM istemi + hayalet temizliği + tetik
+src/core/InlineEdit.*                 → tarif + seçim → kod çıkarımı
+src/core/DocGen.*                     → fonksiyon başı bulma + belge istemi
+src/core/TestGen.*                    → test hedefi çözümleyici + test istemi
+src/core/CommitMsg.*                  → conventional doğrulama + commit istemi
+src/core/PromptLibrary.*              → özel istem deposu
+src/core/ContextBudget.*              → token tahmini + bağlam kırpma
+src/widgets/PromptLibraryDialog.*     → istem kitaplığı diyaloğu
+src/core/ConnectionProfile.*          → uzak bağlantı profili (host/port/anahtar/jump/TOFU)
+src/core/SshSession.*                 → SSH oturumu (exec/sftp/oku/yaz, komut kurma)
+src/core/RemoteFileSystem.*           → ssh:// URI + GNU ls/stat ayrıştırma
+src/core/RemoteTaskRunner.*           → uzak derleme çıktısı → sorun listesi
+src/core/LspTransport.*               → yerel/uzak LSP süreç kurma (ssh stdio köprüsü)
+src/core/GitRunner.*                  → yerel/uzak git çalıştırıcı
+src/core/PortForwarder.*              → ssh -L tünel yöneticisi
+src/widgets/RemoteConnectDialog.*     → profil + bağlan diyaloğu
+src/widgets/RemoteExplorer.*          → uzak dosya ağacı
+src/widgets/RemoteTerminal.*          → uzak etkileşimli kabuk
+src/widgets/PortForwardPanel.*        → aktif tüneller tablosu
+src/core/SnippetEngine.*              → snippet gövde ayrıştırma + genişletme
+src/core/SnippetManager.*             → gömülü + özel snippet deposu
+src/core/FoldingRanges.*              → LSP foldingRange normalize/birleştirme
+src/core/BlockSelect.*                → dikdörtgen seçim hesabı
+src/core/AutoPairs.*                  → çift kapatma/sarma/akıllı Enter kararları
+src/core/PasteTransform.*             → özel yapıştırma dönüşümleri
+src/core/OutlineFallback.*            → regex sınıf/fonksiyon taraması
+src/core/LocalHistory.*               → zaman damgalı anlık görüntüler + budama
+src/core/ReplaceEngine.*              → hariç glob + dosya-başı değiştirme + durum koruma
+src/core/WordComplete.*               → açık belge kelime adayları
+src/widgets/OutlinePanel.*            → sembol ağacı paneli
+src/widgets/TimelinePanel.*           → geçmiş önizleme/fark/geri yükleme
+src/widgets/SnippetDialog.*           → snippet paleti
+src/widgets/EditorFindBar.*           → Ctrl+F bulma çubuğu + sayaç + gezinme
+src/core/Density.*                    → arayüz yoğunluğu (kompakt/rahat/geniş)
+src/core/ColorBlind.*                 → renk körü dostu palet dönüşümü
+src/core/AutoTheme.*                  → sistem/zamanlanmış otomatik tema kararı
+src/core/ProfileStore.*               → isimli görünüm profili deposu
+src/core/ThemeValidator.*             → tema JSON doğrulama + AI yanıt çıkarımı
+src/widgets/ThemeEditorDialog.*       → canlı tema editörü + AI tema üretici
+src/widgets/TitleBar.*                → frameless özel pencere başlığı
+resources/themes/high-contrast.json   → erişilebilirlik teması (11 hazır tema)
+resources/themes/*.json              → 11 hazır tema paleti (QSS yerine token)
+resources/icons/*.svg                → 16 Feather-tarzı ikon (currentColor tabanlı)
+src/core/LanguageManager.*            → TR/EN sözlük
+src/core/OllamaClient.*               → /api/tags + /api/chat
+src/widgets/CodeEditor.*              → gutter + highlighter + load/save
+src/widgets/ExplorerPanel.*           → QFileSystemModel ağacı + .gitignore filtresi + ikonlar + çöp
+src/widgets/GitPanel.*                → git CLI: status/commit/push/pull + hunk diff
+src/widgets/DiffDialog.*              → unified diff çözümleyici + hunk stage/discard
+src/widgets/GitTools.*                → geçmiş/stash/uzak sekmeleri
+src/widgets/TodoPanel.*               → TODO/FIXME tarama (Qt Concurrent)
+src/widgets/CompareDialog.*           → klasör karşılaştırma + dosya diff
+src/core/GitIgnore.*                  → .gitignore glob → regex eşleştirici
+src/core/TrashManager.*               → güvenli silme / geri yükleme
+src/core/ProjectSessions.*            → proje oturumu + anlık görüntüler
+src/core/FileIcons.*                  → uzantı bazlı renkli ikonlar
+src/core/AgentTools.*                 → ajan araçları (read/write/list/search/run) + sandbox
+src/core/AgentLoop.*                  → çok adımlı plan→araç→gözlem döngüsü
+src/core/PatchQueue.*                 → çoklu dosya düzenleme kuyruğu + unified diff
+src/core/ContextResolver.*            → @dosya/@seçim/@sorunlar/@proje etiketleri
+src/core/ChatStore.*                  → çoklu sohbet oturumu (JSON kalıcılık)
+src/core/TokenStats.*                 → token sayacı + yaklaşık maliyet
+src/widgets/PatchReviewDialog.*       → ajan düzenlemelerini incele & toplu uygula
+src/core/StartupArgs.*                → komut satırı argümanları (--line/--new/--command)
+src/core/ToolchainProbe.*             → harici araç zinciri tespiti + sürüm
+src/core/TaskRunner.*                 → tasks.json görev çalıştırıcı (QProcess)
+src/core/TaskChain.*                  → dependsOn zinciri + input genişletme + problemMatcher
+src/core/PluginEngine.*               → eklenti API v1 (QJSEngine + fs.read/fs.write izni)
+src/core/CollabMerge.*                → işbirliği protokolü + diff + basit OT
+src/core/CollabSession.*              → WebSocket host/peer oturumu (imleç/metin/terminal)
+src/core/UiProfile.*                  → görünüm profili dışa/içe aktarma
+src/core/GitVersionManager.*          → git describe sürüm + opt-in tag
+src/core/CacheCleaner.*               → clangd + geçici dosya temizliği
+src/core/ThreadMonitor.*              → QFutureWatcher tabanlı iş izleyici
+src/core/LanguageSupport.*            → dil algılama + compile_commands.json
+tests/test_stage19.cpp                → Stage 18/19 birim + canlı localhost testleri
+src/core/PerfMonitor.*                → başlangıç/yükleme süreleri + RSS bellek
+src/core/KeymapPresets.*              → VS Code / JetBrains / Vim kısayol profilleri
+src/core/BackupManager.*              → zaman damgalı yedekler + kurtarma
+src/core/WorkspaceConfig.*            → .verso/workspace.json proje ayarları
+src/core/SettingsIO.*                 → ayarları JSON dışa/içe aktarma
+src/core/AboutInfo.*                  → sürüm + yenilikler + güncelleme manifesti
+src/widgets/TaskPanel.*               → görev listesi + çalıştır/durdur + canlı çıktı
+src/widgets/DiagnosticsDialog.*       → Sistem Teşhisi (Hakkında/Araç/Performans/Yedek)
+packaging/                            → .desktop + appdata + AppImage betiği
+src/widgets/AiPanel.*                 → chat UI + options (num_ctx/num_gpu/...)
+src/widgets/SettingsDialog.*          → dil + tema + Ollama formu
+resources/themes/{dark,light}.qss
+```

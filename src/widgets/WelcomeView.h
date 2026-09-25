@@ -1,0 +1,30 @@
+#pragma once
+#include <QWidget>
+
+class QLabel;
+class QVBoxLayout;
+
+// Stage 10: yeniden tasarlanmış karşılama ekranı — tüm sekmeler kapandığında
+// editör alanında gösterilir: başlık, hızlı eylemler, son dosyalar, kısayol ipuçları.
+class WelcomeView : public QWidget {
+    Q_OBJECT
+public:
+    explicit WelcomeView(QWidget* parent = nullptr);
+
+    void setRecentFiles(const QStringList& files);
+    int recentCount() const { return m_recent.size(); }
+
+signals:
+    void commandRequested(const QString& cmdId);
+    void fileRequested(const QString& path);
+
+private:
+    QWidget* buildQuickActions();
+    QWidget* buildRecents();
+    QWidget* buildShortcuts();
+    QWidget* buildDemoMode(); // Stage 19: canlı demo önizleme kartı
+
+    QStringList m_recent;
+    QVBoxLayout* m_recentsHost = nullptr;
+    QLabel* m_recentsTitle = nullptr;
+};

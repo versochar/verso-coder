@@ -1,0 +1,14 @@
+/* Verso Coder — light */
+QWidget { background: #f3f3f3; color: #1e1e1e; font-size: 13px; }
+QMainWindow, QSplitter, QTabWidget::pane { background: #ffffff; }
+QMenuBar, QMenu { background: #e8e8e8; color: #1e1e1e; }
+QPushButton { background: #e8e8e8; border: 1px solid #cccccc; border-radius: 4px; padding: 6px 10px; }
+QPushButton:hover { background: #dcdcdc; }
+QPushButton:checked { background: #007acc; color: white; }
+QTreeView, QTextEdit, QLineEdit, QPlainTextEdit, QComboBox {
+  background: #ffffff; color: #1e1e1e; border: 1px solid #cccccc; border-radius: 4px; }
+QTreeView::item:selected { background: #add6ff; }
+QTabBar::tab { background: #e8e8e8; padding: 8px 14px; }
+QTabBar::tab:selected { background: #ffffff; }
+QStatusBar { background: #007acc; color: white; }
+QStatusBar QLabel { color: white; }

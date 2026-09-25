@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Verso Coder
+GenericName=Code Editor
+Comment=Hafif, VS Code tarzı C++/Qt6 kod editörü
+Exec=verso-coder %F
+Icon=verso-coder
+Terminal=false
+Categories=Development;IDE;TextEditor;
+Keywords=editor;ide;code;cpp;qt;
+MimeType=text/plain;text/x-c++src;text/x-csrc;text/x-python;application/json;
+StartupNotify=true

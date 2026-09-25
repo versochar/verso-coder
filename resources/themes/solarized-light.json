@@ -1,0 +1,16 @@
+{
+  "name": "solarized-light",
+  "dark": false,
+  "colors": {
+    "bg": "#fdf6e3", "surface": "#eee8d5", "surfaceAlt": "#e4ddc8", "border": "#ccc7b3",
+    "text": "#657b83", "textStrong": "#073642", "textDim": "#93a1a1",
+    "accent": "#268bd2", "success": "#859900", "warning": "#b58900", "error": "#dc322f",
+    "selection": "#eee8d5", "lineHighlight": "#f2ecda",
+    "gutterBg": "#fdf6e3", "gutterText": "#93a1a1", "gutterActive": "#657b83",
+    "indentGuide": "#d5cdb7", "bracket": "#657b83", "cursor": "#586e75", "scrollbar": "#ccc7b3",
+    "syntax": {
+      "keyword": "#859900", "string": "#2aa198", "comment": "#93a1a1",
+      "number": "#d33682", "func": "#268bd2", "type": "#b58900"
+    }
+  }
+}

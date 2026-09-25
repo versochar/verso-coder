@@ -1,0 +1,16 @@
+{
+  "name": "dark",
+  "dark": true,
+  "colors": {
+    "bg": "#1e1e1e", "surface": "#252526", "surfaceAlt": "#2d2d2d", "border": "#3c3c3c",
+    "text": "#d4d4d4", "textStrong": "#ffffff", "textDim": "#858585",
+    "accent": "#007acc", "success": "#4ec9b0", "warning": "#dcdcaa", "error": "#f44747",
+    "selection": "#264f78", "lineHighlight": "#2a2d2e",
+    "gutterBg": "#1e1e1e", "gutterText": "#858585", "gutterActive": "#c6c6c6",
+    "indentGuide": "#404040", "bracket": "#ffd700", "cursor": "#aeafad", "scrollbar": "#424242",
+    "syntax": {
+      "keyword": "#569cd6", "string": "#ce9178", "comment": "#6a9955",
+      "number": "#b5cea8", "func": "#dcdcaa", "type": "#4ec9b0"
+    }
+  }
+}

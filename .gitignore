@@ -1,0 +1,7 @@
+/build/
+.verso/
+.mitsune/
+*.o
+*.user
+*~
+.DS_Store

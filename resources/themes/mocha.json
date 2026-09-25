@@ -1,0 +1,16 @@
+{
+  "name": "mocha",
+  "dark": true,
+  "colors": {
+    "bg": "#1e1e2e", "surface": "#181825", "surfaceAlt": "#313244", "border": "#45475a",
+    "text": "#cdd6f4", "textStrong": "#ffffff", "textDim": "#7f849c",
+    "accent": "#89b4fa", "success": "#a6e3a1", "warning": "#f9e2af", "error": "#f38ba8",
+    "selection": "#45475a", "lineHighlight": "#313244",
+    "gutterBg": "#1e1e2e", "gutterText": "#585b70", "gutterActive": "#cdd6f4",
+    "indentGuide": "#45475a", "bracket": "#f5c2e7", "cursor": "#f5e0dc", "scrollbar": "#585b70",
+    "syntax": {
+      "keyword": "#cba6f7", "string": "#a6e3a1", "comment": "#6c7086",
+      "number": "#fab387", "func": "#89b4fa", "type": "#f9e2af"
+    }
+  }
+}

@@ -1,0 +1,117 @@
+#pragma once
+#include "../core/AgentLoop.h"
+#include "../core/AgentTools.h"
+#include "../core/ChatStore.h"
+#include "../core/ContextResolver.h"
+#include "../core/OllamaClient.h"
+#include "../core/PatchQueue.h"
+#include "../core/RagIndexer.h"
+#include "../core/TokenStats.h"
+#include <QComboBox>
+#include <QFutureWatcher>
+#include <QJsonObject>
+
+struct AppSettings;
+class QCheckBox;
+class QLabel;
+class QLineEdit;
+class QSpinBox;
+#include <QPushButton>
+#include <QTextEdit>
+#include <QWidget>
+
+struct AiProfile {
+    QString name;
+    QString model;
+    QString system;
+    double temperature = 0.7;
+    int numCtx = 4096;
+};
+
+// Stage 3: streaming + bağlam modları + hazır komutlar + RAG + profil + geçmiş + ajan.
+// Stage 7 (AI Ajan 2.0): araç kullanan çok adımlı ajan, @-bağlam etiketleri,
+// çoklu dosya düzenleme kuyruğu, çoklu sohbet oturumu, token/maliyet sayacı,
+// sorunlardan "AI ile düzelt".
+class AiPanel : public QWidget {
+    Q_OBJECT
+public:
+    explicit AiPanel(QWidget* parent = nullptr);
+    void reloadSettings();
+    void setAgentMode(bool on); // Stage 7: komut paletinden ajan modu
+    bool agentMode() const;
+
+    // Sorunlar panelinden çağrılır: tanılama + kod parçasını ajana gönderir.
+    void fixProblem(const QString& path, int line, const QString& message, const QString& code);
+    // Stage 15: komut paletinden — istem gönder + son kod bloğunu uygula
+    void send(const QString& preset = QString());
+    void applyLastCodeBlock();
+
+private slots:
+    void stop();
+    void saveProfile();
+    void deleteProfile();
+    void onProfileChanged(const QString& name);
+    void saveChat();
+    void loadChat(const QString& file);
+    void refreshHistory();
+
+signals:
+    void currentFileRequested(QString& path, QString& content);
+    void selectionRequested(QString& selected, int& start, int& len);
+    void projectRootRequested(QString& root);
+    void stagedDiffRequested(QString& diff);
+    void applyToEditorRequested(const QString& newText, bool wholeFile, int selStart, int selLen);
+    void problemsTextRequested(QString& text); // Stage 7: @sorunlar + get_problems
+    void applyFileContentRequested(const QString& path, const QString& content); // Stage 7: ajan yazımı
+
+private:
+    QList<AiProfile> loadProfiles() const;
+    void storeProfiles(const QList<AiProfile>& ps) const;
+    void refreshProfileBox();
+    QJsonObject currentOptions() const;
+    QString buildContext(const QString& question);
+    void appendUser(const QString& q);
+    void beginAnswer(const QString& model, const AppSettings& s, const QString& prompt);
+    void setBusy(bool b);
+    static QString extractLastCodeBlock(const QString& text);
+
+    // Stage 7
+    void runAgent(const QString& task);
+    bool approveTool(const ToolCall& c);
+    void showPatchReview();
+    void refreshSessions();
+    void loadSession(const QString& id);
+    void openSessionMenu(const QPoint& pos);
+    void persistMessage(const QString& role, const QString& text);
+    QString problemsText();
+
+    OllamaClient m_client;
+    RagIndexer m_rag;
+    QFutureWatcher<QPair<int, int>> m_ragWatcher; // (dosya, parça)
+    QComboBox* m_profiles;
+    QComboBox* m_models;
+    QComboBox* m_ctxMode;
+    QComboBox* m_history;
+    QCheckBox* m_stream;
+    QCheckBox* m_agentMode;   // Stage 7
+    QCheckBox* m_agentCmd;    // Stage 7
+    QSpinBox* m_agentSteps;   // Stage 7
+    QLabel* m_ragLabel;
+    QLabel* m_tokenLabel;     // Stage 7
+    QTextEdit* m_view;
+    QLineEdit* m_input;
+    QPushButton* m_send;
+    QPushButton* m_stop;
+    QString m_lastResponse; // ajan için son AI yanıtı (düz metin)
+    QTextCursor m_streamCursor;
+    bool m_streamActive = false;
+
+    // Stage 7 durum
+    ContextResolver m_ctx;
+    ChatStore* m_chatStore = nullptr;
+    TokenStats m_tokens;
+    QString m_activeSessionId;
+    QString m_activeModel; // token maliyeti için
+    PatchQueue m_patchQueue;
+    bool m_agentRunning = false;
+};

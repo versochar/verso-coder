@@ -1,0 +1,16 @@
+{
+  "name": "nord",
+  "dark": true,
+  "colors": {
+    "bg": "#2e3440", "surface": "#3b4252", "surfaceAlt": "#434c5e", "border": "#4c566a",
+    "text": "#d8dee9", "textStrong": "#eceff4", "textDim": "#7b88a1",
+    "accent": "#88c0d0", "success": "#a3be8c", "warning": "#ebcb8b", "error": "#bf616a",
+    "selection": "#434c5e", "lineHighlight": "#3b4252",
+    "gutterBg": "#2e3440", "gutterText": "#4c566a", "gutterActive": "#d8dee9",
+    "indentGuide": "#434c5e", "bracket": "#81a1c1", "cursor": "#d8dee9", "scrollbar": "#4c566a",
+    "syntax": {
+      "keyword": "#81a1c1", "string": "#a3be8c", "comment": "#616e88",
+      "number": "#b48ead", "func": "#88c0d0", "type": "#8fbcbb"
+    }
+  }
+}

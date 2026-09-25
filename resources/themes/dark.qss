@@ -1,0 +1,19 @@
+/* Verso Coder — dark (VS Code tarzı) */
+QWidget { background: #1e1e1e; color: #d4d4d4; font-size: 13px; }
+QMainWindow, QSplitter, QTabWidget::pane { background: #1e1e1e; }
+QMenuBar, QMenu { background: #252526; color: #cccccc; }
+QMenu::item:selected { background: #094771; }
+QPushButton { background: #2d2d2d; color: #cccccc; border: 1px solid #3c3c3c; border-radius: 4px; padding: 6px 10px; }
+QPushButton:hover { background: #3e3e42; }
+QPushButton:checked { background: #094771; border-color: #007acc; color: white; }
+QTreeView, QTextEdit, QLineEdit, QPlainTextEdit, QComboBox {
+  background: #1e1e1e; color: #d4d4d4; border: 1px solid #3c3c3c; border-radius: 4px; }
+QTreeView::item:selected { background: #094771; }
+QTabWidget::tab-bar { background: #252526; }
+QTabBar::tab { background: #2d2d2d; color: #969696; padding: 8px 14px; border-top-left-radius: 4px; border-top-right-radius: 4px; }
+QTabBar::tab:selected { background: #1e1e1e; color: white; }
+QLabel { color: #cccccc; }
+QStatusBar { background: #007acc; color: white; }
+QStatusBar QLabel { color: white; }
+QScrollBar:vertical { background: #1e1e1e; width: 12px; }
+QScrollBar::handle:vertical { background: #424242; border-radius: 6px; min-height: 20px; }

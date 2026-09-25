@@ -1,0 +1,16 @@
+{
+  "name": "solarized-dark",
+  "dark": true,
+  "colors": {
+    "bg": "#002b36", "surface": "#073642", "surfaceAlt": "#0b4553", "border": "#586e75",
+    "text": "#93a1a1", "textStrong": "#eee8d5", "textDim": "#657b83",
+    "accent": "#268bd2", "success": "#859900", "warning": "#b58900", "error": "#dc322f",
+    "selection": "#073642", "lineHighlight": "#0a4050",
+    "gutterBg": "#002b36", "gutterText": "#586e75", "gutterActive": "#93a1a1",
+    "indentGuide": "#586e75", "bracket": "#93a1a1", "cursor": "#93a1a1", "scrollbar": "#586e75",
+    "syntax": {
+      "keyword": "#859900", "string": "#2aa198", "comment": "#586e75",
+      "number": "#d33682", "func": "#268bd2", "type": "#b58900"
+    }
+  }
+}

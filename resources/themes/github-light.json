@@ -1,0 +1,16 @@
+{
+  "name": "github-light",
+  "dark": false,
+  "colors": {
+    "bg": "#ffffff", "surface": "#f6f8fa", "surfaceAlt": "#eff2f5", "border": "#d0d7de",
+    "text": "#1f2328", "textStrong": "#000000", "textDim": "#656d76",
+    "accent": "#0969da", "success": "#1a7f37", "warning": "#9a6700", "error": "#cf222e",
+    "selection": "#b6e3ff", "lineHighlight": "#f6f8fa",
+    "gutterBg": "#ffffff", "gutterText": "#8c959f", "gutterActive": "#1f2328",
+    "indentGuide": "#d8dee4", "bracket": "#0969da", "cursor": "#0969da", "scrollbar": "#d0d7de",
+    "syntax": {
+      "keyword": "#cf222e", "string": "#0a3069", "comment": "#6e7781",
+      "number": "#0550ae", "func": "#8250df", "type": "#953800"
+    }
+  }
+}
