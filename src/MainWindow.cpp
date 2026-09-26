@@ -2247,10 +2247,15 @@ void MainWindow::openFile(const QString& path) {
         return;
     }
     if (auto* e = openEditorFor(path)) {
-        // Stage 31: bellek tavanı — 8 MB üstü salt-okunur
-        if (QFileInfo(path).size() > qint64(8) * 1024 * 1024 && !e->isReadOnly()) {
+        // Stage 32: büyük dosya kipi — önizleme / salt-okunur eşikleri
+        AppSettings cfg = SettingsManager::instance().load();
+        const int mode = PerfTools::largeFileMode(QFileInfo(path).size(),
+                                                  cfg.largeFileMb, 8);
+        if (mode == 2 && !e->isReadOnly()) {
             e->setReadOnly(true);
             toast(2, "Büyük dosya salt-okunur açıldı (8 MB+)");
+        } else if (mode == 1) {
+            toast(2, "Büyük dosya — vurgu sınırlı (önizleme kipi)");
         }
         m_status->setText(path);
     }
@@ -5073,6 +5078,17 @@ void MainWindow::checkCrashDumps() {
             .arg(dumps.size()),
         QMessageBox::Yes | QMessageBox::No);
     if (r == QMessageBox::Yes) CrashHandler::clearDumps();
+}
+
+// Stage 32: başlangıç süresini bütçeyle karşılaştır
+void MainWindow::checkStartupBudget(int budgetMs) {
+    const qint64 e = PerfMonitor::instance().sinceStartMs();
+    if (e > budgetMs)
+        toast(3, QString("Başlangıç %1 ms — bütçe %2 ms aşıldı (Tanı → Perf)")
+                      .arg(e)
+                      .arg(budgetMs));
+    else
+        m_status->setText(QString("Hazır — başlangıç %1 ms").arg(e));
 }
 
 // Stage 27: kayıtlı imza yardımını (aktif overload ile) yeniden göster

@@ -8,6 +8,7 @@ SettingsManager& SettingsManager::instance() {
 }
 
 AppSettings SettingsManager::load() const {
+    if (m_cacheValid) return m_cache; // Stage 32: pahalı QSettings okumasını atla
     QSettings q("Verso", "VersoCoder");
     AppSettings s;
     s.language      = q.value("language", "tr").toString();
@@ -108,6 +109,8 @@ AppSettings SettingsManager::load() const {
     s.autoComplete      = q.value("editor/autoComplete", true).toBool();
     s.autoClose         = q.value("editor/autoClose", true).toBool();
     s.historyKeep       = q.value("history/keep", 50).toInt();
+    m_cache = s;          // Stage 32: sonucu önbelleğe al
+    m_cacheValid = true;
     return s;
 }
 
@@ -208,4 +211,6 @@ void SettingsManager::save(const AppSettings& s) const {
     q.setValue("ai/scheduleMin", s.aiScheduleMin);
     q.setValue("editor/autoReload", s.autoReload);
     q.setValue("app/crashReport", s.crashReport);
+    m_cache = s;          // Stage 32: kaydedileni önbellekle (yeniden okuma yok)
+    m_cacheValid = true;
 }

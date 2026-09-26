@@ -206,7 +206,7 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
         bIndex->setEnabled(false);
         m_rag.clear();
         m_ragWatcher.setFuture(QtConcurrent::run([this, root]() {
-            int n = m_rag.indexProject(root);
+            int n = m_rag.indexProjectIncremental(root); // Stage 32: artımlı
             return qMakePair(m_rag.fileCount(), n);
         }));
     });

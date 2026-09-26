@@ -2,6 +2,7 @@
 #include "../core/ThemeTokens.h"
 #include <QList>
 #include <QMap>
+#include <QPixmap>
 #include <QWidget>
 
 class QPlainTextEdit;
@@ -33,6 +34,7 @@ protected:
 
 private slots:
     void scheduleUpdate();
+    void invalidateBars(); // Stage 32: çubuk önbelleğini geçersiz kıl
 
 private:
     void scrollTo(double frac);
@@ -44,4 +46,9 @@ private:
     int m_searchCur = -1;
     QMap<int, int> m_diags;     // Stage 17: 1-based satır → severity
     int m_lensLine = -1;        // hover büyüteci satırı (0-based)
+    QPixmap m_barCache;         // Stage 32: çubuk katmanı önbelleği
+    quint64 m_barRev = 0;
+    quint64 m_barDrawn = ~0ull;
+    QSize m_barSize;
+    QRgb m_barTheme = 0;
 };

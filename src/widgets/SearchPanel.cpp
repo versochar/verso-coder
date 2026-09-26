@@ -1,5 +1,6 @@
 #include "SearchPanel.h"
 #include "SearchEditorDialog.h"
+#include "../core/PerfTools.h"
 #include "../core/ReplaceEngine.h"
 #include <QCheckBox>
 #include <QCompleter>
@@ -16,6 +17,8 @@
 #include <QSettings>
 #include <QStringListModel>
 #include <QTextEdit>
+#include <QThread>
+#include <QThreadPool>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QtConcurrent>
@@ -120,10 +123,13 @@ void SearchPanel::focusSearch() { m_query->setFocus(); m_query->selectAll(); }
 QList<SearchHit> SearchPanel::searchInFile(const QString& file, const QString& query,
                                            bool useRegex, bool caseSens) {
     QList<SearchHit> out;
+    QFileInfo fi(file);
+    if (fi.size() > qint64(4) * 1024 * 1024) return out; // Stage 32: dev dosyayı atla
     QFile f(file);
     if (!f.open(QIODevice::ReadOnly)) return out;
     QByteArray raw = f.read(1 << 20);
-    if (raw.contains('\0')) return out;
+    // Stage 32: ikili sez (yalnız ön eke bakar) — çözümlemeden önce ele
+    if (PerfTools::isLikelyBinary(raw.left(8192))) return out;
     QString text = QString::fromUtf8(raw);
     if (query.isEmpty()) return out;
 
@@ -159,15 +165,38 @@ QList<SearchHit> SearchPanel::runSearchSync(const QString& root, const QString& 
                                             const QString& exclude) {
     QList<SearchHit> hits;
     if (query.isEmpty() || root.isEmpty()) return hits;
+    // Stage 32: önce dosya listesini topla, sonra çok çekirdekte ara
+    QStringList files;
     QDirIterator it(root, QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
     int scanned = 0;
-    while (it.hasNext() && hits.size() < maxHits && scanned < 8000) {
+    while (it.hasNext() && scanned < 8000) {
         QString p = it.next();
-        if (p.contains("/.git/") || p.contains("/build/") || p.contains("/node_modules/")) continue;
-        // Stage 17: dahil + hariç glob (ReplaceEngine)
+        if (p.contains("/.git/") || p.contains("/build/") || p.contains("/node_modules/"))
+            continue;
         if (!ReplaceEngine::fileAllowed(p, filter, exclude)) { ++scanned; continue; }
-        hits.append(searchInFile(p, query, useRegex, caseSens));
+        files << p;
         ++scanned;
+    }
+    if (files.isEmpty()) return hits;
+
+    auto one = [query, useRegex, caseSens](const QString& p) {
+        return searchInFile(p, query, useRegex, caseSens);
+    };
+    if (files.size() < 8) { // küçük iş: paralel kurulum maliyeti gereksiz
+        for (const QString& p : files) {
+            hits += one(p);
+            if (hits.size() >= maxHits) break;
+        }
+        return hits;
+    }
+    const int threads = qBound(2, QThread::idealThreadCount(), 8);
+    QThreadPool pool;
+    pool.setMaxThreadCount(threads);
+    const QList<QList<SearchHit>> parts =
+        QtConcurrent::blockingMapped(&pool, files, one);
+    for (const QList<SearchHit>& part : parts) {
+        hits += part;
+        if (hits.size() >= maxHits) break;
     }
     return hits;
 }

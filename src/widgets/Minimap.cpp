@@ -39,13 +39,19 @@ void Minimap::setEditor(QPlainTextEdit* editor) {
     m_searchCur = -1;
     m_lensLine = -1;
     if (!m_editor) { update(); return; }
-    connect(m_editor->document(), &QTextDocument::contentsChanged, this, &Minimap::scheduleUpdate);
+    connect(m_editor->document(), &QTextDocument::contentsChanged, this,
+            &Minimap::invalidateBars); // Stage 32: içerik değişince çubuklar tazelenir
     connect(m_editor->verticalScrollBar(), &QScrollBar::valueChanged, this, &Minimap::scheduleUpdate);
     connect(m_editor, &QPlainTextEdit::cursorPositionChanged, this, &Minimap::scheduleUpdate);
     update();
 }
 
 void Minimap::scheduleUpdate() { update(); }
+
+void Minimap::invalidateBars() {
+    ++m_barRev;
+    update();
+}
 
 // Stage 10: satır içeriğinden çubuk rengi (sözdizimi sezgisi)
 QColor Minimap::lineColor(const QString& line, const ThemeTokens& tk) {
@@ -78,21 +84,34 @@ void Minimap::paintEvent(QPaintEvent*) {
     double h = (double)height() / qMax(1, n);
     double barH = qMax(1.5, h * 0.8 * step);
     int curLine = m_editor->textCursor().blockNumber();
-    for (int i = 0; i < n; i += step) {
-        QTextBlock b = doc->findBlockByNumber(i);
-        QString t = b.text();
-        QString s = t.trimmed();
-        double y = i * h;
-        int lead = 0;
-        while (lead < t.size() && t[lead].isSpace()) ++lead;
-        int indent = lead / 4;
-        double x = 4 + qMin(30, indent * 5);
-        double w = qMin((double)width() - 8 - x, (double)qMax(6, s.size()));
-        QColor c = lineColor(t, tk);
-        if (!c.isValid()) c = ThemeTokens::withAlphaF(tk.text, tk.dark ? 0.55 : 0.70);
-        if (i == curLine) c = tk.textStrong;
-        p.fillRect(QRectF(x, y, w, barH), c);
+    // Stage 32: çubuk katmanını önbelleğe al — kaydırma/cursor sadece üstte çizer
+    if (m_barCache.isNull() || m_barSize != size() || m_barDrawn != m_barRev ||
+        m_barTheme != tk.gutterBg.rgb()) {
+        m_barCache = QPixmap(size());
+        m_barCache.fill(tk.gutterBg);
+        QPainter bp(&m_barCache);
+        for (int i = 0; i < n; i += step) {
+            QTextBlock b = doc->findBlockByNumber(i);
+            QString t = b.text();
+            QString s = t.trimmed();
+            double y = i * h;
+            int lead = 0;
+            while (lead < t.size() && t[lead].isSpace()) ++lead;
+            int indent = lead / 4;
+            double x = 4 + qMin(30, indent * 5);
+            double w = qMin((double)width() - 8 - x, (double)qMax(6, s.size()));
+            QColor c = lineColor(t, tk);
+            if (!c.isValid()) c = ThemeTokens::withAlphaF(tk.text, tk.dark ? 0.55 : 0.70);
+            bp.fillRect(QRectF(x, y, w, barH), c);
+        }
+        m_barSize = size();
+        m_barDrawn = m_barRev;
+        m_barTheme = tk.gutterBg.rgb();
     }
+    p.drawPixmap(0, 0, m_barCache);
+    // Geçerli satır vurgusu (dinamik)
+    p.fillRect(QRectF(0, curLine * h, width(), barH),
+               ThemeTokens::withAlphaF(tk.textStrong, 0.30));
     // viewport
     auto* sb = m_editor->verticalScrollBar();
     double total = sb->maximum() + sb->pageStep();

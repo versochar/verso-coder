@@ -120,6 +120,11 @@ public:
     static SettingsManager& instance();
     AppSettings load() const;
     void save(const AppSettings& s) const;
+    // Stage 32: önbelleği zorla geçersiz kıl (dış yazım sonrası gerekirse)
+    void invalidateCache() const { m_cacheValid = false; }
+
 private:
     SettingsManager() = default;
+    mutable AppSettings m_cache;
+    mutable bool m_cacheValid = false; // Stage 32: load() tekrarını önler
 };

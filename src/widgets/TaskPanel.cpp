@@ -45,6 +45,7 @@ TaskPanel::TaskPanel(QWidget* parent) : QWidget(parent) {
     m_list->setMaximumWidth(240);
     m_out = new QPlainTextEdit(this);
     m_out->setReadOnly(true);
+    m_out->setMaximumBlockCount(20000); // Stage 32: çıktı selinde bellek tavanı
     m_out->setFont(QFont("Consolas, monospace", 10));
     m_out->setPlaceholderText("Görev çıktısı burada görünür.");
     body->addWidget(m_list);

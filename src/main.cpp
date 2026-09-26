@@ -95,5 +95,6 @@ int main(int argc, char** argv) {
 
     w.show();
     w.applyStartupOptions(opts);
+    w.checkStartupBudget(4000); // Stage 32: başlangıç bütçesi
     return app.exec();
 }

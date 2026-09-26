@@ -129,6 +129,7 @@ void TerminalPanel::newSession() {
     s.proc = new QProcess(this);
     s.out = new QTextEdit(m_tabs);
     s.out->setReadOnly(true);
+    s.out->document()->setMaximumBlockCount(20000); // Stage 32: terminal selinde bellek tavanı
     s.out->setFont(QFont("Consolas, monospace", 10));
     connect(s.proc, &QProcess::readyReadStandardOutput, this, &TerminalPanel::readOutput);
     connect(s.proc, &QProcess::readyReadStandardError, this, &TerminalPanel::readOutput);

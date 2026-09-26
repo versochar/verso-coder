@@ -1,4 +1,5 @@
 #pragma once
+#include <QCache>
 #include <QColor>
 #include <QFileIconProvider>
 #include <QIcon>
@@ -10,4 +11,7 @@ public:
     QIcon icon(const QFileInfo& info) const override;
 
     static QColor colorFor(const QString& suffix);
+
+private:
+    mutable QCache<QString, QIcon> m_cache{256}; // Stage 32: ikon önbelleği
 };

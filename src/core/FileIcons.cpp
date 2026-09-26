@@ -20,6 +20,9 @@ QIcon FileIconProvider::icon(IconType type) const {
 
 QIcon FileIconProvider::icon(const QFileInfo& info) const {
     if (info.isDir()) return QFileIconProvider::icon(info);
+    const QString key = info.suffix().toLower();
+    if (QIcon* hit = m_cache.object(key.isEmpty() ? QString("?") : key))
+        return *hit; // Stage 32: aynı uzantı için yeniden çizme
     QColor c = colorFor(info.suffix());
     QPixmap pm(16, 16);
     pm.fill(Qt::transparent);
@@ -33,5 +36,7 @@ QIcon FileIconProvider::icon(const QFileInfo& info) const {
     QString letter = info.suffix().left(1).toUpper();
     if (letter.isEmpty()) letter = "?";
     p.drawText(pm.rect(), Qt::AlignCenter, letter);
-    return QIcon(pm);
+    QIcon ic(pm);
+    m_cache.insert(key.isEmpty() ? QString("?") : key, new QIcon(ic));
+    return ic;
 }

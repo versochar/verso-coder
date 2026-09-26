@@ -65,6 +65,7 @@ set(SOURCES
     src/core/Stability.cpp
     src/core/BackupManager.cpp
     src/core/CrashHandler.cpp
+    src/core/PerfTools.cpp
     src/core/WorkspaceSymbols.cpp
     src/core/CodeMetrics.cpp
     src/core/DuplicateFinder.cpp
@@ -252,6 +253,7 @@ set(HEADERS
     src/core/Stability.h
     src/core/BackupManager.h
     src/core/CrashHandler.h
+    src/core/PerfTools.h
     src/core/WorkspaceSymbols.h
     src/core/CodeMetrics.h
     src/core/DuplicateFinder.h
@@ -528,6 +530,16 @@ add_executable(test_stage31
 target_include_directories(test_stage31 PRIVATE src)
 target_link_libraries(test_stage31 PRIVATE Qt6::Core Qt6::Widgets)
 add_test(NAME stage31 COMMAND test_stage31)
+
+# --- Stage 32: hız yardımcıları + artımlı RAG + ters indeks ---
+add_executable(test_stage32
+    tests/test_stage32.cpp
+    src/core/PerfTools.cpp
+    src/core/RagIndexer.cpp
+)
+target_include_directories(test_stage32 PRIVATE src)
+target_link_libraries(test_stage32 PRIVATE Qt6::Core Qt6::Widgets Qt6::Concurrent)
+add_test(NAME stage32 COMMAND test_stage32)
 
 # QSS dosyalarını binary yanına kopyala
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD

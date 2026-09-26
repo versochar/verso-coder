@@ -39,6 +39,8 @@ ExplorerPanel::ExplorerPanel(QWidget* parent) : QWidget(parent) {
 
     m_model = new QFileSystemModel(this);
     m_model->setReadOnly(false);
+    m_model->setResolveSymlinks(false); // Stage 32: ek stat çağrısı yok
+    m_model->setOption(QFileSystemModel::DontUseCustomDirectoryIcons, true); // Stage 32: hızlı ikon
     m_model->setIconProvider(new FileIconProvider()); // model sahiplenir (Qt6)
     m_model->setFilter(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot | QDir::NoSymLinks);
     m_proxy = new GitIgnoreFilterModel(this);
@@ -46,6 +48,8 @@ ExplorerPanel::ExplorerPanel(QWidget* parent) : QWidget(parent) {
 
     m_tree = new QTreeView(this);
     m_tree->setModel(m_proxy);
+    m_tree->setUniformRowHeights(true); // Stage 32: satır ölçümü tek kez → hızlı
+    m_tree->setAnimated(false);
     for (int i = 1; i < m_model->columnCount(); ++i) m_tree->hideColumn(i);
     m_tree->setHeaderHidden(true);
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
