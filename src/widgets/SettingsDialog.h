@@ -51,6 +51,21 @@ private:
     QCheckBox* m_agentMemory = nullptr;
     QCheckBox* m_agentSkills = nullptr;
     QLineEdit* m_agentTestCmd = nullptr;
+    // Stage 35: sağlayıcılar
+    void buildProviderTab();
+    void onProviderChanged();
+    void loadProviderForm();
+    void storeProviderForm();
+    void onProviderTest();
+    void onProviderFetchModels();
+    QWidget* m_provPage = nullptr;
+    QComboBox* m_provCombo = nullptr;
+    QLineEdit* m_provUrl = nullptr;
+    QLineEdit* m_provKey = nullptr;
+    QComboBox* m_provModel = nullptr;
+    QLabel* m_provHint = nullptr;
+    QLabel* m_provStatus = nullptr;
+    QCheckBox* m_provShowKey = nullptr;
     QSpinBox* m_threads;    // cpu threads
     QSpinBox* m_gpu;        // num_gpu
     QSlider* m_tempSlider;

@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "1.6.0"; }
+QString AboutInfo::version() { return "1.7.0"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,13 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "1.7.0 (Stage 35)\n"
+        "  • Çok sağlayıcılı AI: NVIDIA NIM, UnoRouter, OpenAI, Claude, Gemini, Groq,\n"
+        "    OpenRouter, DeepSeek, Mistral, xAI, Together, Azure, LM Studio, llama.cpp, vLLM\n"
+        "  • Tek arayüz: akışlı/akışsız sohbet, gömme, görsel, model kataloğu, araç çağırma\n"
+        "  • API anahtarları OS anahtar deposunda ya da 0600 dosyada (düz metin ayar yok)\n"
+        "  • 429/5xx için üstel geri çekilme, sağlayıcıya özel hata mesajları\n"
+        "  • Ayarlar → AI Sağlayıcıları: model çekme + bağlantı testi\n"
         "1.6.0 (Stage 33-34)\n"
         "  • AI derinliği: görü (vision), gömme tabanlı hibrit RAG v2, istem galerisi, arena\n"
         "  • AI otonomisi: politika/bütçe motoru, beceri zinciri, ajan belleği, refleksiyon\n"

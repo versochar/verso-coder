@@ -1,9 +1,14 @@
 #include "SettingsDialog.h"
+#include <QApplication>
 #include "../core/AccentColor.h"
 #include "../core/Commands.h"
 #include "../core/KeymapPresets.h"
 #include "../core/ShortcutCheck.h"
 #include "../core/OllamaClient.h"
+#include "../core/ai/LlmClient.h"
+#include "../core/ai/LlmProvider.h"
+#include "../core/ai/ProviderPrefs.h"
+#include "../core/ai/SecretStore.h"
 #include "../core/SettingsIO.h"
 #include "../core/SettingsManager.h"
 #include "../core/ThemeManager.h"
@@ -304,6 +309,10 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
 
     tabs->addTab(general, "Genel");
     tabs->addTab(ai, "AI Bağlantısı (Ollama)");
+
+    // --- Stage 35: AI Sağlayıcıları (çok sağlayıcı) ---
+    buildProviderTab();
+    tabs->addTab(m_provPage, "AI Sağlayıcıları");
 
     // --- Stage 9: Görünüm (tasarım sistemi) ---
     auto* look = new QWidget(this);
@@ -717,6 +726,174 @@ void SettingsDialog::updateKeyWarn() {
         m_keyWarn->setText("⚠ Çakışan kısayollar: " + bad.join("  ·  "));
 }
 
+// ============================================================
+// Stage 35: AI Sağlayıcıları sekmesi
+// ============================================================
+void SettingsDialog::buildProviderTab() {
+    m_provPage = new QWidget(this);
+    auto* root = new QVBoxLayout(m_provPage);
+    auto* f = new QFormLayout;
+    root->addLayout(f);
+
+    auto note = new QLabel(
+        "Tek arayüzden Ollama, NVIDIA NIM, UnoRouter, OpenAI, Claude, Gemini ve "
+        "OpenAI-uyumlu her sunucu. API anahtarları düz metin ayara yazılmaz; "
+        "varsa işletim sistemi anahtar deposuna, yoksa yalnız sahibi okuyabilen "
+        "(0600) dosyaya saklanır. Alternatif: VERSO_AI_KEY_<SAĞLAYICI> ortam değişkeni.",
+        m_provPage);
+    note->setWordWrap(true);
+    note->setStyleSheet("color:#858585;font-size:11px;");
+    root->addWidget(note);
+
+    m_provCombo = new QComboBox(m_provPage);
+    for (const ProviderSpec& spec : ProviderRegistry::all())
+        m_provCombo->addItem(QString("%1%2")
+                                 .arg(spec.label,
+                                      spec.badge().isEmpty() ? QString()
+                                                             : "  ·  " + spec.badge()),
+                             QVariant(spec.id));
+    m_provCombo->setToolTip("Hangi sağlayıcı kullanılacak?");
+    f->addRow("Sağlayıcı:", m_provCombo);
+
+    m_provUrl = new QLineEdit(m_provPage);
+    m_provUrl->setPlaceholderText("varsayılan kullanılır");
+    m_provUrl->setToolTip("Kendi sunucunuz varsa base URL (örn. http://localhost:1234/v1)");
+    f->addRow("Base URL:", m_provUrl);
+
+    m_provKey = new QLineEdit(m_provPage);
+    m_provKey->setEchoMode(QLineEdit::Password);
+    m_provKey->setPlaceholderText("gerekli değilse boş bırakın");
+    f->addRow("API anahtarı:", m_provKey);
+
+    m_provShowKey = new QCheckBox("Anahtarı göster", m_provPage);
+    connect(m_provShowKey, &QCheckBox::toggled, this, [this](bool on) {
+        if (m_provKey) m_provKey->setEchoMode(on ? QLineEdit::Normal : QLineEdit::Password);
+    });
+    f->addRow("", m_provShowKey);
+
+    m_provModel = new QComboBox(m_provPage);
+    m_provModel->setEditable(true);
+    f->addRow("Model:", m_provModel);
+
+    m_provHint = new QLabel(m_provPage);
+    m_provHint->setWordWrap(true);
+    m_provHint->setStyleSheet("color:#569cd6;font-size:11px;");
+    f->addRow("", m_provHint);
+
+    m_provStatus = new QLabel(m_provPage);
+    m_provStatus->setWordWrap(true);
+    m_provStatus->setStyleSheet("color:#858585;font-size:11px;");
+    f->addRow("Durum:", m_provStatus);
+
+    auto* row = new QHBoxLayout;
+    auto* bFetch = new QPushButton("Modelleri Getir", m_provPage);
+    auto* bTest = new QPushButton("Bağlantıyı Test Et", m_provPage);
+    row->addWidget(bFetch);
+    row->addWidget(bTest);
+    row->addStretch(1);
+    root->addLayout(row);
+    root->addStretch(1);
+
+    connect(bFetch, &QPushButton::clicked, this, &SettingsDialog::onProviderFetchModels);
+    connect(bTest, &QPushButton::clicked, this, &SettingsDialog::onProviderTest);
+    connect(m_provCombo, &QComboBox::currentIndexChanged, this,
+            &SettingsDialog::onProviderChanged);
+
+    loadProviderForm(); // etkin sağlayıcı + kayıtlı anahtar/model gelsin
+}
+
+void SettingsDialog::onProviderChanged() {
+    if (!m_provCombo) return;
+    const QString id = m_provCombo->currentData().toString();
+    const ProviderSpec spec = ProviderRegistry::byId(id);
+    if (spec.id.isEmpty()) return;
+    m_provUrl->setText(ProviderPrefs::urlFor(spec.id));
+    m_provUrl->setPlaceholderText(spec.baseUrl.isEmpty() ? "örn. http://localhost:1234/v1"
+                                                        : spec.baseUrl);
+    m_provHint->setText(spec.hint.isEmpty()
+                            ? QString("%1 · tür: %2")
+                                  .arg(spec.label)
+                                  .arg(int(spec.kind))
+                            : spec.hint);
+    SecretStore store;
+    m_provKey->setText(store.get(spec.id));
+    m_provKey->setEnabled(spec.requiresKey());
+    if (!spec.requiresKey()) m_provKey->setPlaceholderText("bu sağlayıcı anahtar istemez");
+    // Kayıtlı model ya da örnekler
+    const QString saved = ProviderPrefs::modelFor(spec.id);
+    QStringList models;
+    if (!saved.isEmpty()) models << saved;
+    const QStringList samples = ProviderRegistry::sampleModels(spec.id);
+    for (const QString& m : samples)
+        if (!models.contains(m)) models << m;
+    m_provModel->clear();
+    m_provModel->addItems(models);
+    if (!saved.isEmpty()) m_provModel->setCurrentText(saved);
+    m_provStatus->setText(
+        QString("Yetenekler: görü %1 · araç %2 · gömme %3")
+            .arg(spec.supportsVision ? "✓" : "×")
+            .arg(spec.supportsTools ? "✓" : "×")
+            .arg(spec.supportsEmbed ? "✓" : "×"));
+}
+
+void SettingsDialog::loadProviderForm() {
+    if (!m_provCombo) return;
+    const int i = m_provCombo->findData(ProviderPrefs::activeProvider());
+    m_provCombo->setCurrentIndex(i >= 0 ? i : 0);
+    onProviderChanged();
+}
+
+void SettingsDialog::storeProviderForm() {
+    if (!m_provCombo) return;
+    const QString id = m_provCombo->currentData().toString();
+    if (id.isEmpty()) return;
+    ProviderPrefs::setActiveProvider(id);
+    ProviderPrefs::setModel(id, m_provModel->currentText().trimmed());
+    ProviderPrefs::setUrl(id, m_provUrl->text().trimmed());
+    const ProviderSpec spec = ProviderRegistry::byId(id);
+    if (spec.requiresKey()) {
+        SecretStore store;
+        store.set(id, m_provKey->text());
+    }
+    m_provKey->clear();
+}
+
+void SettingsDialog::onProviderFetchModels() {
+    if (!m_provCombo) return;
+    const QString id = m_provCombo->currentData().toString();
+    ProviderSpec spec = ProviderPrefs::resolve(id);
+    if (m_provUrl->text().trimmed().isEmpty()) spec.baseUrl = ProviderRegistry::byId(id).baseUrl;
+    LlmClient client;
+    client.setProvider(spec);
+    if (spec.requiresKey()) client.setApiKey(m_provKey->text().trimmed());
+    m_provStatus->setText("Modeller alınıyor...");
+    connect(&client, &LlmClient::modelsReady, &client, [this, &client](const QStringList& ms) {
+        m_provModel->clear();
+        m_provModel->addItems(ms);
+        m_provStatus->setText(QString("%1 model bulundu.").arg(ms.size()));
+        if (!ms.isEmpty()) m_provModel->setCurrentText(ms.first());
+    });
+    connect(&client, &LlmClient::error, &client,
+            [this](const QString& e) { m_provStatus->setText("Hata: " + e); });
+    client.fetchModels();
+}
+
+void SettingsDialog::onProviderTest() {
+    if (!m_provCombo) return;
+    const QString id = m_provCombo->currentData().toString();
+    ProviderSpec spec = ProviderPrefs::resolve(id);
+    if (m_provUrl->text().trimmed().isEmpty()) spec.baseUrl = ProviderRegistry::byId(id).baseUrl;
+    LlmClient client;
+    client.setProvider(spec);
+    if (spec.requiresKey()) client.setApiKey(m_provKey->text().trimmed());
+    m_provStatus->setText("Bağlantı deneniyor...");
+    QApplication::processEvents();
+    QString err;
+    const bool ok = client.testConnection(err, 10000);
+    m_provStatus->setText(ok ? QString("✓ Bağlantı başarılı (%1)").arg(spec.label)
+                             : "✗ " + err);
+}
+
 void SettingsDialog::saveAll() {    AppSettings cur = SettingsManager::instance().load(); // oturum alanlarını koru
     AppSettings s = cur;
     s.language = (m_lang->currentIndex() == 1) ? "en" : "tr";
@@ -740,6 +917,8 @@ void SettingsDialog::saveAll() {    AppSettings cur = SettingsManager::instance(
     if (m_agentMemory) s.agentMemory = m_agentMemory->isChecked();
     if (m_agentSkills) s.agentSkills = m_agentSkills->isChecked();
     if (m_agentTestCmd) s.agentTestCommand = m_agentTestCmd->text().trimmed();
+    // Stage 35: sağlayıcı tercihleri + API anahtarları
+    storeProviderForm();
     s.gpuBackend = m_backend->currentText();
     s.gpuLayers = (s.gpuBackend == "CPU") ? 0 : m_gpu->value();
     s.temperature = m_tempSlider->value() / 100.0;

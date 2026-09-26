@@ -57,6 +57,13 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
 
     // Model satırı
     auto* top = new QHBoxLayout();
+    // Stage 35: sağlayıcı seçimi (Ollama + bulut sağlayıcıları)
+    m_provider = new QComboBox(this);
+    m_provider->setToolTip("AI sağlayıcısı (Ayarlar → AI Sağlayıcıları)");
+    m_provider->setMinimumWidth(120);
+    for (const ProviderSpec& spec : ProviderRegistry::all())
+        m_provider->addItem(spec.label, spec.id);
+    top->addWidget(m_provider);
     m_models = new QComboBox(this);
     m_models->setEditable(true);
     auto* bReload = new QPushButton("⟳", this);
@@ -214,6 +221,57 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     lay->addWidget(hint);
 
     connect(bReload, &QPushButton::clicked, this, &AiPanel::refreshModels);
+    connect(m_provider, &QComboBox::currentIndexChanged, this, [this](int) {
+        ProviderPrefs::setActiveProvider(m_provider->currentData().toString());
+        configureProvider();
+    });
+    // Stage 35: LlmClient olayları → mevcut arayüze bağlanır
+    connect(&m_llm, &LlmClient::modelsReady, this, [this](const QStringList& ms) {
+        const QString cur = m_models->currentText();
+        m_models->clear();
+        m_models->addItems(ms);
+        const QString want = ProviderPrefs::modelFor(m_provider->currentData().toString());
+        if (!want.isEmpty() && ms.contains(want)) m_models->setCurrentText(want);
+        else if (!cur.isEmpty() && ms.contains(cur)) m_models->setCurrentText(cur);
+        else if (!ms.isEmpty()) m_models->setCurrentText(ms.first());
+        if (!ms.isEmpty())
+            m_view->append(QString("<i>✓ %1 · %2 model</i>")
+                               .arg(ProviderPrefs::resolve().label)
+                               .arg(ms.size()));
+    });
+    connect(&m_llm, &LlmClient::chunkReady, this, [this](const AiChunk& c) {
+        if (m_streamActive && !c.text.isEmpty()) m_streamCursor.insertText(c.text);
+        m_lastResponse += c.text;
+    });
+    connect(&m_llm, &LlmClient::replyReady, this, [this](const AiReply& r) {
+        m_lastResponse = r.text;
+        m_view->append("<hr><b>AI:</b><br>" + r.text.toHtmlEscaped().replace("\n", "<br>"));
+        persistMessage("ai", r.text);
+        setBusy(false);
+    });
+    connect(&m_llm, &LlmClient::finished, this, [this](const AiReply& r) {
+        m_streamActive = false;
+        if (r.ok && m_streamActive) m_view->append("<br>");
+        if (!r.reasoning.isEmpty())
+            m_view->append("<i style='color:#9a9a9a'>düşünme: " +
+                           r.reasoning.left(400).toHtmlEscaped() + "</i>");
+        if (r.ok && m_lastResponse.isEmpty()) m_lastResponse = r.text;
+        if (r.ok && !m_lastResponse.isEmpty()) persistMessage("ai", m_lastResponse);
+        setBusy(false);
+    });
+    connect(&m_llm, &LlmClient::tokensUsed, this, [this](int p, int e, int) {
+        m_tokens.add(p, e);
+        m_tokenLabel->setText(m_tokens.summary(m_activeModel));
+    });
+    connect(&m_llm, &LlmClient::error, this, [this](const QString& e) {
+        m_streamActive = false;
+        m_view->append("<i style='color:red'>" + e.toHtmlEscaped() + "</i>");
+        setBusy(false);
+    });
+    connect(&m_llm, &LlmClient::statusChanged, this, [this](const QString& st) {
+        if (isCloudProvider()) m_view->append("<i style='color:#858585'>" +
+                                             st.toHtmlEscaped() + "</i>");
+    });
     connect(m_models, &QComboBox::currentTextChanged, this, [this](const QString& t) {
         AppSettings s = SettingsManager::instance().load();
         s.ollamaModel = t;
@@ -492,12 +550,47 @@ void AiPanel::reloadSettings() {
     int ctxIdx = (s.contextMode == "selection") ? 1 : (s.contextMode == "rag") ? 2 : (s.contextMode == "none") ? 3 : 0;
     m_ctxMode->setCurrentIndex(ctxIdx);
     m_client.setKeepAlive(s.aiKeepAlive); // Stage 33: modeli sıcak tut
+    // Stage 35: sağlayıcı
+    {
+        const QString active = ProviderPrefs::activeProvider();
+        const int i = m_provider ? m_provider->findData(active) : -1;
+        if (i >= 0) {
+            m_provider->blockSignals(true);
+            m_provider->setCurrentIndex(i);
+            m_provider->blockSignals(false);
+        }
+        configureProvider();
+    }
     if (!s.ollamaModel.isEmpty()) {
         m_caps[s.ollamaModel] = ModelCapabilities::fromName(s.ollamaModel);
         m_client.showModel(s.ollamaModel);
     }
     refreshProfileBox();
     refreshModels();
+}
+
+// Stage 35: aktif sağlayıcıyı uygular ve model listesini getirir
+void AiPanel::configureProvider() {
+    if (!m_provider) return;
+    const ProviderSpec spec = ProviderPrefs::resolve(m_provider->currentData().toString());
+    const bool local = spec.kind == ProviderKind::Ollama;
+    // Yerel sağlayıcıda eski Ollama yolu; bulutta LlmClient
+    m_llm.setProvider(spec);
+    m_llm.setSecretStore(&m_secrets);
+    m_llm.loadKeyForProvider();
+    if (local) {
+        AppSettings s = SettingsManager::instance().load();
+        m_client.setHost(local ? ProviderPrefs::urlFor(spec.id) : s.ollamaHost);
+        refreshModels();
+    } else {
+        if (m_models->count() <= 1) m_llm.fetchModels();
+    }
+}
+
+bool AiPanel::isCloudProvider() const {
+    if (!m_provider) return false;
+    return ProviderPrefs::resolve(m_provider->currentData().toString()).kind !=
+           ProviderKind::Ollama;
 }
 
 QJsonObject AiPanel::currentOptions() const {
@@ -620,6 +713,46 @@ void AiPanel::send(const QString& preset) {
 void AiPanel::beginAnswer(const QString& model, const AppSettings& s, const QString& prompt) {
     setBusy(true);
     m_lastResponse.clear();
+
+    // --- Stage 35: bulut sağlayıcıları (Ollama yolundan ayrı) ---
+    if (isCloudProvider()) {
+        const ProviderSpec spec = ProviderPrefs::resolve();
+        AiChatRequest r;
+        r.model = model;
+        r.systemPrompt = s.systemPrompt;
+        r.temperature = s.temperature;
+        const QStringList imgs = currentImageBase64();
+        if (!imgs.isEmpty() && spec.supportsVision) {
+            AiMessage m;
+            m.role = AiRole::User;
+            m.texts = QStringList{prompt};
+            for (const QString& b : imgs) {
+                AiImage im;
+                im.mime = "image/jpeg";
+                im.bytes = QByteArray::fromBase64(b.toLatin1());
+                m.images << im;
+            }
+            r.messages << m;
+        } else {
+            if (!imgs.isEmpty())
+                m_view->append("<i style='color:#cca700'>Bu sağlayıcı/model görsel "
+                               "desteklemiyor; ekler yok sayıldı.</i>");
+            r.messages << AiMessage::user(prompt);
+        }
+        if (m_stream->isChecked()) {
+            m_view->append("<hr><b>AI:</b><br>");
+            m_streamCursor = QTextCursor(m_view->document());
+            m_streamCursor.movePosition(QTextCursor::End);
+            m_streamActive = true;
+            m_llm.chatStream(r);
+        } else {
+            m_view->append("<i>yazıyor...</i>");
+            m_llm.chat(r);
+        }
+        if (!imgs.isEmpty()) clearImages();
+        return;
+    }
+
     const QStringList imgs = currentImageBase64(); // Stage 33
     bool vision = false;
     if (!imgs.isEmpty()) {
@@ -1009,8 +1142,41 @@ void AiPanel::runAgent(const QString& task) {
     m_view->append("<hr><b>🤖 Ajan:</b> <i>görev işleniyor…</i>");
     const QString system = s.systemPrompt;
     const QJsonObject opts = currentOptions();
-    auto llm = [this, model, opts](const QString& sys, const QString& user, QString& err) -> QString {
-        return m_client.chatSync(model, sys, user, opts, err);
+    // Stage 35: Ollama yerel yol korunur; bulutta LlmClient + araç köprüsü
+    const ProviderSpec agentSpec = ProviderPrefs::resolve();
+    const bool agentCloud = agentSpec.kind != ProviderKind::Ollama;
+    AgentTools toolDefs(root);
+    const auto toolSchemas = toolDefs.toolSchemas();
+    auto llm = [this, model, opts, agentCloud, agentSpec, toolSchemas](
+                   const QString& sys, const QString& user, QString& err) -> QString {
+        if (!agentCloud)
+            return m_client.chatSync(model, sys, user, opts, err);
+        AiChatRequest r;
+        r.model = model;
+        r.systemPrompt = sys;
+        AppSettings ls = SettingsManager::instance().load();
+        r.temperature = ls.temperature;
+        r.messages << AiMessage::user(user);
+        if (agentSpec.supportsTools) {
+            r.wantTools = true;
+            r.tools = AiToolBridge::fromOpenAiSchemas(toolSchemas);
+        }
+        const AiReply rep = m_llm.chatSync(r);
+        if (!rep.ok) {
+            err = rep.error;
+            return {};
+        }
+        // Yerel sürümle aynı olsun diye araç çağrıları metin protokolüne çevrilir
+        if (rep.toolCalls.isEmpty()) return rep.text;
+        QString out = rep.text;
+        for (const AiToolCall& c : rep.toolCalls) {
+            out += QString("\n<tool_call>\n") +
+                   QString::fromUtf8(QJsonDocument(QJsonObject{{"name", c.name},
+                                                               {"arguments", c.args}})
+                                         .toJson(QJsonDocument::Compact)) +
+                   "\n</tool_call>";
+        }
+        return out;
     };
     auto progress = [this](const QString& msg) {
         m_view->append("<span style='color:#569cd6;font-family:Consolas,monospace'>" +

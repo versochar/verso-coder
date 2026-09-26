@@ -12,6 +12,12 @@
 #include "../core/PatchQueue.h"
 #include "../core/RagIndexer.h"
 #include "../core/SkillChain.h"
+#include "../core/ai/AiMessage.h"
+#include "../core/ai/AiToolBridge.h"
+#include "../core/ai/LlmClient.h"
+#include "../core/ai/LlmProvider.h"
+#include "../core/ai/ProviderPrefs.h"
+#include "../core/ai/SecretStore.h"
 #include "../core/TokenStats.h"
 #include <QComboBox>
 #include <QFutureWatcher>
@@ -116,12 +122,17 @@ private:
     QStringList currentImageBase64() const;
     void refreshImageChips();
     QString conversationContext();
+    void configureProvider();    // Stage 35: sağlayıcıyı uygula + modelleri getir
+    bool isCloudProvider() const;
     void renderBranch(const ChatSession& s, const QString& leafId);
 
     OllamaClient m_client;
+    LlmClient m_llm;                     // Stage 35: bulut sağlayıcıları
+    SecretStore m_secrets;               // Stage 35: API anahtarı kasası
     RagIndexer m_rag;
     QFutureWatcher<QPair<int, int>> m_ragWatcher; // (dosya, parça)
     QComboBox* m_profiles;
+    QComboBox* m_provider;        // Stage 35
     QComboBox* m_models;
     QComboBox* m_ctxMode;
     QComboBox* m_history;

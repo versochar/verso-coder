@@ -52,6 +52,14 @@ set(SOURCES
     src/core/AgentReflection.cpp
     src/core/ProjectHealth.cpp
     src/core/AgentRunStore.cpp
+    src/core/ai/LlmProvider.cpp
+    src/core/ai/SecretStore.cpp
+    src/core/ai/AiMessage.cpp
+    src/core/ai/LlmClient.cpp
+    src/core/ai/providers/ProviderCodec.cpp
+    src/core/ai/providers/SseParser.cpp
+    src/core/ai/AiToolBridge.cpp
+    src/core/ai/ProviderPrefs.cpp
     src/core/StartupArgs.cpp
     src/core/ToolchainProbe.cpp
     src/core/TaskRunner.cpp
@@ -247,6 +255,14 @@ set(HEADERS
     src/core/AgentReflection.h
     src/core/ProjectHealth.h
     src/core/AgentRunStore.h
+    src/core/ai/LlmProvider.h
+    src/core/ai/SecretStore.h
+    src/core/ai/AiMessage.h
+    src/core/ai/LlmClient.h
+    src/core/ai/providers/ProviderCodec.h
+    src/core/ai/providers/SseParser.h
+    src/core/ai/AiToolBridge.h
+    src/core/ai/ProviderPrefs.h
     src/core/StartupArgs.h
     src/core/ToolchainProbe.h
     src/core/TaskRunner.h
@@ -612,6 +628,26 @@ add_executable(test_stage34
 target_include_directories(test_stage34 PRIVATE src)
 target_link_libraries(test_stage34 PRIVATE Qt6::Core Qt6::Widgets)
 add_test(NAME stage34 COMMAND test_stage34)
+
+# --- Stage 35: çok sağlayıcılı AI ---
+add_executable(test_stage35
+    tests/test_stage35.cpp
+    src/core/ai/LlmProvider.cpp
+    src/core/ai/SecretStore.cpp
+    src/core/ai/AiMessage.cpp
+    src/core/ai/AiToolBridge.cpp
+    src/core/ai/ProviderPrefs.cpp
+    src/core/ai/LlmClient.cpp
+    src/core/ai/providers/ProviderCodec.cpp
+    src/core/ai/providers/SseParser.cpp
+    src/core/AgentTools.cpp
+    src/core/AgentPolicy.cpp
+    src/core/PatchQueue.cpp
+    src/core/ProjectHealth.cpp
+)
+target_include_directories(test_stage35 PRIVATE src)
+target_link_libraries(test_stage35 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
+add_test(NAME stage35 COMMAND test_stage35)
 
 # QSS dosyalarını binary yanına kopyala
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
