@@ -1,4 +1,6 @@
 #include "LlmClient.h"
+#include "ProviderHealth.h"
+#include "ProviderPrefs.h"
 #include "SecretStore.h"
 #include <QEventLoop>
 #include <QJsonDocument>
@@ -40,6 +42,12 @@ QJsonObject LlmClient::requestHeaders(const ProviderSpec& spec, const QString& a
 
 bool LlmClient::isRetryable(int httpStatus) {
     return httpStatus == 429 || httpStatus == 408 || (httpStatus >= 500 && httpStatus < 600);
+}
+
+bool LlmClient::isHardFailure(int httpStatus) {
+    // 401/403: anahtar/ yetki · 404: model yok · 5xx: sağlayıcı bozuk
+    return httpStatus == 401 || httpStatus == 403 || httpStatus == 404 ||
+           (httpStatus >= 500 && httpStatus < 600);
 }
 
 int LlmClient::retryDelayMs(int attempt, int httpStatus, const QByteArray& retryAfter) {
@@ -127,6 +135,8 @@ void LlmClient::sendChat(const AiChatRequest& req, bool stream) {
     m_streamCalls.clear();
     m_acc = AiReply();
     m_acc.model = m_spec.resolveModelId(req.model);
+    m_failoverCount = 0;
+    m_failoverFrom.clear();
 
     if (m_spec.requiresKey() && apiKey().isEmpty()) {
         emit error(QString("%1 için API anahtarı gerekli (Ayarlar → Sağlayıcılar).")
@@ -135,7 +145,7 @@ void LlmClient::sendChat(const AiChatRequest& req, bool stream) {
     }
 
     QString model;
-    const QJsonObject body = ProviderCodec::chatRequest(m_spec, req, &model);
+    QJsonObject body = ProviderCodec::chatRequest(m_spec, req, &model);
     QJsonObject b = body;
     b["stream"] = stream;
     if (m_spec.kind == ProviderKind::Anthropic) b["stream"] = stream;
@@ -187,6 +197,29 @@ void LlmClient::sendChat(const AiChatRequest& req, bool stream) {
                                    .arg(delay / 1000));
             QTimer::singleShot(delay, this, [this]() { sendChat(m_req, m_wantStream); });
             return;
+        }
+
+        // Stage 36: kalıcı sağlayıcı hatasında eşdeğer sağlayıcıya devir
+        if (m_failover && m_failoverCount < 2 && isHardFailure(status)) {
+            const QString target = ProviderHealth::pickFailover(
+                m_spec.id, ProviderRegistry::all(), m_req.model);
+            if (!target.isEmpty()) {
+                const ProviderSpec next = ProviderPrefs::resolve(target);
+                const QString from = m_spec.label;
+                m_failoverFrom = m_spec.id;
+                m_spec = next;
+                m_apiKey.clear();
+                if (m_secrets)
+                    m_apiKey = m_secrets->effectiveKey(target);
+                else
+                    m_apiKey = SecretStore().effectiveKey(target); // kasasız da çalışır
+                ++m_failoverCount;
+                m_attempt = 0;
+                emit statusChanged(QString("%1 başarısız → %2 sağlayıcısına geçildi")
+                                       .arg(from, next.label));
+                QTimer::singleShot(0, this, [this]() { sendChat(m_req, m_wantStream); });
+                return;
+            }
         }
 
         if (m_wantStream) {
@@ -263,8 +296,9 @@ AiReply LlmClient::chatSync(const AiChatRequest& request, int timeoutMs) {
     QString model;
     QJsonObject b = ProviderCodec::chatRequest(m_spec, request, &model);
     b["stream"] = false;
-    const QString url = ProviderCodec::chatUrl(m_spec, model);
+    QString url = ProviderCodec::chatUrl(m_spec, model);
 
+    int failovers = 0;
     for (int attempt = 0; attempt <= maxRetries(); ++attempt) {
         QNetworkReply* rep = post(b, url);
         QEventLoop loop;
@@ -289,6 +323,26 @@ AiReply LlmClient::chatSync(const AiChatRequest& request, int timeoutMs) {
                 QThread::msleep(static_cast<unsigned long>(
                     retryDelayMs(attempt, status)));
                 continue;
+            }
+            // Stage 36: kalıcı hata → eşdeğer sağlayıcıya devir
+            if (m_failover && failovers < 2 && isHardFailure(status)) {
+                const QString target = ProviderHealth::pickFailover(
+                    m_spec.id, ProviderRegistry::all(), request.model);
+                if (!target.isEmpty()) {
+                    m_failoverFrom = m_spec.id;
+                    m_spec = ProviderPrefs::resolve(target);
+                    m_apiKey.clear();
+                    if (m_secrets)
+                        m_apiKey = m_secrets->effectiveKey(target);
+                    else
+                        m_apiKey = SecretStore().effectiveKey(target);
+                    ++failovers;
+                    b = ProviderCodec::chatRequest(m_spec, request, &model);
+                    b["stream"] = false;
+                    url = ProviderCodec::chatUrl(m_spec, model); // yeni uç nokta şart
+                    attempt = -1; // yeni sağlayıcı kendi yeniden deneme hakkını alır
+                    continue;
+                }
             }
             r.httpStatus = status;
             r.error = ProviderRegistry::mapError(m_spec, status, body);

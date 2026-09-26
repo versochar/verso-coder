@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "1.7.0"; }
+QString AboutInfo::version() { return "1.8.0"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,14 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "1.8.0 (Stage 36)\n"
+        "  • Sağlayıcı+model bazlı fiyatlandırma; ücretsiz katmanlar 0 USD\n"
+        "  • Kalıcı token geçmişi + günlük istek/token kotası (kota dolunca erken ret)\n"
+        "  • Koşu maliyet onayı: tavan aşılırsa ajan başlamadan uyarır\n"
+        "  • Sağlık skoru + otomatik failover (kalıcı hatada eşdeğer sağlayıcıya devir)\n"
+        "  • Görev yönlendirme: basit işler hızlı/ücretsiz, karmaşık işler güçlü model\n"
+        "  • RAG gömmesi tüm sağlayıcılarda (NIM/OpenAI/Gemini/UnoRouter) + önbellek\n"
+        "  • Ayarlar: maliyet tavanı, kota, yönlendirme, Sağlayıcıları Karşılaştır\n"
         "1.7.0 (Stage 35)\n"
         "  • Çok sağlayıcılı AI: NVIDIA NIM, UnoRouter, OpenAI, Claude, Gemini, Groq,\n"
         "    OpenRouter, DeepSeek, Mistral, xAI, Together, Azure, LM Studio, llama.cpp, vLLM\n"

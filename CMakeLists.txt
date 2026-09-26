@@ -60,6 +60,14 @@ set(SOURCES
     src/core/ai/providers/SseParser.cpp
     src/core/ai/AiToolBridge.cpp
     src/core/ai/ProviderPrefs.cpp
+    src/core/ai/ProviderPricing.cpp
+    src/core/ai/UsageLedger.cpp
+    src/core/ai/ProviderHealth.cpp
+    src/core/ai/TaskRouter.cpp
+    src/core/ai/EmbedCache.cpp
+    src/core/ai/EmbedBridge.cpp
+    src/core/ai/AgentLlmAdapter.cpp
+    src/core/ai/ProviderBench.cpp
     src/core/StartupArgs.cpp
     src/core/ToolchainProbe.cpp
     src/core/TaskRunner.cpp
@@ -263,6 +271,14 @@ set(HEADERS
     src/core/ai/providers/SseParser.h
     src/core/ai/AiToolBridge.h
     src/core/ai/ProviderPrefs.h
+    src/core/ai/ProviderPricing.h
+    src/core/ai/UsageLedger.h
+    src/core/ai/ProviderHealth.h
+    src/core/ai/TaskRouter.h
+    src/core/ai/EmbedCache.h
+    src/core/ai/EmbedBridge.h
+    src/core/ai/AgentLlmAdapter.h
+    src/core/ai/ProviderBench.h
     src/core/StartupArgs.h
     src/core/ToolchainProbe.h
     src/core/TaskRunner.h
@@ -637,6 +653,14 @@ add_executable(test_stage35
     src/core/ai/AiMessage.cpp
     src/core/ai/AiToolBridge.cpp
     src/core/ai/ProviderPrefs.cpp
+    src/core/ai/ProviderPricing.cpp
+    src/core/ai/UsageLedger.cpp
+    src/core/ai/ProviderHealth.cpp
+    src/core/ai/TaskRouter.cpp
+    src/core/ai/EmbedCache.cpp
+    src/core/ai/EmbedBridge.cpp
+    src/core/ai/AgentLlmAdapter.cpp
+    src/core/ai/ProviderBench.cpp
     src/core/ai/LlmClient.cpp
     src/core/ai/providers/ProviderCodec.cpp
     src/core/ai/providers/SseParser.cpp
@@ -648,6 +672,40 @@ add_executable(test_stage35
 target_include_directories(test_stage35 PRIVATE src)
 target_link_libraries(test_stage35 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
 add_test(NAME stage35 COMMAND test_stage35)
+
+# --- Stage 36: ekonomi, kota, sağlık/failover, yönlendirme, gömme köprüsü ---
+add_executable(test_stage36
+    tests/test_stage36.cpp
+    src/core/TokenStats.cpp
+    src/core/ModelCapabilities.cpp
+    src/core/ai/LlmProvider.cpp
+    src/core/ai/SecretStore.cpp
+    src/core/ai/AiMessage.cpp
+    src/core/ai/AiToolBridge.cpp
+    src/core/ai/ProviderPrefs.cpp
+    src/core/ai/ProviderPricing.cpp
+    src/core/ai/UsageLedger.cpp
+    src/core/ai/ProviderHealth.cpp
+    src/core/ai/TaskRouter.cpp
+    src/core/ai/EmbedCache.cpp
+    src/core/ai/EmbedBridge.cpp
+    src/core/ai/AgentLlmAdapter.cpp
+    src/core/ai/ProviderBench.cpp
+    src/core/ai/LlmClient.cpp
+    src/core/ai/providers/ProviderCodec.cpp
+    src/core/ai/providers/SseParser.cpp
+    src/core/AgentTools.cpp
+    src/core/AgentPolicy.cpp
+    src/core/AgentBudget.cpp
+    src/core/AgentMemory.cpp
+    src/core/AgentReflection.cpp
+    src/core/AgentLoop.cpp
+    src/core/PatchQueue.cpp
+    src/core/ProjectHealth.cpp
+)
+target_include_directories(test_stage36 PRIVATE src)
+target_link_libraries(test_stage36 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
+add_test(NAME stage36 COMMAND test_stage36)
 
 # QSS dosyalarını binary yanına kopyala
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD

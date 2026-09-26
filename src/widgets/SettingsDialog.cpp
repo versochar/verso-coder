@@ -1,5 +1,7 @@
 #include "SettingsDialog.h"
 #include <QApplication>
+#include <QElapsedTimer>
+#include <QMessageBox>
 #include "../core/AccentColor.h"
 #include "../core/Commands.h"
 #include "../core/KeymapPresets.h"
@@ -8,7 +10,14 @@
 #include "../core/ai/LlmClient.h"
 #include "../core/ai/LlmProvider.h"
 #include "../core/ai/ProviderPrefs.h"
+#include "../core/ai/AgentLlmAdapter.h"
+#include "../core/ai/ProviderBench.h"
+#include "../core/ai/ProviderHealth.h"
+#include "../core/ai/ProviderPricing.h"
 #include "../core/ai/SecretStore.h"
+#include "../core/ai/TaskRouter.h"
+#include "../core/ai/UsageLedger.h"
+#include "../core/TokenStats.h"
 #include "../core/SettingsIO.h"
 #include "../core/SettingsManager.h"
 #include "../core/ThemeManager.h"
@@ -33,6 +42,8 @@
 #include <QSlider>
 #include <QSpinBox>
 #include <QTabWidget>
+#include <algorithm>
+#include <numeric>
 #include <QTextEdit>
 #include <QVBoxLayout>
 
@@ -794,8 +805,98 @@ void SettingsDialog::buildProviderTab() {
     root->addLayout(row);
     root->addStretch(1);
 
+    // --- Stage 36: maliyet, kota, yönlendirme, sağlık ---
+    auto* sep = new QLabel(QString("— %1 —").arg("Maliyet ve kota"), m_provPage);
+    sep->setStyleSheet("color:#569cd6;font-weight:600;margin-top:10px;");
+    root->addWidget(sep);
+
+    m_costGuard = new QDoubleSpinBox(m_provPage);
+    m_costGuard->setRange(0.0, 100.0);
+    m_costGuard->setDecimals(2);
+    m_costGuard->setSingleStep(0.25);
+    m_costGuard->setSuffix(" $");
+    m_costGuard->setSpecialValueText("tavan yok");
+    m_costGuard->setToolTip("Bir koşunun tahmini maliyeti bu değeri aşarsa onay istenir.");
+    f->addRow("Koşu maliyet tavanı:", m_costGuard);
+
+    m_quotaCalls = new QSpinBox(m_provPage);
+    m_quotaCalls->setRange(0, 100000);
+    m_quotaCalls->setSpecialValueText("sınırsız");
+    m_quotaCalls->setToolTip("Seçili sağlayıcı için günlük istek sınırı.");
+    f->addRow("Günlük istek kotası:", m_quotaCalls);
+
+    m_quotaTokens = new QSpinBox(m_provPage);
+    m_quotaTokens->setRange(0, 100000000);
+    m_quotaTokens->setSingleStep(10000);
+    m_quotaTokens->setSpecialValueText("sınırsız");
+    m_quotaTokens->setToolTip("Seçili sağlayıcı için günlük token sınırı.");
+    f->addRow("Günlük token kotası:", m_quotaTokens);
+
+    m_usageLabel = new QLabel(m_provPage);
+    m_usageLabel->setWordWrap(true);
+    m_usageLabel->setStyleSheet("color:#858585;font-size:11px;");
+    f->addRow("Bugünkü kullanım:", m_usageLabel);
+
+    m_healthLabel = new QLabel(m_provPage);
+    m_healthLabel->setWordWrap(true);
+    m_healthLabel->setStyleSheet("color:#858585;font-size:11px;");
+    f->addRow("Sağlık:", m_healthLabel);
+
+    auto* hrow = new QHBoxLayout;
+    auto* bHealthReset = new QPushButton("Sağlık Verisini Sıfırla", m_provPage);
+    auto* bBench = new QPushButton("Sağlayıcıları Karşılaştır...", m_provPage);
+    bBench->setToolTip("2 kısa görevi birkaç sağlayıcıda çalıştırıp puan/Gecikme/maliyet tablosu üretir.");
+    hrow->addWidget(bHealthReset);
+    hrow->addWidget(bBench);
+    hrow->addStretch(1);
+    root->addLayout(hrow);
+
+    sep = new QLabel(QString("— %1 —").arg("Görev yönlendirme"), m_provPage);
+    sep->setStyleSheet("color:#569cd6;font-weight:600;margin-top:10px;");
+    root->addWidget(sep);
+
+    m_routeEnabled = new QCheckBox("Göreve göre sağlayıcı seç (kapalıysa hep seçili sağlayıcı)", m_provPage);
+    root->addWidget(m_routeEnabled);
+    m_routeFreeFirst = new QCheckBox("Ücretsiz/hızlı modeli tercih et", m_provPage);
+    root->addWidget(m_routeFreeFirst);
+
+    auto provBox = [this](QComboBox*& box) {
+        box = new QComboBox(m_provPage);
+        box->addItem("(seçili sağlayıcı)", QString());
+        for (const ProviderSpec& spec : ProviderRegistry::all())
+            box->addItem(spec.label, spec.id);
+        return box;
+    };
+    m_quickProv = provBox(m_quickProv);
+    m_quickModel = new QLineEdit(m_provPage);
+    m_quickModel->setPlaceholderText("model (boş = sağlayıcı varsayılanı)");
+    auto* qr = new QHBoxLayout;
+    qr->addWidget(m_quickProv);
+    qr->addWidget(m_quickModel, 1);
+    f->addRow("Basit görevler:", qr);
+
+    m_strongProv = provBox(m_strongProv);
+    m_strongModel = new QLineEdit(m_provPage);
+    m_strongModel->setPlaceholderText("model (boş = sağlayıcı varsayılanı)");
+    auto* sr = new QHBoxLayout;
+    sr->addWidget(m_strongProv);
+    sr->addWidget(m_strongModel, 1);
+    f->addRow("Karmaşık/ajan görevleri:", sr);
+
+    m_embedProv = provBox(m_embedProv);
+    m_embedModel = new QLineEdit(m_provPage);
+    m_embedModel->setPlaceholderText("örn. text-embedding-3-small");
+    auto* er = new QHBoxLayout;
+    er->addWidget(m_embedProv);
+    er->addWidget(m_embedModel, 1);
+    f->addRow("Gömme (RAG):", er);
+
     connect(bFetch, &QPushButton::clicked, this, &SettingsDialog::onProviderFetchModels);
     connect(bTest, &QPushButton::clicked, this, &SettingsDialog::onProviderTest);
+    connect(bHealthReset, &QPushButton::clicked, this, &SettingsDialog::onHealthReset);
+    connect(bBench, &QPushButton::clicked, this, &SettingsDialog::onProviderBench);
+    connect(m_provCombo, &QComboBox::currentIndexChanged, this,
+            [this](int) { loadStage36(); });
     connect(m_provCombo, &QComboBox::currentIndexChanged, this,
             &SettingsDialog::onProviderChanged);
 
@@ -894,6 +995,156 @@ void SettingsDialog::onProviderTest() {
                              : "✗ " + err);
 }
 
+// ============================================================
+// Stage 36: maliyet / kota / yönlendirme / sağlık yükleme-kaydetme
+// ============================================================
+void SettingsDialog::loadStage36() {
+    if (!m_costGuard) return;
+    TokenStats::setCostGuardUsd(0.0); // değer aşağıda tek seferde okunur
+    QSettings st;
+    m_costGuard->setValue(st.value("ai/costGuardUsd", 0.0).toDouble());
+
+    const QString id = m_provCombo ? m_provCombo->currentData().toString() : QString();
+    const UsageLedger::Quota q = UsageLedger::instance().quota(id);
+    m_quotaCalls->setValue(q.maxCalls);
+    m_quotaTokens->setValue(int(q.maxTokens));
+
+    const UsageLedger::Day today = UsageLedger::instance().today();
+    m_usageLabel->setText(
+        QString("%1 çağrı · %2 token%s")
+            .arg(today.calls)
+            .arg(today.total())
+            .arg(today.usd > 0.0 ? QString(" · ~$%1").arg(today.usd, 0, 'f', 4)
+                                : QString(" · ücretsiz/yerel")));
+    if (!id.isEmpty()) {
+        const ProviderSpec spec = ProviderRegistry::byId(id);
+        m_healthLabel->setText(QString("%1 · %2 · fiyat: %3")
+                                   .arg(spec.label,
+                                        ProviderHealth::instance().statusLine(id),
+                                        ProviderPricing::explain(
+                                            spec, ProviderPrefs::modelFor(id))));
+        QString why;
+        if (UsageLedger::instance().quotaExceeded(id, why))
+            m_healthLabel->setText(m_healthLabel->text() + " · ⚠ " + why);
+    }
+
+    const TaskRouter::Prefs p = TaskRouter::readSettings();
+    m_routeEnabled->setChecked(p.enabled);
+    m_routeFreeFirst->setChecked(p.useFreeFirst);
+    m_quickProv->setCurrentIndex(qMax(0, m_quickProv->findData(p.quickProvider)));
+    m_quickModel->setText(p.quickModel);
+    m_strongProv->setCurrentIndex(qMax(0, m_strongProv->findData(p.strongProvider)));
+    m_strongModel->setText(p.strongModel);
+    m_embedProv->setCurrentIndex(qMax(0, m_embedProv->findData(p.embedProvider)));
+    m_embedModel->setText(p.embedModel);
+}
+
+void SettingsDialog::storeStage36() {
+    if (!m_costGuard) return;
+    TokenStats::setCostGuardUsd(m_costGuard->value());
+
+    const QString id = m_provCombo ? m_provCombo->currentData().toString() : QString();
+    if (!id.isEmpty()) {
+        UsageLedger::Quota q;
+        q.maxCalls = m_quotaCalls->value();
+        q.maxTokens = m_quotaTokens->value();
+        UsageLedger::instance().setQuota(id, q);
+        UsageLedger::instance().prune(90);
+    }
+
+    TaskRouter::Prefs p = TaskRouter::readSettings();
+    p.enabled = m_routeEnabled->isChecked();
+    p.useFreeFirst = m_routeFreeFirst->isChecked();
+    p.quickProvider = m_quickProv->currentData().toString();
+    p.quickModel = m_quickModel->text().trimmed();
+    p.strongProvider = m_strongProv->currentData().toString();
+    p.strongModel = m_strongModel->text().trimmed();
+    p.embedProvider = m_embedProv->currentData().toString();
+    p.embedModel = m_embedModel->text().trimmed();
+    TaskRouter::writeSettings(p);
+}
+
+void SettingsDialog::onHealthReset() {
+    ProviderHealth::instance().reset();
+    loadStage36();
+    if (m_provStatus) m_provStatus->setText("Sağlık verileri sıfırlandı.");
+}
+
+void SettingsDialog::onProviderBench() {
+    // Adaylar: anahtarı olan ya da yerel (anahtarsız) sağlayıcılar
+    SecretStore store;
+    QList<ProviderSpec> pool;
+    const QString active = m_provCombo ? m_provCombo->currentData().toString() : QString();
+    for (const ProviderSpec& spec : ProviderRegistry::all()) {
+        if (spec.supportsEmbed) continue; // yalnız sohbet sağlayıcıları
+        if (spec.requiresKey() && store.effectiveKey(spec.id).isEmpty()) continue;
+        if (spec.id == active) continue;
+        pool << spec;
+    }
+    if (pool.size() > 3) pool = pool.mid(0, 3);
+    if (pool.isEmpty()) {
+        QMessageBox::information(this, "Karşılaştırma",
+                                 "Karşılaştırılacak sağlayıcı yok. Önce bir API anahtarı girin "
+                                 "(ya da Ollama'yı etkin bırakın).");
+        return;
+    }
+    const QList<BenchTask> tasks = ProviderBench::tasks();
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    QApplication::processEvents();
+
+    QList<BenchResult> results;
+    for (const ProviderSpec& spec : pool) {
+        const QString model = ProviderPrefs::modelFor(
+            spec.id, ProviderRegistry::sampleModels(spec.id).value(0));
+        if (model.isEmpty()) continue;
+        LlmClient client;
+        client.setProvider(spec);
+        client.setSecretStore(&store);
+        QList<QPair<QString, QString>> answers;
+        QList<int> latencies;
+        for (int i = 0; i < qMin(2, tasks.size()); ++i) {
+            AiChatRequest req;
+            req.model = model;
+            req.systemPrompt = "Kısa ve doğru cevap ver.";
+            req.messages << AiMessage::user(tasks.at(i).prompt);
+            req.maxTokens = 400;
+            QElapsedTimer timer;
+            timer.start();
+            const AiReply rep = client.chatSync(req, 25000);
+            latencies << int(timer.elapsed());
+            answers.append(qMakePair(tasks.at(i).id, rep.ok ? rep.text : QString()));
+        }
+        results << ProviderBench::score(spec.id, model, answers, latencies);
+        QApplication::processEvents();
+    }
+    if (results.isEmpty()) {
+        QMessageBox::warning(this, "Karşılaştırma", "Hiçbir sağlayıcı yanıt vermedi.");
+        return;
+    }
+    QApplication::restoreOverrideCursor();
+    std::sort(results.begin(), results.end(),
+              [](const BenchResult& a, const BenchResult& b) { return a.score > b.score; });
+    QString text = "Sağlayıcı          Puan  Kalite  Gecikme  Maliyet\n";
+    for (const BenchResult& r : results) {
+        text += QString("%1 %2  %3  %4 ms  $5\n")
+                    .arg(r.providerId, -16)
+                    .arg(r.score, 5, 'f', 0)
+                    .arg(r.quality, 6, 'f', 0)
+                    .arg(r.latencyMs, 7)
+                    .arg(r.usd, 0, 'f', 4);
+    }
+    text += QString("\nÖneri: %1").arg(ProviderBench::recommend(results));
+    QMessageBox box(this);
+    box.setWindowTitle("Sağlayıcı Karşılaştırması");
+    box.setText(text);
+    box.setDetailedText(
+        std::accumulate(results.begin(), results.end(), QString(),
+                        [](const QString& acc, const BenchResult& r) {
+                            return acc + ProviderBench::explain(r) + "\n";
+                        }));
+    box.exec();
+}
+
 void SettingsDialog::saveAll() {    AppSettings cur = SettingsManager::instance().load(); // oturum alanlarını koru
     AppSettings s = cur;
     s.language = (m_lang->currentIndex() == 1) ? "en" : "tr";
@@ -919,6 +1170,8 @@ void SettingsDialog::saveAll() {    AppSettings cur = SettingsManager::instance(
     if (m_agentTestCmd) s.agentTestCommand = m_agentTestCmd->text().trimmed();
     // Stage 35: sağlayıcı tercihleri + API anahtarları
     storeProviderForm();
+    // Stage 36: maliyet tavanı + kota + yönlendirme
+    storeStage36();
     s.gpuBackend = m_backend->currentText();
     s.gpuLayers = (s.gpuBackend == "CPU") ? 0 : m_gpu->value();
     s.temperature = m_tempSlider->value() / 100.0;

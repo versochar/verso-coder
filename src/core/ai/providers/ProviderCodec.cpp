@@ -531,7 +531,8 @@ QJsonObject ProviderCodec::embedRequest(const ProviderSpec& spec, const QString&
     if (resolvedModel) *resolvedModel = spec.resolveModelId(model);
     root["model"] = spec.resolveModelId(model);
     root["input"] = QJsonArray::fromStringList(inputs);
-    if (spec.kind == ProviderKind::Ollama) root["prompt"] = inputs.value(0);
+    // Not: Ollama /api/embed `input` dizisini de kabul eder; eski tek "prompt"
+    // alanı yalnız bir girdide anlamlıydı, toplu istekleri sessizce düşürüyordu.
     return root;
 }
 

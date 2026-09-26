@@ -8,6 +8,16 @@
 
 class AgentMemory;
 
+// Stage 36: adım telemetrisi — hangi sağlayıcı/model kaç token harcadı.
+struct StepMeta {
+    QString providerId;
+    QString model;
+    qint64 promptTokens = 0;
+    qint64 evalTokens = 0;
+    bool nativeTools = false;
+    int httpStatus = 0;
+};
+
 // Tek adımın kaydı: asistan yanıtı + yapılan çağrılar + gözlemler.
 struct AgentStep {
     QString assistant;
@@ -33,6 +43,8 @@ class AgentLoop {
 public:
     using Llm = std::function<QString(const QString& systemPrompt, const QString& userPrompt,
                                       QString& error)>;
+    // Stage 36: adım sonrası telemetri toplayıcı (sağlayıcı/model/token).
+    using Meta = std::function<StepMeta(const QString& assistantText, const QList<ToolCall>&)>;
     using Approver = std::function<bool(const ToolCall&)>;
     using Progress = std::function<void(const QString&)>;
 
@@ -48,6 +60,7 @@ public:
         QList<StepReflection> reflections;
         QList<QPair<QString, bool>> callResults;
         QList<RunFile> changedFiles; // geri alınabilir dosya değişiklikleri
+        QList<StepMeta> metas;       // Stage 36: adım telemetrisi
         bool budgetStopped = false;
         QString budgetReason;
         int finalScore = 0; // son refleksiyon puanı
@@ -55,7 +68,8 @@ public:
 
     static Result run(AgentTools& tools, const QString& systemPrompt, const QString& userTask,
                       int maxSteps, const Llm& llm, const Approver& approve = {},
-                      const Progress& progress = {}, AgentRunContext* ctx = nullptr);
+                      const Progress& progress = {}, AgentRunContext* ctx = nullptr,
+                      const Meta& meta = {});
 
     static QString formatTranscript(const QList<AgentStep>& steps, int maxChars = 16000);
     // Stage 34: koşu sonrası tek parça özet (günlüğe yazılır).

@@ -19,7 +19,7 @@ QString readIfExists(const QString& path) {
 AgentLoop::Result AgentLoop::run(AgentTools& tools, const QString& systemPrompt,
                                  const QString& userTask, int maxSteps, const Llm& llm,
                                  const Approver& approve, const Progress& progress,
-                                 AgentRunContext* ctx) {
+                                 AgentRunContext* ctx, const Meta& meta) {
     Result res;
     if (maxSteps <= 0) maxSteps = 1;
 
@@ -70,6 +70,8 @@ AgentLoop::Result AgentLoop::run(AgentTools& tools, const QString& systemPrompt,
         AgentStep st;
         st.assistant = reply;
         st.calls = AgentTools::parseCalls(reply);
+        // Stage 36: sağlayıcı/model/token telemetrisi (opsiyonel)
+        if (meta) res.metas << meta(reply, st.calls);
         emitProgress(QString("[adım %1] yanıt alındı (%2 araç çağrısı)").arg(step + 1).arg(st.calls.size()));
 
         if (st.calls.isEmpty()) {

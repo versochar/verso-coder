@@ -12,7 +12,10 @@
 #include "../core/PatchQueue.h"
 #include "../core/RagIndexer.h"
 #include "../core/SkillChain.h"
+#include "../core/AgentLoop.h"
+#include "../core/ai/AgentLlmAdapter.h"
 #include "../core/ai/AiMessage.h"
+#include "../core/ai/EmbedBridge.h"
 #include "../core/ai/AiToolBridge.h"
 #include "../core/ai/LlmClient.h"
 #include "../core/ai/LlmProvider.h"
@@ -123,11 +126,13 @@ private:
     void refreshImageChips();
     QString conversationContext();
     void configureProvider();    // Stage 35: sağlayıcıyı uygula + modelleri getir
+    void refreshEmbedRoute();   // Stage 36: gömme sağlayıcısı/modelini güncelle
     bool isCloudProvider() const;
     void renderBranch(const ChatSession& s, const QString& leafId);
 
     OllamaClient m_client;
     LlmClient m_llm;                     // Stage 35: bulut sağlayıcıları
+    EmbedBridge m_embed;                  // Stage 36: sağlayıcı-duyarsız gömme
     SecretStore m_secrets;               // Stage 35: API anahtarı kasası
     RagIndexer m_rag;
     QFutureWatcher<QPair<int, int>> m_ragWatcher; // (dosya, parça)

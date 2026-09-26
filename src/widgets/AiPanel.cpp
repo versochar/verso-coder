@@ -1,5 +1,9 @@
 #include "AiPanel.h"
 #include "../core/EmbeddingClient.h"
+#include "../core/TokenStats.h"
+#include "../core/ai/ProviderHealth.h"
+#include "../core/ai/TaskRouter.h"
+#include "../core/ai/UsageLedger.h"
 #include "../core/ProjectHealth.h"
 #include "../core/SettingsManager.h"
 #include "AgentPanelDialog.h"
@@ -302,16 +306,22 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
         m_rag.clear();
         // Stage 33: gömme modeli tanımlıysa anlamsal vektörleri de üret
         const AppSettings rs = SettingsManager::instance().load();
-        const QString embedModel = rs.aiEmbedModel.trimmed();
-        const QString host = rs.ollamaHost;
-        m_ragWatcher.setFuture(QtConcurrent::run([this, root, embedModel, host]() {
+        // Stage 36: gömme sağlayıcısı sohbet sağlayıcısından farklı olabilir
+        refreshEmbedRoute();
+        const QString embedProvider = m_embed.provider();
+        const QString embedModel = m_embed.model().isEmpty() ? rs.aiEmbedModel.trimmed()
+                                                              : m_embed.model();
+        m_ragWatcher.setFuture(QtConcurrent::run([this, root, embedModel, embedProvider]() {
             int n = m_rag.indexProjectIncremental(root); // Stage 32: artımlı
             if (!embedModel.isEmpty() && m_rag.chunkCount() > 0) {
-                auto ec = std::make_shared<EmbeddingClient>();
-                ec->setHost(host);
-                m_rag.setEmbedder([ec, embedModel](const QStringList& texts) {
-                    QString err;
-                    return ec->embedSync(embedModel, texts, err, 60000);
+                // Stage 36: sağlayıcı-duyarsız gömme (Ollama dâhil) + önbellek
+                auto eb = std::make_shared<EmbedBridge>();
+                eb->setProvider(embedProvider);
+                eb->setModel(embedModel);
+                eb->cache().setMaxEntries(4096);
+                m_rag.setEmbedder([eb, embedModel](const QStringList& texts) {
+                    const EmbedBridge::Result r = eb->embed(texts, 60000);
+                    return r.vectors;
                 });
                 m_rag.embedAll(16);
             }
@@ -542,6 +552,7 @@ bool AiPanel::agentMode() const {
 }
 
 void AiPanel::reloadSettings() {
+    m_embed.setSecretStore(&m_secrets); // Stage 36
     AppSettings s = SettingsManager::instance().load();
     m_client.setHost(s.ollamaHost);
     if (m_models->findText(s.ollamaModel) < 0) m_models->addItem(s.ollamaModel);
@@ -585,12 +596,23 @@ void AiPanel::configureProvider() {
     } else {
         if (m_models->count() <= 1) m_llm.fetchModels();
     }
+    // Stage 36: gömme rotası ayrı olabilir (ör. sohbet Ollama, gömme NIM)
+    refreshEmbedRoute();
 }
 
 bool AiPanel::isCloudProvider() const {
     if (!m_provider) return false;
     return ProviderPrefs::resolve(m_provider->currentData().toString()).kind !=
            ProviderKind::Ollama;
+}
+
+// Stage 36: gömme sağlayıcısı/modelini yönlendirme tercihine göre günceller.
+// Sohbet sağlayıcısı gömme desteklemiyorsa destekleyen ilkine geçilir.
+void AiPanel::refreshEmbedRoute() {
+    const TaskRouter::Prefs p = TaskRouter::prefs();
+    m_embed.setProvider(TaskRouter::embedProvider(p));
+    const QString model = TaskRouter::embedModel(p);
+    if (!model.isEmpty()) m_embed.setModel(model);
 }
 
 QJsonObject AiPanel::currentOptions() const {
@@ -622,13 +644,10 @@ QString AiPanel::buildContext(const QString& question) {
         const AppSettings rs = SettingsManager::instance().load();
         QList<RagChunk> hits;
         bool semantic = false;
-        if (!rs.aiEmbedModel.trimmed().isEmpty() && m_rag.vectorCount() > 0) {
-            EmbeddingClient ec;
-            ec.setHost(rs.ollamaHost);
-            QString err;
-            const auto qv = ec.embedSync(rs.aiEmbedModel.trimmed(), {q}, err, 8000);
-            if (!qv.isEmpty()) {
-                hits = m_rag.queryHybrid(q, qv.first(), 4);
+        if (m_rag.vectorCount() > 0 && !m_embed.model().isEmpty()) {
+            const EmbedBridge::Result er = m_embed.embedOne(q, 8000);
+            if (er.ok()) {
+                hits = m_rag.queryHybrid(q, er.vectors.first(), 4);
                 semantic = true;
             }
         }
@@ -1079,16 +1098,48 @@ void AiPanel::runAgent(const QString& task) {
         return;
     }
 
+    // Stage 36: göreve göre sağlayıcı/model yönlendirmesi
+    const TaskRouter::Route route = TaskRouter::route(task);
+    const QString agentProvider = route.providerId.isEmpty()
+                                      ? ProviderPrefs::activeProvider()
+                                      : route.providerId;
+    if (!route.model.isEmpty() && !route.forceLocked) model = route.model;
+    const ProviderSpec agentSpec = ProviderPrefs::resolve(agentProvider);
+    if (model.isEmpty())
+        model = ProviderPrefs::modelFor(agentProvider,
+                                        ProviderRegistry::sampleModels(agentProvider).value(0));
+    if (model.isEmpty()) { m_view->append("<i>Önce model seç.</i>"); return; }
+    if (agentProvider != m_provider->currentData().toString()) {
+        m_view->append(QString("<i>Yönlendirme: %1 görev → %2 · %3</i>")
+                           .arg(TaskRouter::label(route.cls), agentSpec.label,
+                                route.reason.toHtmlEscaped()));
+    }
+    // Kota denetimi: aşılıysa ajan hiç başlamaz
+    {
+        QString why;
+        if (UsageLedger::instance().quotaExceeded(agentProvider, why)) {
+            m_view->append("<i style='color:#f44747'>" + why.toHtmlEscaped() +
+                           " — Ayarlar → AI Sağlayıcıları → Kota</i>");
+            return;
+        }
+    }
+
     // Stage 25: plan kapısı — çalıştırmadan önce onay
     {
         const int steps = m_agentSteps ? m_agentSteps->value() : 10;
-        auto r = QMessageBox::question(
-            this, "Ajan Planı",
-            QString("Görev: %1\n\nEn çok %2 adım, %3 araç kullanılabilir. Başlansın mı?")
-                .arg(task.left(300))
-                .arg(steps)
-                .arg("dosya/ara/komut/yama"),
-            QMessageBox::Yes | QMessageBox::Cancel);
+        const double estUsd = AgentLlmAdapter::estimateUsd(agentProvider, model, steps);
+        QString plan = QString("Görev: %1\n\nEn çok %2 adım, %3 araç kullanılabilir.\n"
+                               "Sağlayıcı: %4 · %5\nMaliyet: %6\n\nBaşlansın mı?")
+                           .arg(task.left(300))
+                           .arg(steps)
+                           .arg("dosya/ara/komut/yama")
+                           .arg(agentSpec.label, model,
+                                AgentLlmAdapter::costPreview(agentProvider, model, steps));
+        if (TokenStats::needsConfirmation(estUsd))
+            plan += QString("\n\n⚠ Bu koşu maliyet tavanını ($%1) aşabilir.")
+                        .arg(TokenStats::costGuardUsd(), 0, 'f', 2);
+        auto r = QMessageBox::question(this, "Ajan Planı", plan,
+                                       QMessageBox::Yes | QMessageBox::Cancel);
         if (r != QMessageBox::Yes) {
             m_view->append("<i>Ajan iptal edildi (plan onaylanmadı).</i>");
             return;
@@ -1142,42 +1193,23 @@ void AiPanel::runAgent(const QString& task) {
     m_view->append("<hr><b>🤖 Ajan:</b> <i>görev işleniyor…</i>");
     const QString system = s.systemPrompt;
     const QJsonObject opts = currentOptions();
-    // Stage 35: Ollama yerel yol korunur; bulutta LlmClient + araç köprüsü
-    const ProviderSpec agentSpec = ProviderPrefs::resolve();
-    const bool agentCloud = agentSpec.kind != ProviderKind::Ollama;
+    // Stage 36: tek adaptör — Ollama dahil her sağlayıcıda aynı yol.
+    // Sağlayıcı yönlendirmesi, kota denetimi, sağlık/kullanım kaydı ve
+    // native araç çağırma → metin protokolü dönüşümü burada toplanır.
     AgentTools toolDefs(root);
     const auto toolSchemas = toolDefs.toolSchemas();
-    auto llm = [this, model, opts, agentCloud, agentSpec, toolSchemas](
-                   const QString& sys, const QString& user, QString& err) -> QString {
-        if (!agentCloud)
-            return m_client.chatSync(model, sys, user, opts, err);
-        AiChatRequest r;
-        r.model = model;
-        r.systemPrompt = sys;
-        AppSettings ls = SettingsManager::instance().load();
-        r.temperature = ls.temperature;
-        r.messages << AiMessage::user(user);
-        if (agentSpec.supportsTools) {
-            r.wantTools = true;
-            r.tools = AiToolBridge::fromOpenAiSchemas(toolSchemas);
-        }
-        const AiReply rep = m_llm.chatSync(r);
-        if (!rep.ok) {
-            err = rep.error;
-            return {};
-        }
-        // Yerel sürümle aynı olsun diye araç çağrıları metin protokolüne çevrilir
-        if (rep.toolCalls.isEmpty()) return rep.text;
-        QString out = rep.text;
-        for (const AiToolCall& c : rep.toolCalls) {
-            out += QString("\n<tool_call>\n") +
-                   QString::fromUtf8(QJsonDocument(QJsonObject{{"name", c.name},
-                                                               {"arguments", c.args}})
-                                         .toJson(QJsonDocument::Compact)) +
-                   "\n</tool_call>";
-        }
-        return out;
-    };
+    AgentLlmAdapter adapter;
+    AgentLlmAdapter::Options aopt;
+    aopt.providerId = agentProvider;
+    aopt.model = model;
+    aopt.recordHealth = true;
+    aopt.recordUsage = true;
+    AppSettings ls = SettingsManager::instance().load();
+    aopt.temperature = ls.temperature;
+    adapter.setOptions(aopt);
+    adapter.setSecretStore(&m_secrets);
+    adapter.resolve();
+    auto llm = adapter.toFn(toolSchemas);
     auto progress = [this](const QString& msg) {
         m_view->append("<span style='color:#569cd6;font-family:Consolas,monospace'>" +
                        msg.toHtmlEscaped() + "</span>");
@@ -1185,7 +1217,10 @@ void AiPanel::runAgent(const QString& task) {
 
     AgentLoop::Result r = AgentLoop::run(tools, system, task, m_agentMaxSteps, llm,
                                          [this](const ToolCall& c) { return approveTool(c); },
-                                         progress, &ctx);
+                                         progress, &ctx,
+                                         [&adapter](const QString&, const QList<ToolCall>&) {
+                                             return adapter.lastMeta();
+                                         });
 
     // --- Stage 34: koşu günlüğü + zincir ilerlemesi ---
     if (m_runStore) {

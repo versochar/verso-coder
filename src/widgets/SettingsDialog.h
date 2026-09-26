@@ -58,6 +58,10 @@ private:
     void storeProviderForm();
     void onProviderTest();
     void onProviderFetchModels();
+    void onProviderBench();       // Stage 36: sağlayıcı karşılaştırma
+    void onHealthReset();         // Stage 36
+    void loadStage36();           // Stage 36: yönlendirme/kota/maliyet bölümü
+    void storeStage36();          // Stage 36
     QWidget* m_provPage = nullptr;
     QComboBox* m_provCombo = nullptr;
     QLineEdit* m_provUrl = nullptr;
@@ -66,6 +70,20 @@ private:
     QLabel* m_provHint = nullptr;
     QLabel* m_provStatus = nullptr;
     QCheckBox* m_provShowKey = nullptr;
+    // Stage 36
+    QCheckBox* m_routeEnabled = nullptr;
+    QCheckBox* m_routeFreeFirst = nullptr;
+    QComboBox* m_quickProv = nullptr;
+    QLineEdit* m_quickModel = nullptr;
+    QComboBox* m_strongProv = nullptr;
+    QLineEdit* m_strongModel = nullptr;
+    QComboBox* m_embedProv = nullptr;
+    QLineEdit* m_embedModel = nullptr;
+    QDoubleSpinBox* m_costGuard = nullptr;
+    QSpinBox* m_quotaCalls = nullptr;
+    QSpinBox* m_quotaTokens = nullptr;
+    QLabel* m_usageLabel = nullptr;
+    QLabel* m_healthLabel = nullptr;
     QSpinBox* m_threads;    // cpu threads
     QSpinBox* m_gpu;        // num_gpu
     QSlider* m_tempSlider;
