@@ -44,6 +44,14 @@ set(SOURCES
     src/core/HybridRanker.cpp
     src/core/ResponseScorer.cpp
     src/core/ConversationSummarizer.cpp
+    src/core/AgentPolicy.cpp
+    src/core/AgentBudget.cpp
+    src/core/AgentMemory.cpp
+    src/core/SkillRegistry.cpp
+    src/core/SkillChain.cpp
+    src/core/AgentReflection.cpp
+    src/core/ProjectHealth.cpp
+    src/core/AgentRunStore.cpp
     src/core/StartupArgs.cpp
     src/core/ToolchainProbe.cpp
     src/core/TaskRunner.cpp
@@ -200,6 +208,7 @@ set(SOURCES
     src/widgets/ClipboardDialog.cpp
     src/widgets/PromptLibraryDialog.cpp
     src/widgets/ModelArenaDialog.cpp
+    src/widgets/AgentPanelDialog.cpp
 )
 set(HEADERS
     src/MainWindow.h
@@ -230,6 +239,14 @@ set(HEADERS
     src/core/HybridRanker.h
     src/core/ResponseScorer.h
     src/core/ConversationSummarizer.h
+    src/core/AgentPolicy.h
+    src/core/AgentBudget.h
+    src/core/AgentMemory.h
+    src/core/SkillRegistry.h
+    src/core/SkillChain.h
+    src/core/AgentReflection.h
+    src/core/ProjectHealth.h
+    src/core/AgentRunStore.h
     src/core/StartupArgs.h
     src/core/ToolchainProbe.h
     src/core/TaskRunner.h
@@ -371,6 +388,7 @@ set(HEADERS
     src/widgets/SnippetDialog.h
     src/widgets/PromptLibraryDialog.h
     src/widgets/ModelArenaDialog.h
+    src/widgets/AgentPanelDialog.h
     src/widgets/NewFileDialog.h
     src/widgets/FirstRunDialog.h
     src/widgets/ShortcutDialog.h
@@ -575,6 +593,25 @@ add_executable(test_stage33
 target_include_directories(test_stage33 PRIVATE src)
 target_link_libraries(test_stage33 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
 add_test(NAME stage33 COMMAND test_stage33)
+
+# --- Stage 34: politika/bütçe/beceri/bellek/refleksiyon/otonomi ---
+add_executable(test_stage34
+    tests/test_stage34.cpp
+    src/core/AgentPolicy.cpp
+    src/core/AgentBudget.cpp
+    src/core/AgentMemory.cpp
+    src/core/SkillRegistry.cpp
+    src/core/SkillChain.cpp
+    src/core/AgentReflection.cpp
+    src/core/ProjectHealth.cpp
+    src/core/AgentRunStore.cpp
+    src/core/AgentTools.cpp
+    src/core/AgentLoop.cpp
+    src/core/PatchQueue.cpp
+)
+target_include_directories(test_stage34 PRIVATE src)
+target_link_libraries(test_stage34 PRIVATE Qt6::Core Qt6::Widgets)
+add_test(NAME stage34 COMMAND test_stage34)
 
 # QSS dosyalarını binary yanına kopyala
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD

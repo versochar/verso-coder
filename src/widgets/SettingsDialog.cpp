@@ -225,6 +225,42 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_summary->setValue(s.aiSummaryTokens);
     m_summary->setToolTip("Sohbet geçmişi bu token eşiğini aşınca eski turlar özetlenir (0 = kapalı)");
     af->addRow("Sohbet özeti eşiği:", m_summary);
+    // --- Stage 34: ajan otonomisi ---
+    m_agentAutonomous = new QCheckBox("Otonom ajan (varsayılan kapalı)", ai);
+    m_agentAutonomous->setChecked(s.agentAutonomous);
+    m_agentAutonomous->setToolTip(
+        "Açıkken ajan yalnızca okuma araçlarını kullanır ve rapor üretir; dosya değiştirmez.");
+    af->addRow("", m_agentAutonomous);
+    m_agentToolCalls = new QSpinBox(ai);
+    m_agentToolCalls->setRange(1, 200);
+    m_agentToolCalls->setValue(s.agentMaxToolCalls);
+    af->addRow("Ajan araç tavanı:", m_agentToolCalls);
+    m_agentWrites = new QSpinBox(ai);
+    m_agentWrites->setRange(0, 50);
+    m_agentWrites->setValue(s.agentMaxWrites);
+    m_agentWrites->setToolTip("Bir koşuda en fazla kaç dosya yazılabilir");
+    af->addRow("Ajan yazma tavanı:", m_agentWrites);
+    m_agentTokens = new QSpinBox(ai);
+    m_agentTokens->setRange(0, 5000000);
+    m_agentTokens->setSingleStep(1000);
+    m_agentTokens->setSpecialValueText("Sınırsız");
+    m_agentTokens->setValue(s.agentMaxTokens);
+    af->addRow("Ajan token tavanı:", m_agentTokens);
+    m_agentMinutes = new QSpinBox(ai);
+    m_agentMinutes->setRange(1, 240);
+    m_agentMinutes->setSuffix(" dk");
+    m_agentMinutes->setValue(s.agentMaxMinutes);
+    af->addRow("Ajan süre tavanı:", m_agentMinutes);
+    m_agentMemory = new QCheckBox("Ajan belleği (öğrenilen notlar)", ai);
+    m_agentMemory->setChecked(s.agentMemory);
+    af->addRow("", m_agentMemory);
+    m_agentSkills = new QCheckBox("Beceri zinciri", ai);
+    m_agentSkills->setChecked(s.agentSkills);
+    m_agentSkills->setToolTip("Hedefe uygun çok adımlı beceri planı üret");
+    af->addRow("", m_agentSkills);
+    m_agentTestCmd = new QLineEdit(s.agentTestCommand, ai);
+    m_agentTestCmd->setPlaceholderText("boş = otomatik (ctest / npm test / pytest …)");
+    af->addRow("Ajan test komutu:", m_agentTestCmd);
     af->addRow("GPU Backend:", m_backend);
     af->addRow("GPU Offload (num_gpu):", m_gpu);
     af->addRow("Temperature:", tempRow);
@@ -695,6 +731,15 @@ void SettingsDialog::saveAll() {    AppSettings cur = SettingsManager::instance(
     if (m_keepAlive) s.aiKeepAlive = m_keepAlive->value();
     if (m_parallel) s.aiParallel = m_parallel->value();
     if (m_summary) s.aiSummaryTokens = m_summary->value();
+    // Stage 34
+    if (m_agentAutonomous) s.agentAutonomous = m_agentAutonomous->isChecked();
+    if (m_agentToolCalls) s.agentMaxToolCalls = m_agentToolCalls->value();
+    if (m_agentWrites) s.agentMaxWrites = m_agentWrites->value();
+    if (m_agentTokens) s.agentMaxTokens = m_agentTokens->value();
+    if (m_agentMinutes) s.agentMaxMinutes = m_agentMinutes->value();
+    if (m_agentMemory) s.agentMemory = m_agentMemory->isChecked();
+    if (m_agentSkills) s.agentSkills = m_agentSkills->isChecked();
+    if (m_agentTestCmd) s.agentTestCommand = m_agentTestCmd->text().trimmed();
     s.gpuBackend = m_backend->currentText();
     s.gpuLayers = (s.gpuBackend == "CPU") ? 0 : m_gpu->value();
     s.temperature = m_tempSlider->value() / 100.0;

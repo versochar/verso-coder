@@ -1,5 +1,6 @@
 #include "AgentTools.h"
 #include "PatchQueue.h"
+#include "ProjectHealth.h"
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -7,6 +8,7 @@
 #include <QProcess>
 #include <QRegularExpression>
 #include <QTextStream>
+#include <algorithm>
 
 AgentTools::AgentTools(const QString& root) : m_root(root) {}
 
@@ -61,6 +63,30 @@ QJsonArray AgentTools::toolSchemas() const {
                       QJsonObject{{"command", QJsonObject{{"type", "string"}}}}, {"command"}));
     arr.append(schema("get_problems", "Editörün bildirdiği derleme/lint sorunlarını getir.",
                       QJsonObject{}, {}));
+    // --- Stage 34 araçları ---
+    arr.append(schema("read_range", "Dosyanın belirli satır aralığını oku (start/end dahil).",
+                      QJsonObject{{"path", QJsonObject{{"type", "string"}}},
+                                  {"start", QJsonObject{{"type", "integer"}}},
+                                  {"end", QJsonObject{{"type", "integer"}}}},
+                      {"path"}));
+    arr.append(schema("grep_lines", "Desen eşleşen satırları bağlam satırlarıyla getir.",
+                      QJsonObject{{"pattern", QJsonObject{{"type", "string"}}},
+                                  {"glob", QJsonObject{{"type", "string"}}},
+                                  {"context", QJsonObject{{"type", "integer"}}}},
+                      {"pattern"}));
+    arr.append(schema("find_symbol", "Sınıf/fonksiyon/sembol tanım ve kullanımlarını bul.",
+                      QJsonObject{{"name", QJsonObject{{"type", "string"}}}},
+                      {"name"}));
+    arr.append(schema("git_status", "Git çalışma ağacı durumunu oku.",
+                      QJsonObject{}, {}));
+    arr.append(schema("git_diff", "Çalışma ağacı ya da staged değişiklikleri oku.",
+                      QJsonObject{{"staged", QJsonObject{{"type", "boolean"}}}}, {}));
+    arr.append(schema("run_tests",
+                      QString("Proje test komutunu çalıştır") +
+                          (m_policy.toolAllowed("run_tests") ? " (onay ister)" : " (şu an kapalı)") + ".",
+                      QJsonObject{{"command", QJsonObject{{"type", "string"}}}}, {}));
+    arr.append(schema("health_scan", "Proje sağlık taraması çalıştır (skor + öneriler).",
+                      QJsonObject{}, {}));
     return arr;
 }
 
@@ -79,6 +105,18 @@ QString AgentTools::systemPromptAddendum() const {
     s += "- search {pattern, glob?}\n";
     s += "- run_command {command}  (onay ister" + QString(m_allowCommand ? "" : ", şu an kapalı") + ")\n";
     s += "- get_problems {}\n";
+    // --- Stage 34 araçları ---
+    s += "- read_range {path, start, end}\n";
+    s += "- grep_lines {pattern, glob?, context?}\n";
+    s += "- find_symbol {name}\n";
+    s += "- git_status {}   (yalnız okuma)\n";
+    s += "- git_diff {staged?}   (yalnız okuma)\n";
+    s += "- run_tests {command?}" +
+         QString(m_policy.toolAllowed("run_tests") ? "  (onay ister)\n" : "  (şu an kapalı)\n");
+    s += "- health_scan {}   (proje sağlık skoru)\n";
+    if (m_policy.autonomous)
+        s += "OTONOM MOD: yalnızca okuma araçlarını kullan; hiçbir dosyayı değiştirme, "
+             "komut çalıştırma; sonunda kısa bir rapor ver.\n";
     if (m_writeMode == Queue)
         s += "NOT: write_file çağrıları önce kullanıcı onay kuyruğuna alınır.\n";
     return s;
@@ -222,11 +260,57 @@ ToolResult AgentTools::search(const QString& pattern, const QString& glob, int m
     return r;
 }
 
-ToolResult AgentTools::runCommand(const QString& command, int timeoutMs) {
+QStringList AgentTools::blockedPatterns() {
+    // Stage 34 güvenlik: yıkıcı/uzak etkili komut kalıpları
+    return {
+        "rm -rf /", "rm -fr /", "mkfs", "dd if=", ":(){", "shutdown", "reboot", "halt",
+        "chown -R /", "chmod -R 777 /", "> /dev/sd", "git push", "git reset --hard",
+        "curl ", "wget ", "sudo ", "su -", "nc -l", "ssh ", "scp ", "systemctl ",
+        "kill -9 1", "insmod", "modprobe", "> /proc/", "truncate -s 0 /"};
+}
+
+bool AgentTools::isCommandBlocked(const QString& command, QString* why) {
+    const QString c = command.toLower();
+    for (const QString& pat : blockedPatterns())
+        if (c.contains(pat)) {
+            if (why) *why = QString("tehlikeli kalıp: \"%1\"").arg(pat);
+            return true;
+        }
+    return false;
+}
+
+QString AgentTools::guessTestCommand(const QString& root) {
+    const QString r = QDir(root).absolutePath();
+    if (QFile::exists(r + "/package.json")) return "npm test";
+    if (QFile::exists(r + "/pytest.ini") || QFile::exists(r + "/tests/test_" + QFileInfo(r).fileName() + ".py"))
+        return "python3 -m pytest -q";
+    if (QFile::exists(r + "/Makefile") || QFile::exists(r + "/CMakeLists.txt")) return "ctest --output-on-failure";
+    if (QFile::exists(r + "/Cargo.toml")) return "cargo test";
+    if (QFile::exists(r + "/go.mod")) return "go test ./...";
+    if (QFile::exists(r + "/pom.xml")) return "mvn -q test";
+    if (QFile::exists(r + "/build.gradle")) return "./gradlew test";
+    return {};
+}
+
+ToolResult AgentTools::runShell(const QString& command, int timeoutMs, const QString& label,
+                                bool needsApproval) {
     ToolResult r;
-    if (!m_allowCommand) { r.denied = true; r.output = "run_command devre dışı (ayarlardan/onaydan aç)."; return r; }
-    ToolCall c; c.name = "run_command"; c.args = QJsonObject{{"command", command}};
-    if (!approve(c)) { r.denied = true; r.output = "Kullanıcı komutu reddetti."; return r; }
+    QString why;
+    if (isCommandBlocked(command, &why)) {
+        r.denied = true;
+        r.output = "Güvenlik: komut engellendi (" + why + ")";
+        return r;
+    }
+    if (needsApproval) {
+        ToolCall c;
+        c.name = label;
+        c.args = QJsonObject{{"command", command}};
+        if (!approve(c)) {
+            r.denied = true;
+            r.output = "Kullanıcı komutu reddetti.";
+            return r;
+        }
+    }
     QProcess p;
     p.setWorkingDirectory(m_root);
     p.start("bash", {"-lc", command});
@@ -239,8 +323,113 @@ ToolResult AgentTools::runCommand(const QString& command, int timeoutMs) {
     QString err = QString::fromUtf8(p.readAllStandardError());
     r.ok = p.exitCode() == 0;
     r.output = QString("$ %1\n[exit %2]\n%3%4")
-                   .arg(command).arg(p.exitCode())
-                   .arg(out.left(12000), err.isEmpty() ? "" : "\n[stderr]\n" + err.left(4000));
+                   .arg(command)
+                   .arg(p.exitCode())
+                   .arg(out.left(12000),
+                        err.isEmpty() ? "" : "\n[stderr]\n" + err.left(4000));
+    return r;
+}
+
+ToolResult AgentTools::runCommand(const QString& command, int timeoutMs) {
+    if (!m_allowCommand) {
+        ToolResult r;
+        r.denied = true;
+        r.output = "run_command devre dışı (ayarlardan/onaydan aç).";
+        return r;
+    }
+    return runShell(command, timeoutMs, "run_command", true);
+}
+
+ToolResult AgentTools::runTests(const QString& command, int timeoutMs) {
+    // Politika + izin kapısı (otonom modda test koşmak serbest değildir)
+    if (!m_policy.toolAllowed("run_tests")) {
+        ToolResult r;
+        r.denied = true;
+        r.output = "Politika: test koşumu kapalı (ayarlardan açılır).";
+        return r;
+    }
+    QString cmd = command.trimmed();
+    if (cmd.isEmpty()) cmd = m_testCommand.trimmed();
+    if (cmd.isEmpty()) cmd = guessTestCommand(m_root);
+    if (cmd.isEmpty()) {
+        ToolResult r;
+        r.output = "HATA: test komutu bulunamadı; run_tests {command} ile ver.";
+        return r;
+    }
+    ToolResult r = runShell(cmd, timeoutMs, "run_tests", m_policy.needsApproval("run_tests"));
+    if (!r.ok && r.output.isEmpty()) r.output = "HATA: test komutu başarısız.";
+    return r;
+}
+
+ToolResult AgentTools::readRange(const QString& path, int startLine, int endLine) {
+    if (endLine < startLine) std::swap(startLine, endLine);
+    return readFile(path, startLine, qMax(0, endLine - startLine + 1));
+}
+
+ToolResult AgentTools::grepLines(const QString& pattern, const QString& glob, int context,
+                                 int maxHits) {
+    const ToolResult base = search(pattern, glob, maxHits);
+    if (!base.ok || context <= 0) return base;
+    // Bağlam satırlarını ekle (yalnız eşleşen dosyalarda)
+    QStringList out = base.output.split('\n');
+    QStringList rich;
+    for (const QString& line : out) {
+        const int c1 = line.indexOf(':');
+        if (c1 < 0) continue;
+        const int c2 = line.indexOf(':', c1 + 1);
+        if (c2 < 0) continue;
+        const QString file = line.left(c1);
+        const int ln = line.mid(c1 + 1, c2 - c1 - 1).toInt();
+        QFile f(absoluteInRoot(file));
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
+        const QStringList all = QString::fromUtf8(f.readAll()).split('\n');
+        for (int i = qMax(1, ln - context); i <= qMin(all.size(), ln + context); ++i) {
+            const QString mark = (i == ln) ? "»" : " ";
+            rich << QString("%1%2:%3: %4").arg(mark).arg(file).arg(i).arg(all[i - 1].left(160));
+        }
+    }
+    ToolResult r = base;
+    r.output = rich.isEmpty() ? base.output : rich.join('\n');
+    return r;
+}
+
+ToolResult AgentTools::findSymbol(const QString& name, int maxHits) {
+    ToolResult r;
+    const QString sym = name.trimmed();
+    if (sym.isEmpty()) { r.output = "HATA: sembol adı boş."; return r; }
+    const QRegularExpression rx(
+        QString("\\b(class|struct|enum( class)?|namespace|union|interface|def|fn|func|function|"
+                "void|int|bool|auto|double|float)\\s+%1\\b|\\b%1\\s*\\(|\\b%1\\s*::")
+            .arg(QRegularExpression::escape(sym)));
+    ToolResult s = search(rx.pattern(), QString(), maxHits);
+    if (!s.ok) return s;
+    r.ok = true;
+    r.output = s.output == "(eşleşme yok)" ? QString("(sembol bulunamadı: %1)").arg(sym) : s.output;
+    return r;
+}
+
+ToolResult AgentTools::gitStatus() {
+    if (!m_gitRepo) { ToolResult r; r.output = "(bu klasör git deposu değil)"; return r; }
+    return runShell("git status --porcelain=v1 -b", 15000, "git_status", false);
+}
+
+ToolResult AgentTools::gitDiff(bool staged, int maxChars) {
+    if (!m_gitRepo) { ToolResult r; r.output = "(bu klasör git deposu değil)"; return r; }
+    const QString cmd = staged ? "git diff --staged" : "git diff";
+    ToolResult r = runShell(cmd, 20000, "git_diff", false);
+    r.output = r.output.left(maxChars);
+    return r;
+}
+
+ToolResult AgentTools::healthScan() {
+    ToolResult r;
+    r.ok = true;
+    const ProjectHealth h = ProjectHealth::scan(m_root);
+    QString out = h.summary() + "\n";
+    out += QString("uzun dosya: %1 · dev dosya: %2").arg(h.longFiles).arg(h.hugeFiles);
+    if (h.maxFileLines > 0) out += QString("\nen uzun: %1 (%2 satır)").arg(h.maxFilePath).arg(h.maxFileLines);
+    for (const QString& n : h.notes) out += "\n- " + n;
+    r.output = out;
     return r;
 }
 
@@ -255,6 +444,18 @@ ToolResult AgentTools::getProblems() {
 ToolResult AgentTools::execute(const ToolCall& call) {
     const QString n = call.name;
     ToolResult r;
+    // Stage 34: politika kapısı — otonom modda yalnız salt-okunur araçlar çalışır.
+    // Bilinmeyen araç adları kapıya giremez; aşağıda "Bilinmeyen araç" olarak döner.
+    if (AgentPolicy::isReadOnlyTool(n) || AgentPolicy::isMutatingTool(n)) {
+        const bool allowed =
+            m_policy.autonomous ? m_policy.autonomousAllows(n) : m_policy.toolAllowed(n);
+        if (!allowed) {
+            r.denied = true;
+            r.output = "Politika bu aracı kapattı: " + n +
+                       (m_policy.autonomous ? " (otonom mod salt-okunur)" : " (izin yok)");
+            return r;
+        }
+    }
     if (n == "read_file")
         return readFile(call.args.value("path").toString(),
                         call.args.value("start").toInt(),
@@ -269,6 +470,28 @@ ToolResult AgentTools::execute(const ToolCall& call) {
         return runCommand(call.args.value("command").toString());
     if (n == "get_problems")
         return getProblems();
+    // --- Stage 34 araçları ---
+    if (n == "read_range") {
+        const QString p = call.args.value("path").toString();
+        const int st = call.args.value("start").toInt(1);
+        const int en = call.args.value("end").toInt(0);
+        return en <= 0 ? readFile(p, st, -1) : readRange(p, st, en);
+    }
+    if (n == "grep_lines")
+        return grepLines(call.args.value("pattern").toString(),
+                         call.args.value("glob").toString(), call.args.value("context").toInt(0),
+                         call.args.value("maxHits").toInt(60));
+    if (n == "find_symbol")
+        return findSymbol(call.args.value("name").toString(),
+                          call.args.value("maxHits").toInt(40));
+    if (n == "git_status")
+        return gitStatus();
+    if (n == "git_diff")
+        return gitDiff(call.args.value("staged").toBool(), call.args.value("maxChars").toInt(12000));
+    if (n == "run_tests")
+        return runTests(call.args.value("command").toString());
+    if (n == "health_scan")
+        return healthScan();
     r.output = "Bilinmeyen araç: " + n;
     return r;
 }

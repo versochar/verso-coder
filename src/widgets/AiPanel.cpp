@@ -1,6 +1,8 @@
 #include "AiPanel.h"
 #include "../core/EmbeddingClient.h"
+#include "../core/ProjectHealth.h"
 #include "../core/SettingsManager.h"
+#include "AgentPanelDialog.h"
 #include "ApplyEditDialog.h"
 #include "ModelArenaDialog.h"
 #include "PatchReviewDialog.h"
@@ -96,6 +98,11 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     aRow->addWidget(new QLabel("adım:", this));
     aRow->addWidget(m_agentSteps);
     aRow->addWidget(m_agentCmd);
+    // Stage 34: ajan paneli düğmesi
+    auto* bAgentPanel = new QPushButton("Panel", this);
+    bAgentPanel->setToolTip("Ajan paneli: politika, bütçe, beceri zinciri, bellek, koşu günlüğü");
+    connect(bAgentPanel, &QPushButton::clicked, this, &AiPanel::openAgentPanel);
+    aRow->addWidget(bAgentPanel);
     aRow->addStretch(1);
 
     m_ragLabel = new QLabel("indeks: yok", this);
@@ -362,6 +369,12 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     });
 
     m_chatStore = new ChatStore(chatDir());
+    // Stage 34: ajan belleği + koşu günlüğü
+    const QString agentDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                             + "/agent";
+    QDir().mkpath(agentDir);
+    m_agentMemory = new AgentMemory(agentDir + "/memory.json");
+    m_runStore = new AgentRunStore(agentDir + "/runs");
     reloadSettings();
     refreshHistory();
 }
@@ -884,7 +897,7 @@ void AiPanel::persistMessage(const QString& role, const QString& text) {
 
 // --- Stage 7: araç kullanan ajan ---
 bool AiPanel::approveTool(const ToolCall& c) {
-    if (c.name != "write_file" && c.name != "run_command") return true;
+    if (c.name != "write_file" && c.name != "run_command" && c.name != "run_tests") return true;
     QString detail;
     if (c.name == "write_file") {
         const QString path = c.args.value("path").toString();
@@ -955,6 +968,41 @@ void AiPanel::runAgent(const QString& task) {
     tools.setWriteMode(AgentTools::Queue);
     m_patchQueue.clear();
     tools.setPatchQueue(&m_patchQueue);
+    tools.setGitRepo(QFileInfo(root + "/.git").exists());
+    tools.setTestCommand(s.agentTestCommand.trimmed().isEmpty()
+                             ? AgentTools::guessTestCommand(root)
+                             : s.agentTestCommand.trimmed());
+
+    // --- Stage 34: politika + bütçe + bellek + beceri zinciri ---
+    AgentRunContext ctx;
+    ctx.goal = task;
+    ctx.memory = s.agentMemory ? m_agentMemory : nullptr;
+    if (s.agentAutonomous || m_forceAutonomous) {
+        ctx.policy = AgentPolicy::autonomousReadOnly(m_agentMaxSteps);
+        m_view->append("<i style='color:#cca700'>Otonom mod: yalnızca okuma araçları kullanılacak.</i>");
+    } else {
+        ctx.policy = AgentPolicy::safeDefault();
+        ctx.policy.allowWrite = true;  // yazma onay kuyruğuna
+        ctx.policy.allowCommand = m_agentCmd->isChecked();
+        ctx.policy.allowTests = s.agentTestCommand.trimmed().isEmpty() ||
+                                !AgentTools::guessTestCommand(root).isEmpty();
+        ctx.policy.maxSteps = m_agentMaxSteps;
+    }
+    ctx.budget.maxSteps = m_agentMaxSteps;
+    ctx.budget.maxToolCalls = s.agentMaxToolCalls;
+    ctx.budget.maxWrites = s.agentMaxWrites;
+    ctx.budget.maxTokens = s.agentMaxTokens;
+    ctx.budget.maxMs = qint64(s.agentMaxMinutes) * 60000LL;
+    if (s.agentSkills) {
+        m_chain = SkillChain::forGoal(task, SkillRegistry::all(), 4);
+        ctx.skillChainPrompt = m_chain.toPrompt(task);
+        if (!m_chain.isEmpty())
+            m_view->append("<i>Beceri zinciri: " + m_chain.skillNames().join(" → ") + "</i>");
+    } else {
+        m_chain.clear();
+        ctx.skillChainPrompt.clear();
+    }
+    m_view->append(QString("<i>Politika: %1 · %2</i>").arg(ctx.policy.summary(), ctx.budget.summary()));
 
     m_agentRunning = true;
     setBusy(true);
@@ -970,7 +1018,32 @@ void AiPanel::runAgent(const QString& task) {
     };
 
     AgentLoop::Result r = AgentLoop::run(tools, system, task, m_agentMaxSteps, llm,
-                                         [this](const ToolCall& c) { return approveTool(c); }, progress);
+                                         [this](const ToolCall& c) { return approveTool(c); },
+                                         progress, &ctx);
+
+    // --- Stage 34: koşu günlüğü + zincir ilerlemesi ---
+    if (m_runStore) {
+        AgentRun run;
+        run.task = task;
+        run.elapsedMs = r.budget.elapsedMs();
+        run.tokens = r.budget.tokens;
+        run.ok = r.ok;
+        run.finalText = r.finalText;
+        run.toolCalls = r.toolCalls;
+        run.changedFiles = r.changedFiles;
+        for (const AgentStep& st : r.steps) {
+            AgentRunStep rs;
+            rs.assistant = st.assistant.left(2000);
+            for (const ToolCall& c : st.calls) rs.toolNames << c.name;
+            rs.observations = st.observations;
+            run.stepLog << rs;
+        }
+        m_runStore->add(run);
+    }
+    if (!m_chain.isEmpty()) {
+        m_chain.completeCurrent(r.ok ? "tamam" : "kısmi");
+    }
+    m_view->append("<i>" + AgentLoop::summarizeRun(r).toHtmlEscaped().replace("\n", "<br>") + "</i>");
 
     if (!r.finalText.isEmpty()) {
         m_lastResponse = r.finalText;
@@ -1143,6 +1216,47 @@ void AiPanel::sendArena() {
                                    currentOptions(), this);
     d->setAttribute(Qt::WA_DeleteOnClose);
     d->show();
+}
+
+void AiPanel::openAgentPanel() {
+    QString root;
+    emit projectRootRequested(root);
+    auto* d = new AgentPanelDialog(root, this);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    d->show();
+}
+
+// Stage 34: otonom ama SALT-OKUNUR proje denetimi (varsayılan ayar gerektirmez,
+// çünkü hiçbir şeyi değiştiremez).
+void AiPanel::runAutonomousAudit() {
+    if (m_agentRunning) return;
+    QString root;
+    emit projectRootRequested(root);
+    if (root.isEmpty()) {
+        m_view->append("<i>Denetim için önce bir proje klasörü aç.</i>");
+        return;
+    }
+    const ProjectHealth h = ProjectHealth::scan(root);
+    const auto ans = QMessageBox::question(
+        this, "Otonom denetim",
+        QString("Salt-okunur proje denetimi yapılacak.\n\n"
+                "Mevcut ölçüm: %1\n\n"
+                "Ajan yalnızca okuma araçlarını kullanır; hiçbir dosya değişmez, "
+                "komut çalıştırmaz. Devam edilsin mi?")
+            .arg(h.summary()),
+        QMessageBox::Yes | QMessageBox::Cancel);
+    if (ans != QMessageBox::Yes) return;
+
+    const QString task =
+        QString("Projeyi salt-okunur olarak denetle ve kısa bir rapor yaz. Şunlara bak: "
+                "1) health_scan ile sağlık skorunu ve önerileri al. "
+                "2) git_status ve git_diff ile çalışma ağacındaki değişiklikleri incele. "
+                "3) En büyük 3 riski önem sırasıyla yaz. "
+                "Hiçbir dosyayı değiştirme, komut çalıştırma.");
+    m_input->setText("Projeyi denetle");
+    m_forceAutonomous = true;
+    runAgent(task);
+    m_forceAutonomous = false;
 }
 
 void AiPanel::fixProblem(const QString& path, int line, const QString& message, const QString& code) {

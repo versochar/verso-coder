@@ -1,5 +1,7 @@
 #pragma once
 #include "../core/AgentLoop.h"
+#include "../core/AgentMemory.h"
+#include "../core/AgentRunStore.h"
 #include "../core/AgentTools.h"
 #include "../core/ChatStore.h"
 #include "../core/ContextResolver.h"
@@ -9,6 +11,7 @@
 #include "../core/OllamaClient.h"
 #include "../core/PatchQueue.h"
 #include "../core/RagIndexer.h"
+#include "../core/SkillChain.h"
 #include "../core/TokenStats.h"
 #include <QComboBox>
 #include <QFutureWatcher>
@@ -66,6 +69,8 @@ public:
     void clearImages();
     void sendArena();      // çok-modelli arena
     void showBranches();   // sohbet dallanma ağacı
+    void openAgentPanel(); // Stage 34: ajan paneli (bütçe/beceri/bellek/günlük)
+    void runAutonomousAudit(); // Stage 34: otonom salt-okunur proje denetimi
 
 private slots:
     void stop();
@@ -157,4 +162,9 @@ private:
     QHash<QString, ModelCapabilities> m_caps;   // model yetenek önbelleği
     QString m_convSummary;                       // yerel sohbet özeti
     QString m_activeBranch;                      // seçili dal yaprağı
+    // --- Stage 34 durum ---
+    AgentMemory* m_agentMemory = nullptr;
+    AgentRunStore* m_runStore = nullptr;
+    SkillChain m_chain;
+    bool m_forceAutonomous = false; // Stage 34: tek seferlik otonom denetim
 };

@@ -73,6 +73,15 @@ AppSettings SettingsManager::load() const {
     s.aiKeepAlive       = q.value("ai/keepAlive", 5).toInt();
     s.aiParallel        = qBound(1, q.value("ai/parallel", 1).toInt(), 8);
     s.aiSummaryTokens   = qMax(0, q.value("ai/summaryTokens", 2200).toInt());
+    // Stage 34
+    s.agentAutonomous   = q.value("agent/autonomous", false).toBool();
+    s.agentMaxToolCalls = qMax(1, q.value("agent/maxToolCalls", 20).toInt());
+    s.agentMaxWrites    = qMax(0, q.value("agent/maxWrites", 3).toInt());
+    s.agentMaxTokens    = qMax(0, q.value("agent/maxTokens", 0).toInt());
+    s.agentMaxMinutes   = qMax(1, q.value("agent/maxMinutes", 10).toInt());
+    s.agentMemory       = q.value("agent/memory", true).toBool();
+    s.agentSkills       = q.value("agent/skills", true).toBool();
+    s.agentTestCommand  = q.value("agent/testCommand", "").toString();
     // Stage 9: görünüm
     s.accentColor    = q.value("ui/accent", "").toString();
     s.uiFontFamily   = q.value("ui/fontFamily", "").toString();
@@ -221,6 +230,15 @@ void SettingsManager::save(const AppSettings& s) const {
     q.setValue("ai/keepAlive", s.aiKeepAlive);
     q.setValue("ai/parallel", s.aiParallel);
     q.setValue("ai/summaryTokens", s.aiSummaryTokens);
+    // Stage 34
+    q.setValue("agent/autonomous", s.agentAutonomous);
+    q.setValue("agent/maxToolCalls", s.agentMaxToolCalls);
+    q.setValue("agent/maxWrites", s.agentMaxWrites);
+    q.setValue("agent/maxTokens", s.agentMaxTokens);
+    q.setValue("agent/maxMinutes", s.agentMaxMinutes);
+    q.setValue("agent/memory", s.agentMemory);
+    q.setValue("agent/skills", s.agentSkills);
+    q.setValue("agent/testCommand", s.agentTestCommand);
     q.setValue("editor/autoReload", s.autoReload);
     q.setValue("app/crashReport", s.crashReport);
     m_cache = s;          // Stage 32: kaydedileni önbellekle (yeniden okuma yok)

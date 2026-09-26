@@ -68,6 +68,8 @@ inline QList<UiCommand> defaultCommands() {
         {"task.chain", "Görev Zincirini Çalıştır", ""},
         {"remote.reconnect", "Uzak Bağlantıya Dön", ""},
         {"ai.searchChats", "Sohbetlerde Ara", ""},
+        {"ai.agentPanel", "Ajan Paneli", ""},
+        {"ai.autonomousAudit", "Projeyi Otonom Denetle (salt-okunur)", ""},
         {"file.save", "Kaydet", "Ctrl+S"},
         {"file.saveAll", "Tümünü Kaydet", "Ctrl+Shift+S"},
         {"nav.quickOpen", "Hızlı Aç", "Ctrl+P"},

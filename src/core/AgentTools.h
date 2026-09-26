@@ -1,4 +1,5 @@
 #pragma once
+#include "AgentPolicy.h"
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QStringList>
@@ -37,6 +38,15 @@ public:
     void setPatchQueue(PatchQueue* q) { m_queue = q; }
     void setAllowCommand(bool on) { m_allowCommand = on; }
     bool allowCommand() const { return m_allowCommand; }
+    // Stage 34: politika kapısı (araç izni + otonom kısıtı)
+    void setPolicy(const AgentPolicy& p) { m_policy = p; }
+    const AgentPolicy& policy() const { return m_policy; }
+    // Stage 34: test komutu (otomatik algılanır, onay + politika gerekir)
+    void setTestCommand(const QString& cmd) { m_testCommand = cmd; }
+    QString testCommand() const { return m_testCommand; }
+    // Git deposu mu? (git_* araçlarında kullanılır)
+    void setGitRepo(bool on) { m_gitRepo = on; }
+    bool gitRepo() const { return m_gitRepo; }
 
     // Model yanıtından araç çağrılarını ayrıştır:
     //   <tool_call>{"name":"read_file","arguments":{"path":"..."}}</tool_call>
@@ -58,12 +68,30 @@ public:
     ToolResult runCommand(const QString& command, int timeoutMs = 20000);
     ToolResult getProblems();
 
+    // --- Stage 34: yeni araçlar (salt-okunur ya da onay + politika kapılı) ---
+    ToolResult readRange(const QString& path, int startLine, int endLine);
+    ToolResult grepLines(const QString& pattern, const QString& glob = QString(), int context = 0,
+                         int maxHits = 60);
+    ToolResult findSymbol(const QString& name, int maxHits = 40);
+    ToolResult gitStatus();
+    ToolResult gitDiff(bool staged = false, int maxChars = 12000);
+    ToolResult runTests(const QString& command = QString(), int timeoutMs = 120000);
+    ToolResult healthScan();
+
+    // Tehlikeli kabuk kalıpları (Stage 34 güvenlik): komut reddedilir.
+    static bool isCommandBlocked(const QString& command, QString* why = nullptr);
+    static QStringList blockedPatterns();
+    // Test komutunu köke göre otomatik tahmin et.
+    static QString guessTestCommand(const QString& root);
+
     // kök dışına çıkan yolları reddet
     bool isInsideRoot(const QString& absPath) const;
     QString absoluteInRoot(const QString& rel) const;
 
 private:
     bool approve(const ToolCall& c);
+    ToolResult runShell(const QString& command, int timeoutMs, const QString& label,
+                        bool needsApproval);
 
     QString m_root;
     Approver m_approver;
@@ -71,4 +99,8 @@ private:
     WriteMode m_writeMode = Direct;
     PatchQueue* m_queue = nullptr;
     bool m_allowCommand = false;
+    // Stage 34
+    AgentPolicy m_policy;
+    QString m_testCommand;
+    bool m_gitRepo = false;
 };

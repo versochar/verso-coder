@@ -42,6 +42,15 @@ private:
     QSpinBox* m_keepAlive = nullptr;
     QSpinBox* m_parallel = nullptr;
     QSpinBox* m_summary = nullptr;
+    // Stage 34: ajan otonomisi
+    QCheckBox* m_agentAutonomous = nullptr;
+    QSpinBox* m_agentToolCalls = nullptr;
+    QSpinBox* m_agentWrites = nullptr;
+    QSpinBox* m_agentTokens = nullptr;
+    QSpinBox* m_agentMinutes = nullptr;
+    QCheckBox* m_agentMemory = nullptr;
+    QCheckBox* m_agentSkills = nullptr;
+    QLineEdit* m_agentTestCmd = nullptr;
     QSpinBox* m_threads;    // cpu threads
     QSpinBox* m_gpu;        // num_gpu
     QSlider* m_tempSlider;

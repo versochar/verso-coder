@@ -430,6 +430,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     mkAct("ai.commit", "AI Commit Mesajı", [this]() { commitMessageAi(); });
     mkAct("ai.explain", "Sembolü Açıkla", [this]() { explainSymbol(); });
     mkAct("ai.prompts", "İstem Kitaplığı", [this]() { promptLibrary(); });
+    // Stage 34: ajan paneli + otonom denetim
+    mkAct("ai.agentPanel", "Ajan Paneli", [this]() { runCommand("ai.agentPanel"); });
+    mkAct("ai.autonomousAudit", "Projeyi Otonom Denetle", [this]() { runCommand("ai.autonomousAudit"); });
     mkAct("ai.applyLast", "Son AI Kodunu Uygula", [this]() { applyLastAi(); });
     mkAct("ai.pullModel", "Ollama Modeli İndir", [this]() { pullModel(); });
     mkAct("ai.startServer", "Ollama Sunucusunu Başlat", [this]() { runCommand("ai.startServer"); });
@@ -539,6 +542,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     aiMenu->addAction(m_actions["ai.commit"]);
     aiMenu->addAction(m_actions["ai.explain"]);
     aiMenu->addAction(m_actions["ai.prompts"]);
+    aiMenu->addAction(m_actions["ai.agentPanel"]);
+    aiMenu->addAction(m_actions["ai.autonomousAudit"]);
     aiMenu->addAction(m_actions["ai.applyLast"]);
     aiMenu->addAction(m_actions["ai.pullModel"]);
     // Stage 16: uzak menüsü
@@ -1969,6 +1974,8 @@ void MainWindow::runCommand(const QString& id) {
     else if (id == "task.chain") runTaskChain();
     else if (id == "remote.reconnect") remoteReconnect();
     else if (id == "ai.searchChats") searchAiChats();
+    else if (id == "ai.agentPanel") { if (m_ai) m_ai->openAgentPanel(); }
+    else if (id == "ai.autonomousAudit") { if (m_ai) m_ai->runAutonomousAudit(); }
     else if (id == "workspace.trust") {
         QSettings q("Verso", "VersoCoder");
         q.remove("trust/roots");

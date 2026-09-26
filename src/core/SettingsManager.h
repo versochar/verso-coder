@@ -119,6 +119,15 @@ struct AppSettings {
     int     aiKeepAlive = 5;              // Ollama keep_alive (dk; -1 süresiz, 0 hemen)
     int     aiParallel = 1;               // eşzamanlı istek
     int     aiSummaryTokens = 2200;       // sohbet özeti eşiği (token, 0=kapalı)
+    // --- Stage 34: ajan otonomisi ---
+    bool    agentAutonomous = false;      // otonom ajan (VARSAYILAN KAPALI)
+    int     agentMaxToolCalls = 20;       // koşu başına araç çağrısı tavanı
+    int     agentMaxWrites = 3;           // koşu başına dosya yazma tavanı
+    int     agentMaxTokens = 0;           // 0 = sınırsız
+    int     agentMaxMinutes = 10;         // koşu süre tavanı
+    bool    agentMemory = true;           // ajan belleği (öğrenilen notlar)
+    bool    agentSkills = true;           // beceri zinciri
+    QString agentTestCommand = "";        // boş = otomatik tahmin
 };
 
 class SettingsManager {
