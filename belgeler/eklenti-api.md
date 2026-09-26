@@ -1,0 +1,50 @@
+# Verso Coder — Eklenti API v2 Kılavuzu
+
+Eklentiler, eklenti klasöründeki (`Dosya → Eklentiler Klasörünü Aç`) `.js`
+dosyalarıdır. Her dosya bir eklentidir; QJSEngine ile çalışır.
+
+## Başlık manifesti
+
+```js
+// @name Selam Durumu
+// @version 1.0.0
+// @description Ne yaptığı (isteğe bağlı)
+// @permission ui, fs.write
+```
+
+İzinler: `fs.read`, `fs.write`, `events`, `ui`, `net` (`fetch` için). İzinsiz çağrı engellenir ve
+Teşhis → Eklentiler sekmesine düşer. İzinler yönetici diyaloğundan
+kısıtlanabilir (`plugin/perms/<id>` geçersiz kılma).
+
+## `verso` nesnesi
+
+| Çağrı | İzin | Açıklama |
+|---|---|---|
+| `log(mesaj)` | — | Günlük + durum çubuğu |
+| `registerCommand(id, başlık, fn)` | — | `plugin.<eklenti>.<id>` komutu (`callCommand(arg)` ile tetiklenir) |
+| `readFile(yol)` / `writeFile(yol, metin)` | `fs.read` / `fs.write` | Dosya erişimi |
+| `onEvent(ad, fn)` | `events` | `save`, `open`, `startup`, `language` (arg: yol) |
+| `showStatus(metin, ms)` | `ui` | Durum çubuğu (ms sonra temizlenir) |
+| `quickPick(jsonDizi, ipucu)` | `ui` | Listeden seç (dizi JSON ya da satırlı metin) |
+| `inputBox(soru, varsayılan)` | `ui` | Metin sor |
+| `sendTerminal(metin)` | `ui` | Terminal kabuğuna gönder |
+| `fetch(url, ms)` | `net` | HTTP GET (eşzamanlı, en çok 1 MB) |
+| `reportProblems(json)` | `ui` | `[{file, line, message}]` → Sorunlar paneli |
+| `registerView(id, başlık, fn)` | `ui` | `fn()` HTML döndürür, paletten açılır |
+| `registerTheme(ad, json)` | `ui` | Tema JSON'u içe aktarılır |
+| `registerKeybinding(komutId, tuş)` | `ui` | Çakışmasızsa atanır |
+| `execCommand(komutId)` | `ui` | Editör komutunu çalıştır |
+| `get/setGlobalState(k, v)` | — | Eklentiye özel kalıcı alan |
+| `get/setWorkspaceState(k, v)` | — | Proje başına alan |
+| `get/setConfig(k, v)` | — | Yönetici diyaloğundan düzenlenebilir ayar |
+
+## Güvenlik
+
+- İlk yüklemede dosya mühürlenir (sha256); değişirse uyarı verilir.
+- Hata yapan eklenti 3 hatada **karantinaya** alınır (yönetciden kaldırılır).
+- Güvenilmez çalışma alanında eklentiler hiç yüklenmez.
+
+## Örnekler
+
+`resources/plugins/`: `echo.js` (v1), `selam.js` (durum + giriş + sayaç),
+`notal.js` (quickPick + dosya + görünüm). İlk açılışta klasöre kopyalanırlar.

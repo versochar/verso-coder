@@ -1,8 +1,14 @@
 #include "OllamaClient.h"
+#include <QDir>
+#include <QElapsedTimer>
 #include <QEventLoop>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkRequest>
+#include <QProcess>
+#include <QStandardPaths>
+#include <QThread>
 #include <QTimer>
 
 OllamaClient::OllamaClient(QObject* parent) : QObject(parent) {}
@@ -12,9 +18,19 @@ void OllamaClient::setHost(const QString& host) {
     while (m_host.endsWith('/')) m_host.chop(1);
 }
 
+void OllamaClient::armTimeout(QNetworkReply* r, int ms) {
+    QTimer* t = new QTimer(r);
+    t->setSingleShot(true);
+    QObject::connect(t, &QTimer::timeout, r, [r]() {
+        if (r->isRunning()) r->abort();
+    });
+    t->start(qMax(1000, ms));
+}
+
 void OllamaClient::fetchModels() {
     QNetworkRequest req(QUrl(m_host + "/api/tags"));
     QNetworkReply* r = m_net.get(req);
+    armTimeout(r, 15000); // Stage 31: asılı listeleme yok
     connect(r, &QNetworkReply::finished, this, [this, r]() {
         r->deleteLater();
         if (r->error() != QNetworkReply::NoError) {
@@ -48,6 +64,7 @@ void OllamaClient::chat(const QString& model, const QString& systemPrompt,
     QNetworkRequest req(QUrl(m_host + "/api/chat"));
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     QNetworkReply* r = m_net.post(req, chatPayload(model, systemPrompt, userText, options, false));
+    armTimeout(r, 180000); // Stage 31: akışsız sohbette 3 dk tavan
     connect(r, &QNetworkReply::finished, this, [this, r]() {
         r->deleteLater();
         if (r->error() != QNetworkReply::NoError) {
@@ -202,4 +219,49 @@ void OllamaClient::cancelPull() {
         m_pull->deleteLater();
         m_pull = nullptr;
     }
+}
+
+// Uygulama içinden "Ollama'yı Başlat": ikili dosya bulma + yoklama + başlatma
+QString OllamaClient::findServerBinary() {
+    QString p = QStandardPaths::findExecutable("ollama");
+    if (!p.isEmpty()) return p;
+    const QStringList extra = {QDir::homePath() + "/.local/bin/ollama",
+                               "/usr/local/bin/ollama"};
+    for (const QString& c : extra)
+        if (QFileInfo(c).isExecutable()) return c;
+    return {};
+}
+
+bool OllamaClient::isServerUp(const QString& host, int timeoutMs) {
+    QNetworkAccessManager net;
+    QEventLoop loop;
+    QTimer timer;
+    timer.setSingleShot(true);
+    QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    bool ok = false;
+    QNetworkReply* r = net.get(QNetworkRequest(QUrl(host + "/api/tags")));
+    QObject::connect(r, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    timer.start(qMax(500, timeoutMs));
+    loop.exec();
+    if (r->error() == QNetworkReply::NoError) {
+        const QJsonDocument d = QJsonDocument::fromJson(r->readAll());
+        ok = d.isObject();
+    }
+    r->deleteLater();
+    return ok;
+}
+
+bool OllamaClient::ensureServer(const QString& host, int timeoutMs) {
+    if (isServerUp(host, 2000)) return true;
+    const QString bin = findServerBinary();
+    if (bin.isEmpty()) return false;
+    // Uygulamadan bağımsız yaşasın (kapatınca sönmesin)
+    if (!QProcess::startDetached(bin, {"serve"})) return false;
+    QElapsedTimer t;
+    t.start();
+    while (t.elapsed() < timeoutMs) {
+        QThread::msleep(500);
+        if (isServerUp(host, 1500)) return true;
+    }
+    return isServerUp(host, 2000);
 }

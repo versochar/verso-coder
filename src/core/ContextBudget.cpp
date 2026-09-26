@@ -15,3 +15,13 @@ QString ContextBudget::trim(const QString& text, int maxTokens) {
     const int tail = maxChars - head;
     return text.left(head) + "\n\n[...kırpıldı: bağlam bütçesi...]\n\n" + text.right(tail);
 }
+
+bool ContextBudget::exceeds(const QString& text, int maxTokens) {
+    return estimate(text) > maxTokens;
+}
+
+QString ContextBudget::warnText(const QString& text, int maxTokens) {
+    return QString("Bağlam bütçesi aşıldı (~%1 token > %2): gönderi kırpıldı.")
+        .arg(estimate(text))
+        .arg(maxTokens);
+}

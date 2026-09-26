@@ -5,7 +5,9 @@
 #include <QStringList>
 
 class QGridLayout;
+class QHBoxLayout;
 class QLabel;
+class QComboBox;
 
 // Stage 9: tema kartı — paleti minyatür editör önizlemesi olarak çizer.
 class ThemeCard : public QWidget {
@@ -41,9 +43,15 @@ signals:
 
 private:
     void buildCards();
+    // Stage 21: son özel vurgu renkleri
+    static QStringList recentAccents();
+    void pushRecentAccent(const QColor& c);
+    void rebuildRecentAccents();
     QString m_current;
     QColor m_accent;
     QGridLayout* m_grid = nullptr;
     QLabel* m_accentLabel = nullptr;
+    QHBoxLayout* m_recentRow = nullptr;
+    QComboBox* m_cvdPreview = nullptr; // Stage 23: renk körü önizleme
     QList<ThemeCard*> m_cards;
 };

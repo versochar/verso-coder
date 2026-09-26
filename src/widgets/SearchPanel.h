@@ -9,6 +9,8 @@ class QTreeWidget;
 class QTextEdit;
 class QPushButton;
 class QLabel;
+class QCompleter;
+class QStringListModel;
 
 struct SearchHit {
     QString file;
@@ -33,6 +35,10 @@ public:
     // Dosyadan ±radius satır bağlam (önizleme bölmesi için).
     static QString contextSnippet(const QString& file, int line, int radius = 3);
     void focusExclude(); // Stage 17: hariç kutusuna odaklan
+    // Stage 21: arama geçmişi (kalıcı, en çok 10)
+    static QStringList searchHistory();
+    void pushHistory(const QString& q);
+    void openInEditor(); // Stage 30: kalıcı sonuç listesi (komut paleti)
 
 signals:
     void fileOpened(const QString& path, int line);
@@ -42,6 +48,7 @@ private slots:
     void onSearchDone();
     void replaceAll();
     void replaceFileSelected(); // Stage 17: seçili dosyada önizlemeli uygula
+    void highlightPreview();    // Stage 21: önizlemede sorgu vurgusu
 
 private:
     static QList<SearchHit> searchInFile(const QString& file, const QString& query,
@@ -62,6 +69,7 @@ private:
     QPushButton* m_btnReplaceAll;
     QPushButton* m_btnReplaceFile; // Stage 17
     QLabel* m_status;
+    QCompleter* m_completer = nullptr; // Stage 21: geçmiş tamamlama
     QList<SearchHit> m_hits;
     QFutureWatcher<QList<SearchHit>> m_watcher;
 };

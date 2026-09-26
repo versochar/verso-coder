@@ -14,6 +14,7 @@ public:
 
 signals:
     void chosen(const CompletionItem& item);
+    void highlighted(const CompletionItem& item); // Stage 27: dokümantasyon için
     void cancelled();
 
 protected:

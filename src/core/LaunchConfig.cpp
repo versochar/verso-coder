@@ -1,6 +1,7 @@
 #include "LaunchConfig.h"
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -66,12 +67,46 @@ bool LaunchConfig::save(const QString& root) const {
 }
 
 QString LaunchConfig::resolvedProgram(const QString& root) const {
-    if (QDir::isAbsolutePath(program)) return program;
-    return QDir(root).absoluteFilePath(program);
+    const QString p = expandVars(program, root);
+    if (QDir::isAbsolutePath(p)) return p;
+    return QDir(root).absoluteFilePath(p);
 }
 
 QString LaunchConfig::resolvedCwd(const QString& root) const {
-    if (!cwd.isEmpty())
-        return QDir::isAbsolutePath(cwd) ? cwd : QDir(root).absoluteFilePath(cwd);
-    return root;
+    if (cwd.isEmpty()) return root;
+    const QString c = expandVars(cwd, root);
+    return QDir::isAbsolutePath(c) ? c : QDir(root).absoluteFilePath(c);
+}
+
+QStringList LaunchConfig::resolvedArgs(const QString& root, const QString& file) const {
+    QStringList out;
+    for (const QString& a : args) out << expandVars(a, root, file);
+    return out;
+}
+
+QString LaunchConfig::expandVars(const QString& text, const QString& root,
+                                 const QString& file) {
+    QString out = text;
+    out.replace("${workspaceFolder}", root);
+    out.replace("${file}", file);
+    out.replace("${fileBasename}", QFileInfo(file).fileName());
+    out.replace("${fileDirname}", QFileInfo(file).absolutePath());
+    out.replace("${pathSeparator}", QDir::separator());
+    return out;
+}
+
+QStringList LaunchConfig::knownKeys() {
+    return {"program", "args", "cwd", "preBuild", "stopAtEntry"};
+}
+
+QStringList LaunchConfig::unknownKeys(const QString& root) {
+    QString path = configPath(root);
+    if (!QFile::exists(path)) path = legacyPath(root);
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return {};
+    const QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
+    QStringList out;
+    for (const QString& k : o.keys())
+        if (!knownKeys().contains(k)) out << k;
+    return out;
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include <QDialog>
+#include <QMap>
 #include <QStringList>
 
 class QLabel;
@@ -26,6 +27,9 @@ public:
     // Son kullanılan komutlar (QSettings'ta kalıcı, en fazla 8)
     static QStringList recents();
     static void pushRecent(const QString& id);
+    // Stage 30: kullanım sayaçları (sık kullanılanlar)
+    static QMap<QString, int> uses();
+    static void recordUse(const QString& id);
 
 private slots:
     void refilter();

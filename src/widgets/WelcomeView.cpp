@@ -1,13 +1,39 @@
 #include "WelcomeView.h"
 #include "../core/IconTheme.h"
 #include "../core/ThemeManager.h"
+#include <QEvent>
+#include <QDir>
 #include <QFileInfo>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPainter>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QVBoxLayout>
+
+// Stage 20: sağdan "…" ile kısalan etiket (uzun alt yazılar kartı germesin)
+class ElideLabel : public QLabel {
+public:
+    using QLabel::QLabel;
+
+protected:
+    void paintEvent(QPaintEvent* ev) override {
+        Q_UNUSED(ev);
+        QPainter p(this);
+        p.setFont(font());
+        p.setPen(palette().color(foregroundRole()));
+        const QString t = fontMetrics().elidedText(text(), Qt::ElideRight, width());
+        p.drawText(rect(), int(alignment() | Qt::TextSingleLine), t);
+    }
+    QSize sizeHint() const override {
+        const int full = fontMetrics().horizontalAdvance(text());
+        return {qMin(full + 2, 220), fontMetrics().height() + 2};
+    }
+    QSize minimumSizeHint() const override {
+        return {60, fontMetrics().height() + 2};
+    }
+};
 
 WelcomeView::WelcomeView(QWidget* parent) : QWidget(parent) {
     auto* outer = new QVBoxLayout(this);
@@ -32,6 +58,7 @@ WelcomeView::WelcomeView(QWidget* parent) : QWidget(parent) {
     lay->addSpacing(10);
 
     lay->addWidget(buildQuickActions(), 0, Qt::AlignHCenter);
+    lay->addWidget(buildProjects(), 0, Qt::AlignHCenter); // Stage 28
     lay->addWidget(buildRecents(), 0, Qt::AlignHCenter);
     lay->addWidget(buildShortcuts(), 0, Qt::AlignHCenter);
     lay->addWidget(buildDemoMode(), 0, Qt::AlignHCenter);
@@ -74,14 +101,18 @@ QWidget* WelcomeView::buildQuickActions() {
         ic->setPixmap(IconTheme::pixmap(a.icon, ThemeManager::instance().tokens().text, 18));
         auto* t1 = new QLabel(a.title, b);
         t1->setObjectName("welcomeActionTitle");
-        auto* t2 = new QLabel(a.sub, b);
+        auto* t2 = new ElideLabel(a.sub, b);
         t2->setObjectName("welcomeActionSub");
+        t2->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         row->addWidget(ic);
         row->addWidget(t1);
         row->addStretch(1);
         row->addWidget(t2);
         const QString cmd = a.cmd;
         connect(b, &QPushButton::clicked, this, [this, cmd]() { emit commandRequested(cmd); });
+        // Stage 20: hover'da yazı renklerini sabitle (QSS :hover alt etikete
+        // her temada ulaşamayabilir → kod garantisi)
+        b->installEventFilter(this);
         // QPushButton boyut ipucunu iç düzenden almaz → içeriğe göre sabitle
         b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         b->setMinimumSize(row->totalSizeHint());
@@ -101,6 +132,84 @@ QWidget* WelcomeView::buildRecents() {
     m_recentsTitle->setObjectName("welcomeSection");
     m_recentsHost->addWidget(m_recentsTitle);
     return card;
+}
+
+bool WelcomeView::eventFilter(QObject* o, QEvent* e) {
+    if (auto* b = qobject_cast<QPushButton*>(o)) {
+        if (e->type() == QEvent::Enter || e->type() == QEvent::Leave) {
+            const ThemeTokens tk = ThemeManager::instance().tokens();
+            const bool enter = e->type() == QEvent::Enter;
+            for (QLabel* l : b->findChildren<QLabel*>()) {
+                if (l->objectName() == "welcomeActionTitle")
+                    l->setStyleSheet(enter ? QString("color: %1;").arg(tk.textStrong.name())
+                                           : QString());
+                else if (l->objectName() == "welcomeActionSub")
+                    l->setStyleSheet(enter ? QString("color: %1;").arg(tk.textDim.name())
+                                           : QString());
+            }
+        }
+    }
+    return QWidget::eventFilter(o, e);
+}
+
+// Stage 28: son projeler kartı
+QWidget* WelcomeView::buildProjects() {
+    auto* card = new QFrame(this);
+    card->setObjectName("welcomeCard");
+    auto* lay = new QVBoxLayout(card);
+    lay->setContentsMargins(24, 18, 24, 18);
+    lay->setSpacing(6);
+    auto* head = new QLabel("Son Projeler", card);
+    head->setObjectName("welcomeSection");
+    lay->addWidget(head);
+    m_projectsHost = new QVBoxLayout();
+    m_projectsHost->setSpacing(4);
+    lay->addLayout(m_projectsHost);
+    return card;
+}
+
+void WelcomeView::setRecentProjects(const QStringList& dirs) {
+    m_projects.clear();
+    for (const QString& d : dirs) {
+        if (d.isEmpty() || !QDir(d).exists()) continue;
+        if (!m_projects.contains(d)) m_projects << d;
+        if (m_projects.size() >= 5) break;
+    }
+    QLayoutItem* it;
+    while ((it = m_projectsHost->takeAt(0)) != nullptr) {
+        if (it->widget()) it->widget()->deleteLater();
+        delete it;
+    }
+    if (m_projects.isEmpty()) {
+        auto* none = new QLabel("Henüz proje açılmadı", this);
+        none->setObjectName("welcomeActionSub");
+        m_projectsHost->addWidget(none);
+        return;
+    }
+    const ThemeTokens tk = ThemeManager::instance().tokens();
+    for (const QString& d : m_projects) {
+        auto* b = new QPushButton(this);
+        b->setObjectName("welcomeAction");
+        b->setCursor(Qt::PointingHandCursor);
+        b->setToolTip(d);
+        auto* row = new QHBoxLayout(b);
+        row->setContentsMargins(10, 6, 10, 6);
+        row->setSpacing(10);
+        auto* ic = new QLabel(b);
+        ic->setPixmap(IconTheme::pixmap("explorer", tk.text, 16));
+        auto* name = new QLabel(QFileInfo(d).fileName(), b);
+        name->setObjectName("welcomeActionTitle");
+        auto* path = new QLabel(d, b);
+        path->setObjectName("welcomeActionSub");
+        row->addWidget(ic);
+        row->addWidget(name);
+        row->addStretch(1);
+        row->addWidget(path);
+        connect(b, &QPushButton::clicked, this, [this, d]() { emit projectRequested(d); });
+        b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        b->setMinimumSize(row->totalSizeHint());
+        m_projectsHost->addWidget(b);
+    }
 }
 
 QWidget* WelcomeView::buildShortcuts() {

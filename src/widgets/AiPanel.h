@@ -17,7 +17,7 @@ class QLabel;
 class QLineEdit;
 class QSpinBox;
 #include <QPushButton>
-#include <QTextEdit>
+#include <QTextBrowser>
 #include <QWidget>
 
 struct AiProfile {
@@ -45,6 +45,17 @@ public:
     // Stage 15: komut paletinden — istem gönder + son kod bloğunu uygula
     void send(const QString& preset = QString());
     void applyLastCodeBlock();
+    // Stage 21: sohbeti markdown dosyası olarak dışa aktar
+    void exportChatMarkdown();
+    // Ollama'yı uygulama içinden başlat (async) + model listesini tazele
+    void ensureServerAsync();
+    void refreshModels();
+    bool m_modelsPending = false;
+    // Stage 25: iki modelle karşılaştır + son yanıtı geri al
+    void sendCompare();
+    void undoLastAnswer();
+    // Stage 30: eski sohbetlerde metin bul
+    void searchChats(const QString& query);
 
 private slots:
     void stop();
@@ -56,6 +67,7 @@ private slots:
     void refreshHistory();
 
 signals:
+    void aiModelsChanged(bool hasModels); // Stage 25: çevrimdışı rozeti
     void currentFileRequested(QString& path, QString& content);
     void selectionRequested(QString& selected, int& start, int& len);
     void projectRootRequested(QString& root);
@@ -98,7 +110,7 @@ private:
     QSpinBox* m_agentSteps;   // Stage 7
     QLabel* m_ragLabel;
     QLabel* m_tokenLabel;     // Stage 7
-    QTextEdit* m_view;
+    QTextBrowser* m_view;
     QLineEdit* m_input;
     QPushButton* m_send;
     QPushButton* m_stop;
@@ -110,6 +122,14 @@ private:
     ContextResolver m_ctx;
     ChatStore* m_chatStore = nullptr;
     TokenStats m_tokens;
+    // Stage 25
+    bool m_budgetWarned = false;
+    bool m_compareArmed = false;
+    QString m_compareModel;
+    QString m_compareSys;
+    QString m_comparePrompt;
+    QJsonObject m_compareOpts;
+    int m_agentMaxSteps = 5;
     QString m_activeSessionId;
     QString m_activeModel; // token maliyeti için
     PatchQueue m_patchQueue;

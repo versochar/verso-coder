@@ -7,6 +7,7 @@
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QProcess>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QVBoxLayout>
@@ -57,10 +58,18 @@ RemoteConnectDialog::RemoteConnectDialog(QWidget* parent) : QDialog(parent) {
     form->addRow("", m_trust);
     lay->addLayout(form);
     auto* row = new QHBoxLayout();
+    auto* bImp = new QPushButton("SSH Config...", this);
+    bImp->setToolTip("~/.ssh/config içe aktar");
+    connect(bImp, &QPushButton::clicked, this, [this]() { emit importSshRequested(); });
     auto* bSave = new QPushButton("Kaydet", this);
     auto* bGo = new QPushButton("Bağlan", this);
     bGo->setDefault(true);
+    auto* bFp = new QPushButton("Parmak izi", this);
+    bFp->setToolTip("known_hosts'taki host anahtarının parmak izini gösterir");
+    connect(bFp, &QPushButton::clicked, this, &RemoteConnectDialog::showFingerprint);
     row->addStretch(1);
+    row->addWidget(bImp);
+    row->addWidget(bFp);
     row->addWidget(bSave);
     row->addWidget(bGo);
     lay->addLayout(row);
@@ -146,8 +155,33 @@ void RemoteConnectDialog::newProfile() {
     m_host->setFocus();
 }
 
-void RemoteConnectDialog::doConnect() {
-    collectFromUi();
+// Stage 22: known_hosts'taki anahtarın parmak izini göster (TOFU kararı yardımı)
+void RemoteConnectDialog::showFingerprint() {
+    const QString host = m_host->text().trimmed();
+    if (host.isEmpty()) {
+        QMessageBox::information(this, "Parmak izi", "Önce host yazın.");
+        return;
+    }
+    QProcess p;
+    p.start("ssh-keygen", {"-F", host});
+    if (!p.waitForFinished(5000)) {
+        QMessageBox::warning(this, "Parmak izi", "ssh-keygen zaman aşımı.");
+        return;
+    }
+    const QString found = QString::fromUtf8(p.readAllStandardOutput()).trimmed();
+    if (found.isEmpty()) {
+        QMessageBox::information(this, "Parmak izi",
+            host + " known_hosts'ta yok (ilk bağlanışta TOFU ile kaydedilir).");
+        return;
+    }
+    QProcess h;
+    h.start("ssh-keygen", {"-l", "-F", host});
+    h.waitForFinished(5000);
+    QMessageBox::information(this, "Parmak izi",
+        QString::fromUtf8(h.readAllStandardOutput()).trimmed());
+}
+
+void RemoteConnectDialog::doConnect() {    collectFromUi();
     if (!m_current.isValid()) {
         QMessageBox::warning(this, "Bağlan", "Önce host yazın.");
         return;

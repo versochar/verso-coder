@@ -23,6 +23,8 @@ public:
 
     void show(ToastType type, const QString& message, int ms = 2600);
     int visibleCount() const;
+    // Stage 28: bildirim geçmişi (en çok 50, yeniler başta)
+    QStringList history() const { return m_history; }
 
     static QString typeString(ToastType t); // "info" | "success" | ...
 
@@ -37,6 +39,7 @@ private:
     bool eventFilter(QObject* o, QEvent* e) override;
     QWidget* m_host = nullptr;
     QWidget* m_overlay = nullptr;
+    QStringList m_history;
     QVBoxLayout* m_lay = nullptr;
     QTimer* m_relayout = nullptr;
 };

@@ -17,4 +17,7 @@ public:
                           const QString& subject);
     static QString buildPrompt(const QString& diff);
     static QStringList types();
+    // Stage 21: ileti şablonları — "feat: …" önekleri (saf, test edilebilir)
+    static QStringList templates();
+    static QString applyTemplate(const QString& tpl, const QString& subject);
 };

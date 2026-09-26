@@ -17,17 +17,32 @@ CallHierarchyDialog::CallHierarchyDialog(const QString& symbol, QWidget* parent)
     m_outTop->setExpanded(true);
     connect(m_tree, &QTreeWidget::itemDoubleClicked, this, &CallHierarchyDialog::onJump);
     connect(m_tree, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem* it) {
-        if (it == m_inTop || it == m_outTop || it->childCount() > 0) return;
+        if (it == m_inTop || it == m_outTop) return;
+        // Yalnızca "…" yer tutuculu düğümler genişletilir (Stage 24: derinlik takibi)
+        if (it->childCount() != 1 || it->child(0)->text(0) != "…") return;
         CallNode n;
         n.name = it->data(0, Qt::UserRole).toString();
         n.uri = it->data(0, Qt::UserRole + 1).toString();
         n.line = it->data(0, Qt::UserRole + 2).toInt();
+        // Stage 24: derinlik sınırı (4) + döngü koruması (ata zincirinde aynı düğüm)
+        const int depth = it->data(0, Qt::UserRole + 4).toInt();
+        if (depth >= 4) {
+            it->addChild(new QTreeWidgetItem(it, QStringList("(derinlik sınırı)")));
+            return;
+        }
+        for (QTreeWidgetItem* a = it->parent(); a; a = a->parent()) {
+            if (a->data(0, Qt::UserRole + 1).toString() == n.uri &&
+                a->data(0, Qt::UserRole).toString() == n.name) {
+                it->addChild(new QTreeWidgetItem(it, QStringList("(döngü)")));
+                return;
+            }
+        }
         if (it->parent() == m_inTop) emit expandIncoming(n, it);
         else emit expandOutgoing(n, it);
     });
 }
 
-static void addNodes(QTreeWidgetItem* top, const QList<CallNode>& nodes) {
+static void addNodes(QTreeWidgetItem* top, const QList<CallNode>& nodes, int depth = 1) {
     for (const CallNode& n : nodes) {
         auto* it = new QTreeWidgetItem(top);
         QString label = n.name;
@@ -38,6 +53,7 @@ static void addNodes(QTreeWidgetItem* top, const QList<CallNode>& nodes) {
         it->setData(0, Qt::UserRole + 1, n.uri);
         it->setData(0, Qt::UserRole + 2, n.line);
         it->setData(0, Qt::UserRole + 3, n.detail);
+        it->setData(0, Qt::UserRole + 4, depth); // Stage 24: derinlik
         // Lazy: genişletilince alt seviye yüklenir (boş çocuk işareti)
         it->addChild(new QTreeWidgetItem(it, QStringList("…")));
     }

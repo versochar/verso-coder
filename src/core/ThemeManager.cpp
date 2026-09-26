@@ -104,6 +104,7 @@ void ThemeManager::applyTokens() {
     in.tokens = tokens();
     in.accentOverride = m_accent;
     in.typo = m_typo;
+    in.selectionOpacity = m_selOpacity;
     qApp->setStyleSheet(QssBuilder::build(in));
     qApp->setFont(Typography::uiFont(m_typo));
     notify();

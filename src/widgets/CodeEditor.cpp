@@ -10,6 +10,7 @@
 #include <QClipboard>
 #include "../core/SpellChecker.h"
 #include "../core/Spelling.h"
+#include "../core/GitBlame.h"
 #include "../core/ThemeManager.h"
 #include "../core/Typography.h"
 #include <QFile>
@@ -19,11 +20,16 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPropertyAnimation>
 #include <QPushButton>
+#include <QProcess>
+#include <QDateTime>
 #include <QRegularExpression>
+#include <QScrollBar>
 #include <QTextBlock>
 #include <QTextStream>
 #include <QTimer>
+#include <QWheelEvent>
 
 // --- Renklendirme ---
 CodeHighlighter::CodeHighlighter(QTextDocument* doc) : QSyntaxHighlighter(doc) {}
@@ -125,6 +131,24 @@ CodeEditor::CodeEditor(QWidget* parent) : QPlainTextEdit(parent) {
     m_sticky = new QPushButton(this);
     m_sticky->setObjectName("stickyBar");
     m_sticky->setFlat(true);
+    // Stage 23: özel imleç yanıp sönme sayacı
+    m_blinkTimer = new QTimer(this);
+    connect(m_blinkTimer, &QTimer::timeout, this, [this]() {
+        m_blinkOn = !m_blinkOn;
+        viewport()->update();
+    });
+    connect(this, &QPlainTextEdit::cursorPositionChanged, this, [this]() {
+        m_blinkOn = true;
+        if (m_blinkTimer->isActive()) m_blinkTimer->start();
+    });
+    // Stage 24: blame hayaleti (imleç durunca)
+    m_blameTimer = new QTimer(this);
+    m_blameTimer->setSingleShot(true);
+    connect(m_blameTimer, &QTimer::timeout, this, &CodeEditor::refreshBlame);
+    connect(this, &QPlainTextEdit::cursorPositionChanged, this, [this]() {
+        m_blame.clear();
+        m_blameTimer->start(800);
+    });
     m_sticky->setCursor(Qt::PointingHandCursor);
     m_sticky->setFocusPolicy(Qt::NoFocus);
     m_sticky->hide();
@@ -150,6 +174,8 @@ bool CodeEditor::loadFile(const QString& path) {
     if (!f.open(QIODevice::ReadOnly)) return false;
     QByteArray raw = f.readAll();
     m_crlf = raw.contains("\r\n");
+    m_blame.clear();
+    m_blameLine = -1;
     // editorconfig
     m_useSpaces = true;
     m_ecEol.clear();
@@ -172,6 +198,7 @@ bool CodeEditor::loadFile(const QString& path) {
     m_lastMtime = QFileInfo(path).lastModified();
     m_extra.clear();
     refreshFolds();
+    refreshBlameAges(); // Stage 24: ısı haritası yaşları
     return true;
 }
 
@@ -455,8 +482,181 @@ QList<FoldRange> CodeEditor::detectFoldRanges(const QString& text) {
     return out;
 }
 
-void CodeEditor::refreshFolds() {
-    if (m_large || m_preview) { m_foldStarts.clear(); return; }
+// Stage 20: yeni dosya dili — şimdilik renklendirmeyi tazeler
+// (CodeHighlighter dil-agnostik; dil çip + kayıt uzantısı + başlıkta yaşar)
+void CodeEditor::setLang(const QString& id) {
+    if (m_lang == id) return;
+    m_lang = id;
+    if (m_highlighter) m_highlighter->rehighlight();
+}
+
+// Stage 23: görünüm ayarları
+void CodeEditor::setCursorStyle(const QString& st) {
+    m_cursorStyle = (st == "block" || st == "underline") ? st : "bar";
+    if (m_cursorStyle == "bar") {
+        if (m_blinkTimer) m_blinkTimer->stop();
+        AppSettings s = SettingsManager::instance().load();
+        setCursorWidth(qBound(1, s.cursorWidth, 6));
+    } else {
+        setCursorWidth(0); // yerel imleci gizle, paintEvent çizer
+        const int ms = SettingsManager::instance().load().cursorBlink;
+        m_blinkTimer->start(ms > 0 ? ms : QApplication::cursorFlashTime());
+    }
+    viewport()->update();
+}
+
+void CodeEditor::setCursorBlinkMs(int ms) {
+    if (ms > 0) QApplication::setCursorFlashTime(ms * 2);
+    if (m_cursorStyle != "bar" && m_blinkTimer) {
+        m_blinkTimer->stop();
+        m_blinkTimer->start(ms > 0 ? ms : QApplication::cursorFlashTime());
+    }
+}
+
+void CodeEditor::setSmoothScroll(bool on) { m_smooth = on; }
+
+void CodeEditor::setBracketStyle(const QString& st) {
+    m_bracketStyle = st;
+    refreshExtraSelections();
+}
+
+void CodeEditor::setFoldGutter(const QString& pos) {
+    m_foldGutter = pos;
+    m_gutter->update();
+}
+
+void CodeEditor::setLineHiOpacity(double o) {
+    m_lineHiOpacity = qBound(0.05, o, 1.0);
+    refreshExtraSelections();
+}
+
+void CodeEditor::setShowLineEnds(bool on) {
+    QTextOption opt = document()->defaultTextOption();
+    QTextOption::Flags f = opt.flags();
+    if (on) f |= QTextOption::ShowLineAndParagraphSeparators;
+    else f &= ~QTextOption::ShowLineAndParagraphSeparators;
+    opt.setFlags(f);
+    document()->setDefaultTextOption(opt);
+}
+
+// Stage 24: imleç satırının git blame'i → satır sonu hayaleti
+void CodeEditor::refreshBlame() {
+    m_blame.clear();
+    if (m_large || m_preview || m_path.isEmpty() || m_path.startsWith("ssh://")) {
+        viewport()->update();
+        return;
+    }
+    const int line0 = textCursor().blockNumber();
+    const QFileInfo fi(m_path);
+    if (m_blameProc && m_blameProc->state() != QProcess::NotRunning) m_blameProc->kill();
+    delete m_blameProc;
+    m_blameProc = new QProcess(this);
+    m_blameLine = line0;
+    connect(m_blameProc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this, line0](int, QProcess::ExitStatus) {
+                QProcess* p = m_blameProc;
+                m_blameProc = nullptr;
+                if (!p) return;
+                const QString out = QString::fromUtf8(p->readAllStandardOutput());
+                p->deleteLater();
+                if (line0 != textCursor().blockNumber()) return; // imleç gitmiş
+                const QList<BlameLine> bl = GitBlame::parse(out);
+                if (bl.isEmpty()) return;
+                const BlameLine& b = bl.first();
+                if (b.author.isEmpty() || b.author == "Not Committed Yet") return;
+                const QDate d = QDateTime::fromSecsSinceEpoch(b.authorTime).date();
+                InlayHint h;
+                h.line = line0;
+                h.col = 0;
+                h.label = QString("%1 • %2").arg(b.author.left(24)).arg(d.toString("yyyy-MM-dd"));
+                h.kind = 0;
+                m_blame = {h};
+                viewport()->update();
+            });
+    m_blameProc->setWorkingDirectory(fi.absolutePath());
+    m_blameProc->start("git",
+                       {"blame", "-L", QString("%1,%1").arg(line0 + 1), "--line-porcelain",
+                        "--", fi.fileName()});
+}
+
+// Stage 24: tüm dosyanın satır yaşları (ısı haritası için, tek seferlik)
+void CodeEditor::refreshBlameAges() {
+    m_blameAges.clear();
+    if (m_large || m_preview || m_path.isEmpty() || m_path.startsWith("ssh://")) return;
+    const QFileInfo fi(m_path);
+    QProcess* p = new QProcess(this);
+    connect(p, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this, p](int code, QProcess::ExitStatus) {
+                if (code == 0) {
+                    const qint64 now = QDateTime::currentSecsSinceEpoch();
+                    Q_UNUSED(now);
+                    for (const BlameLine& b : GitBlame::parse(
+                             QString::fromUtf8(p->readAllStandardOutput())))
+                        if (b.line > 0) m_blameAges[b.line] = b.authorTime;
+                    m_gutter->update();
+                }
+                p->deleteLater();
+            });
+    p->setWorkingDirectory(fi.absolutePath());
+    p->start("git", {"blame", "--line-porcelain", "--", fi.fileName()});
+}
+
+// Stage 27: code lens + renk kutuları
+void CodeEditor::setCodeLens(const QList<InlayHint>& lens) {
+    m_lens = lens;
+    viewport()->update();
+}
+
+void CodeEditor::setColorBoxes(const QList<ColorBox>& boxes) {
+    m_colorBoxes = boxes;
+    m_gutter->update();
+}
+
+// Stage 28: yer imleri
+void CodeEditor::setBookmarks(const QList<int>& lines1) {
+    m_bookmarks = lines1;
+    m_gutter->update();
+}
+
+void CodeEditor::wheelEvent(QWheelEvent* e) {
+    if (m_smooth && e->angleDelta().x() == 0 && e->modifiers() == Qt::NoModifier) {
+        auto* sb = verticalScrollBar();
+        int dy = -e->pixelDelta().y();
+        if (dy == 0 && !e->angleDelta().isNull())
+            dy = -e->angleDelta().y() / 120 * qMax(12, fontMetrics().height() * 3);
+        if (dy != 0) {
+            if (!m_smoothAnim) {
+                m_smoothAnim = new QPropertyAnimation(this);
+                m_smoothAnim->setTargetObject(sb);
+                m_smoothAnim->setPropertyName("value");
+                m_smoothAnim->setDuration(90);
+                m_smoothAnim->setEasingCurve(QEasingCurve::OutCubic);
+            }
+            m_smoothAnim->stop();
+            m_smoothAnim->setStartValue(sb->value());
+            m_smoothAnim->setEndValue(qBound(sb->minimum(), sb->value() + dy, sb->maximum()));
+            m_smoothAnim->start();
+            e->accept();
+            return;
+        }
+    }
+    QPlainTextEdit::wheelEvent(e);
+}
+
+// Stage 21: satır sonu dönüşümü (LF ↔ CRLF), geri-al tek adımda
+void CodeEditor::setCrlf(bool on) {
+    if (m_crlf == on) return;
+    QString t = toPlainText();
+    t.replace("\r\n", "\n");
+    if (on) t.replace("\n", "\r\n");
+    QTextCursor c(document());
+    c.beginEditBlock();
+    c.select(QTextCursor::Document);
+    c.insertText(t);
+    c.endEditBlock();
+    m_crlf = on;
+}
+void CodeEditor::refreshFolds() {    if (m_large || m_preview) { m_foldStarts.clear(); return; }
     m_foldStarts.clear();
     m_foldEnds.clear();
     if (blockCount() > 50000 || document()->characterCount() > 300000) return; // yazarken tarama
@@ -698,6 +898,7 @@ void CodeEditor::gutterPaintEvent(QPaintEvent* ev) {
     const ThemeTokens tk = ThemeManager::instance().tokens();
     p.fillRect(ev->rect(), tk.gutterBg);
     const int curLine = textCursor().blockNumber();
+    const qint64 nowSecs = QDateTime::currentSecsSinceEpoch(); // Stage 24: ısı
     QTextBlock b = firstVisibleBlock();
     int num = b.blockNumber();
     int top = (int)blockBoundingGeometry(b).translated(contentOffset()).top();
@@ -708,6 +909,17 @@ void CodeEditor::gutterPaintEvent(QPaintEvent* ev) {
     while (b.isValid() && top <= ev->rect().bottom()) {
         if (b.isVisible() && bottom >= ev->rect().top()) {
             const int h = bottom - top;
+            // Stage 24: ısı haritası — yeni satırlar vurgulu, eskiler silik
+            if (!m_blameAges.isEmpty()) {
+                BlameLine tmp;
+                tmp.authorTime = m_blameAges.value(num + 1, 0);
+                const double heat = GitBlame::heat(tmp, nowSecs);
+                if (heat < 0.999) {
+                    QColor hc = tk.accent;
+                    hc.setAlphaF(0.03 + 0.20 * (1.0 - heat));
+                    p.fillRect(0, top, gw, h, hc);
+                }
+            }
             // Stage 11: hover satırı zemin vurgusu
             if (num == m_hoverLine) {
                 p.fillRect(0, top, gw, h, ThemeTokens::withAlphaF(tk.text, 0.06));
@@ -715,6 +927,10 @@ void CodeEditor::gutterPaintEvent(QPaintEvent* ev) {
             // Stage 14: çalışan çerçeve satırı (sarı zemin + ok)
             if (num == m_frameLine) {
                 p.fillRect(0, top, gw, h, ThemeTokens::withAlphaF(tk.warning, 0.30));
+            }
+            // Stage 28: yer imi (sol kenar şeridi)
+            if (m_bookmarks.contains(num + 1)) {
+                p.fillRect(0, top, 3, h, QColor("#4ec9b0"));
             }
             // Stage 14: kesme noktası (kırmızı nokta; çerçevedeyse okla birlikte)
             if (m_breakpoints.contains(num + 1)) {
@@ -727,19 +943,28 @@ void CodeEditor::gutterPaintEvent(QPaintEvent* ev) {
                 p.setPen(tk.warning);
                 p.drawText(2, top, 14, fm.height(), Qt::AlignLeft, "➤");
             }
+            // Stage 27: renk kutuları (sağ kenar, git şeridinin solu)
+            for (const ColorBox& cb : std::as_const(m_colorBoxes)) {
+                if (cb.line0 != num || !cb.color.isValid()) continue;
+                p.fillRect(gw - 12, top + 2, 6, qMax(4, h - 4), cb.color);
+                p.setPen(tk.border);
+                p.drawRect(gw - 12, top + 2, 6, qMax(4, h - 4));
+            }
             // Stage 11: git diff işareti (sağ kenarda 3px şerit)
             if (m_gitMarks.contains(num + 1)) {
                 const char st = m_gitMarks[num + 1];
                 QColor mc = (st == 'a') ? tk.success : (st == 'm') ? tk.accent : tk.error;
                 p.fillRect(gw - 4, top, 3, h, mc);
             }
-            // Katlama işareti (hover'da belirgin)
-            if (m_foldStarts.contains(num)) {
+            // Katlama işareti (hover'da belirgin; konum ayarlanabilir)
+            if (m_foldStarts.contains(num) && m_foldGutter != "gizli") {
                 bool folded = m_folded.contains(num);
                 const bool hov = (num == m_hoverLine);
+                // Stage 23: sol | sağ
+                const int fx = (m_foldGutter == "sag") ? gw - 16 : 2;
                 p.setPen(hov ? tk.textStrong : (num == curLine ? tk.gutterActive : tk.gutterText));
-                if (hov) p.fillRect(0, top, 16, h, ThemeTokens::withAlphaF(tk.accent, 0.25));
-                p.drawText(2, top, 14, fm.height(), Qt::AlignLeft,
+                if (hov) p.fillRect(fx - 2, top, 16, h, ThemeTokens::withAlphaF(tk.accent, 0.25));
+                p.drawText(fx, top, 14, fm.height(), Qt::AlignLeft,
                            folded ? "▸" : "▾");
             }
             // Satır numarası (aktif satır kalın)
@@ -784,6 +1009,15 @@ void CodeEditor::gutterClick(int y) {
     // Stage 14: sol 16px'teki katlama oku katlar; gutter'ın gerisi kesme noktası
     const int x = m_gutter->mapFromGlobal(QCursor::pos()).x();
     if (x < 16 && m_foldStarts.contains(ln)) { toggleFoldAtLine(ln); return; }
+    // Stage 27: renk kutusu tıklaması
+    if (x >= m_gutter->width() - 12) {
+        for (const ColorBox& cb : std::as_const(m_colorBoxes)) {
+            if (cb.line0 == ln) {
+                emit colorBoxClicked(ln);
+                return;
+            }
+        }
+    }
     emit breakpointToggleRequested(ln + 1);
 }
 
@@ -1053,6 +1287,21 @@ void CodeEditor::keyPressEvent(QKeyEvent* e) {
 
 void CodeEditor::paintEvent(QPaintEvent* e) {
     QPlainTextEdit::paintEvent(e);
+    // Stage 23: blok / alt çizgi imleç (yerel çizim)
+    if (m_cursorStyle != "bar" && hasFocus() && !textCursor().hasSelection() && m_blinkOn
+        && !m_large && !m_preview) {
+        const QRect cr = cursorRect();
+        QPainter p(viewport());
+        const QColor c = ThemeManager::instance().tokens().textStrong;
+        p.setPen(Qt::NoPen);
+        p.setBrush(c);
+        if (m_cursorStyle == "block") {
+            const int w = qMax(4, fontMetrics().horizontalAdvance(QLatin1Char('M')));
+            p.drawRect(cr.x(), cr.y(), w, cr.height());
+        } else { // underline
+            p.drawRect(cr.x(), cr.y() + cr.height() - 2, qMax(4, cr.width()), 2);
+        }
+    }
     if (m_large) return; // büyük dosyada kılavuz çizme
     const ThemeTokens tk = ThemeManager::instance().tokens();
     QPainter p(viewport());
@@ -1170,6 +1419,17 @@ void CodeEditor::paintEvent(QPaintEvent* e) {
                     tags << h.label.left(24);
                     if (tags.size() >= 4) break;
                 }
+                // Stage 24: blame hayaleti (imleç satırında, en sonda)
+                for (const InlayHint& h : std::as_const(m_blame)) {
+                    if (h.line != b2.blockNumber()) continue;
+                    tags << ("◷ " + h.label.left(40));
+                }
+                // Stage 27: code lens (gönderme sayısı)
+                for (const InlayHint& h : std::as_const(m_lens)) {
+                    if (h.line != b2.blockNumber()) continue;
+                    tags << ("↗" + h.label.left(24));
+                    break;
+                }
                 if (!tags.isEmpty()) {
                     const QString txt = QString("  %1").arg(tags.join("  "));
                     p.drawText((int)(r.left() + r.width()) - 220, (int)r.top(),
@@ -1227,8 +1487,19 @@ SpellChecker* CodeEditor::spellChecker() {
     if (cfg.spellLang == "off") return nullptr;
     m_spell = new SpellChecker();
     QStringList langs;
-    if (cfg.spellLang == "auto") langs << "tr_TR" << "en_US";
-    else langs << cfg.spellLang;
+    // Stage 21: dile göre sözlük — düz metin/belge → ayar; kod → önce İngilizce
+    const QString suf = QFileInfo(m_path).suffix().toLower();
+    const bool prose = suf == "md" || suf == "markdown" || suf == "txt" || m_path.isEmpty();
+    auto cfgLangs = [&] {
+        if (cfg.spellLang == "auto") return QStringList{"tr_TR", "en_US"};
+        return QStringList{cfg.spellLang};
+    };
+    if (prose) langs = cfgLangs();
+    else {
+        langs << "en_US";
+        for (const QString& l : cfgLangs())
+            if (!langs.contains(l)) langs << l;
+    }
     for (const QString& l : langs)
         if (m_spell->load(l)) return m_spell;
     return nullptr;
@@ -1246,7 +1517,10 @@ void CodeEditor::refreshExtraSelections() {
     const AppSettings as = SettingsManager::instance().load();
     if (!m_large && as.lineHighlightOn) {
         QTextEdit::ExtraSelection s;
-        s.format.setBackground(tk.lineHighlight);
+        // Stage 23: satır vurgusu opaklığı
+        QColor bg = tk.lineHighlight;
+        bg.setAlphaF(qBound(0.05, bg.alphaF() * m_lineHiOpacity, 1.0));
+        s.format.setBackground(bg);
         s.format.setProperty(QTextFormat::FullWidthSelection, true);
         s.cursor = textCursor();
         s.cursor.clearSelection();
@@ -1321,10 +1595,20 @@ void CodeEditor::refreshExtraSelections() {
         for (const BracketMark& mk : std::as_const(m_bracketMarks)) {
             if (mk.pos < 0 || mk.pos >= document()->characterCount()) continue;
             QTextCharFormat bf;
-            bf.setForeground(BracketDepth::colorFor(mk.depth, tk.dark));
-            QFont bfFont = font();
-            bfFont.setBold(true);
-            bf.setFont(bfFont);
+            // Stage 23: parantez vurgu stili
+            if (m_bracketStyle == "zemin") {
+                QColor bg = tk.accent;
+                bg.setAlphaF(0.30);
+                bf.setBackground(bg);
+            } else if (m_bracketStyle == "altcizgi") {
+                bf.setUnderlineStyle(QTextCharFormat::SingleUnderline);
+                bf.setUnderlineColor(tk.accent);
+            } else {
+                bf.setForeground(BracketDepth::colorFor(mk.depth, tk.dark));
+                QFont bfFont = font();
+                bfFont.setBold(true);
+                bf.setFont(bfFont);
+            }
             QTextCursor bc(document());
             bc.setPosition(mk.pos);
             bc.setPosition(mk.pos + 1, QTextCursor::KeepAnchor);

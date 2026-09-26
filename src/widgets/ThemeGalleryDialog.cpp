@@ -1,7 +1,9 @@
 #include "ThemeGalleryDialog.h"
 #include "../core/AccentColor.h"
+#include "../core/ColorBlind.h"
 #include "../core/ThemeStore.h"
 #include <QColorDialog>
+#include <QComboBox>
 #include <QFileDialog>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -10,6 +12,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
+#include <QSettings>
 #include <QScrollArea>
 #include <QVBoxLayout>
 
@@ -136,6 +139,7 @@ ThemeGalleryDialog::ThemeGalleryDialog(const QString& currentTheme,
         if (!c.isValid()) return;
         m_accent = c;
         if (m_accentLabel) m_accentLabel->setText(m_accent.name());
+        pushRecentAccent(c);
         emit accentSelected(m_accent);
     });
     accRow->addWidget(bCustom);
@@ -143,7 +147,22 @@ ThemeGalleryDialog::ThemeGalleryDialog(const QString& currentTheme,
     m_accentLabel->setStyleSheet("color:#888;");
     accRow->addWidget(m_accentLabel);
     accRow->addStretch(1);
+
+    // Stage 21: son özel renkler
+    m_recentRow = new QHBoxLayout();
+    rebuildRecentAccents();
     lay->addLayout(accRow);
+    lay->addLayout(m_recentRow); // Stage 21: son özel renkler
+
+    // Stage 23: renk körü önizlemesi (kartlar dönüşmüş paletle çizilir, uygulanmaz)
+    auto* cvdRow = new QHBoxLayout();
+    cvdRow->addWidget(new QLabel("Renk körü önizleme:", this));
+    m_cvdPreview = new QComboBox(this);
+    m_cvdPreview->addItems(ColorBlind::names());
+    cvdRow->addWidget(m_cvdPreview, 1);
+    connect(m_cvdPreview, &QComboBox::currentTextChanged, this,
+            [this]() { buildCards(); });
+    lay->addLayout(cvdRow);
 
     // kart ızgarası (kaydırılabilir)
     auto* scroll = new QScrollArea(this);
@@ -200,10 +219,14 @@ void ThemeGalleryDialog::buildCards() {
     }
 
     const QStringList names = ThemeStore::instance().themeNames();
+    const ColorBlind::Mode cvd =
+        m_cvdPreview ? ColorBlind::fromName(m_cvdPreview->currentText())
+                     : ColorBlind::Mode::None;
     int row = 0, col = 0;
     for (const QString& n : names) {
-        const ThemeTokens t = ThemeStore::instance().theme(n);
+        ThemeTokens t = ThemeStore::instance().theme(n);
         if (!t.isValid()) continue;
+        if (cvd != ColorBlind::Mode::None) t = ColorBlind::applyTo(t, cvd); // Stage 23
         auto* card = new ThemeCard(t, this);
         card->setCurrent(n == m_current);
         connect(card, &ThemeCard::activated, this, [this, card](const QString& name) {
@@ -215,4 +238,47 @@ void ThemeGalleryDialog::buildCards() {
         m_cards << card;
         if (++col >= 3) { col = 0; ++row; }
     }
+}
+
+// Stage 21: son özel vurgu renkleri (kalıcı, en çok 5)
+QStringList ThemeGalleryDialog::recentAccents() {
+    return QSettings("Verso", "VersoCoder").value("gallery/recentAccents").toStringList();
+}
+
+void ThemeGalleryDialog::pushRecentAccent(const QColor& c) {
+    if (!c.isValid()) return;
+    QStringList r = recentAccents();
+    r.removeAll(c.name());
+    r.prepend(c.name());
+    while (r.size() > 5) r.removeLast();
+    QSettings("Verso", "VersoCoder").setValue("gallery/recentAccents", r);
+    rebuildRecentAccents();
+}
+
+void ThemeGalleryDialog::rebuildRecentAccents() {
+    if (!m_recentRow) return;
+    QLayoutItem* it;
+    while ((it = m_recentRow->takeAt(0)) != nullptr) {
+        if (it->widget()) it->widget()->deleteLater();
+        delete it;
+    }
+    const QStringList r = recentAccents();
+    if (r.isEmpty()) return;
+    m_recentRow->addWidget(new QLabel("Son renkler:", this));
+    for (const QString& n : r) {
+        const QColor c(n);
+        if (!c.isValid()) continue;
+        auto* b = new QPushButton(this);
+        b->setFixedSize(26, 22);
+        b->setToolTip(n);
+        b->setStyleSheet(QString("background:%1;border:1px solid #888;border-radius:5px;")
+                             .arg(c.name()));
+        connect(b, &QPushButton::clicked, this, [this, c]() {
+            m_accent = c;
+            if (m_accentLabel) m_accentLabel->setText(m_accent.name());
+            emit accentSelected(m_accent);
+        });
+        m_recentRow->addWidget(b);
+    }
+    m_recentRow->addStretch(1);
 }

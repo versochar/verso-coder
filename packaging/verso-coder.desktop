@@ -10,3 +10,4 @@ Categories=Development;IDE;TextEditor;
 Keywords=editor;ide;code;cpp;qt;
 MimeType=text/plain;text/x-c++src;text/x-csrc;text/x-python;application/json;
 StartupNotify=true
+StartupWMClass=verso-coder

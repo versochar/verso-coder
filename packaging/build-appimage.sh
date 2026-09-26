@@ -22,10 +22,20 @@ cp -r "$ROOT/resources" "$APPDIR/usr/bin/resources" 2>/dev/null || true
 cp "$ROOT/packaging/verso-coder.desktop" "$APPDIR/usr/share/applications/"
 cp "$ROOT/packaging/verso-coder.appdata.xml" "$APPDIR/usr/share/metainfo/"
 cp "$ROOT/packaging/verso-coder.desktop" "$APPDIR/verso-coder.desktop"
-# ikon yoksa basit bir yer tutucu oluştur (varsa gerçek ikonu kopyala)
+# ikon: önce PNG, yoksa SVG'den üret (rsvg-convert / ImageMagick), o da yoksa uyar
 if [ -f "$ROOT/resources/icon.png" ]; then
   cp "$ROOT/resources/icon.png" "$APPDIR/verso-coder.png"
   cp "$ROOT/resources/icon.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/verso-coder.png"
+elif [ -f "$ROOT/resources/icon.svg" ]; then
+  if command -v rsvg-convert >/dev/null 2>&1; then
+    rsvg-convert -w 256 -h 256 "$ROOT/resources/icon.svg" -o "$APPDIR/verso-coder.png"
+  elif command -v convert >/dev/null 2>&1; then
+    convert -background none -resize 256x256 "$ROOT/resources/icon.svg" "$APPDIR/verso-coder.png"
+  else
+    echo "!! ikon dönüştürücü yok (rsvg-convert/convert); AppImage ikonsuz paketlenir."
+  fi
+  [ -f "$APPDIR/verso-coder.png" ] && cp "$APPDIR/verso-coder.png" \
+    "$APPDIR/usr/share/icons/hicolor/256x256/apps/verso-coder.png"
 fi
 
 # AppRun

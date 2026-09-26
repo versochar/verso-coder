@@ -40,9 +40,13 @@ bool LspClient::start(const QString& program, const QStringList& args, const QSt
     QJsonObject params;
     params["processId"] = (int)QCoreApplication::applicationPid();
     params["rootUri"] = m_rootUri;
+    // Stage 27: çok köklü çalışma alanı + ilişkili tanı bilgisi
+    params["workspaceFolders"] = QJsonArray{QJsonObject{{"uri", m_rootUri}, {"name", "root"}}};
+    QJsonObject wfold;
+    wfold["supported"] = false;
     // Stage 13: geniş istemci yetenekleri (sunucu ne verirse kullansın)
     QJsonObject td;
-    td["publishDiagnostics"] = QJsonObject{{"relatedInformation", false}};
+    td["publishDiagnostics"] = QJsonObject{{"relatedInformation", true}}; // Stage 27
     td["hover"] = QJsonObject{{"contentFormat", QJsonArray{"plaintext", "markdown"}}};
     td["completion"] = QJsonObject{{"completionItem", QJsonObject{
         {"snippetSupport", false},
@@ -70,9 +74,15 @@ bool LspClient::start(const QString& program, const QStringList& args, const QSt
         "deprecated", "abstract", "async", "modification", "documentation", "defaultLibrary"};
     td["semanticTokens"] = sem;
     td["callHierarchy"] = QJsonObject{{"dynamicRegistration", false}};
+    // Stage 27: derinlik yetenekleri
+    td["documentLink"] = QJsonObject{{"tooltipSupport", true}};
+    td["colorProvider"] = QJsonObject{};
+    td["codeLens"] = QJsonObject{};
+    td["typeHierarchy"] = QJsonObject{{"dynamicRegistration", false}};
     QJsonObject caps;
     caps["textDocument"] = td;
-    caps["workspace"] = QJsonObject{{"symbol", QJsonObject{}}};
+    caps["workspace"] = QJsonObject{{"symbol", QJsonObject{}},
+                                        {"workspaceFolders", wfold}};
     params["capabilities"] = caps;
     m_initId = m_nextId;
     sendRequest("initialize", params, [this](QJsonObject res) {
@@ -107,6 +117,7 @@ void LspClient::sendRequest(const QString& method, const QJsonObject& params,
                             std::function<void(QJsonObject)> handler) {
     int id = m_nextId++;
     m_handlers[id] = handler;
+    logMsg(">", method); // Stage 27: ileti günlüğü
     sendMessage(QJsonObject{{"jsonrpc", "2.0"}, {"id", id}, {"method", method}, {"params", params}});
 }
 
@@ -207,7 +218,21 @@ void LspClient::handleMessage(const QJsonObject& obj) {
             }
             emit diagnosticsReady(path, diags);
         }
-        // window/showMessage, $/progress vb. yoksayılır
+        if (m == "$/progress") {
+            // Stage 27: {"token":..,"value":{"kind":"begin|report|end",...}}
+            const QJsonObject v = obj["params"].toObject()["value"].toObject();
+            const QString kind = v["kind"].toString();
+            const QString title = v["title"].toString();
+            int pct = v["percentage"].toInt(-1);
+            if (kind == "end") pct = 100;
+            emit progressUpdate(kind, title, pct);
+            return;
+        }
+        if (m == "window/showMessage" || m == "window/logMessage") {
+            logMsg("<", m + ": " + obj["params"].toObject()["message"].toString().left(160));
+            return;
+        }
+        // diğer bildirimler yoksayılır
         return;
     }
     if (obj.contains("id")) {
@@ -333,6 +358,90 @@ void LspClient::requestFormat(const QString& path, std::function<void(QJsonObjec
     request("textDocument/formatting",
             QJsonObject{{"textDocument", QJsonObject{{"uri", pathToUri(path)}}},
                         {"options", QJsonObject{{"tabSize", 4}, {"insertSpaces", true}}}}, h);
+}
+
+// Stage 27: derinlik istekleri
+void LspClient::requestRangeFormat(const QString& path, int sLine, int sCol, int eLine,
+                                   int eCol, std::function<void(QJsonObject)> h) {
+    if (!m_ready) return;
+    QJsonObject range = QJsonObject{
+        {"start", QJsonObject{{"line", sLine}, {"character", sCol}}},
+        {"end", QJsonObject{{"line", eLine}, {"character", eCol}}}};
+    request("textDocument/rangeFormatting",
+            QJsonObject{{"textDocument", QJsonObject{{"uri", pathToUri(path)}}},
+                        {"range", range},
+                        {"options", QJsonObject{{"tabSize", 4}, {"insertSpaces", true}}}}, h);
+}
+
+void LspClient::requestDocumentLink(const QString& path,
+                                    std::function<void(QJsonObject)> h) {
+    if (!m_ready) return;
+    request("textDocument/documentLink",
+            QJsonObject{{"textDocument", QJsonObject{{"uri", pathToUri(path)}}}}, h);
+}
+
+void LspClient::requestDocumentColor(const QString& path,
+                                     std::function<void(QJsonObject)> h) {
+    if (!m_ready) return;
+    request("textDocument/documentColor",
+            QJsonObject{{"textDocument", QJsonObject{{"uri", pathToUri(path)}}}}, h);
+}
+
+void LspClient::requestCodeLens(const QString& path, std::function<void(QJsonObject)> h) {
+    if (!m_ready) return;
+    request("textDocument/codeLens",
+            QJsonObject{{"textDocument", QJsonObject{{"uri", pathToUri(path)}}}}, h);
+}
+
+void LspClient::requestSelectionRange(const QString& path,
+                                      const QList<QPair<int, int>>& positions,
+                                      std::function<void(QJsonObject)> h) {
+    if (!m_ready) return;
+    QJsonArray arr;
+    for (const auto& p : positions)
+        arr.append(QJsonObject{{"line", p.first}, {"character", p.second}});
+    request("textDocument/selectionRange",
+            QJsonObject{{"textDocument", QJsonObject{{"uri", pathToUri(path)}}},
+                        {"positions", arr}},
+            h);
+}
+
+void LspClient::requestTypePrepare(const QString& path, int line, int col,
+                                   std::function<void(QJsonObject)> h) {
+    if (!m_ready) return;
+    request("textDocument/prepareTypeHierarchy", textPos(path, line, col), h);
+}
+
+void LspClient::requestTypeSupertypes(const QJsonObject& item,
+                                      std::function<void(QJsonObject)> h) {
+    if (!m_ready) return;
+    request("typeHierarchy/supertypes", QJsonObject{{"item", item}}, h);
+}
+
+void LspClient::requestTypeSubtypes(const QJsonObject& item,
+                                    std::function<void(QJsonObject)> h) {
+    if (!m_ready) return;
+    request("typeHierarchy/subtypes", QJsonObject{{"item", item}}, h);
+}
+
+void LspClient::requestPullDiagnostics(const QString& path,
+                                       std::function<void(QJsonObject)> h) {
+    if (!m_ready) return;
+    request("textDocument/diagnostic",
+            QJsonObject{{"textDocument", QJsonObject{{"uri", pathToUri(path)}}},
+                        {"previousResultId", ""}},
+            h);
+}
+
+void LspClient::didChangeConfiguration(const QJsonObject& settings) {
+    if (!m_ready) return;
+    sendNotification("workspace/didChangeConfiguration",
+                     QJsonObject{{"settings", settings}});
+}
+
+void LspClient::logMsg(const QString& dir, const QString& text) {
+    m_log << dir + " " + text.left(200);
+    while (m_log.size() > 200) m_log.removeFirst();
 }
 
 void LspClient::requestInlay(const QString& path, int startLine, int endLine,

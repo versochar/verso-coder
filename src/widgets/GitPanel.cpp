@@ -1,5 +1,7 @@
 #include "GitPanel.h"
 #include "DiffDialog.h"
+#include "../core/CommitMsg.h"
+#include <QCheckBox>
 #include <QDir>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -66,12 +68,29 @@ GitPanel::GitPanel(QWidget* parent) : QWidget(parent), m_dir(QDir::homePath()) {
     m_msg = new QLineEdit(this);
     m_msg->setPlaceholderText("Commit mesajı...");
     auto* cRow = new QHBoxLayout();
+    // Stage 21: ileti şablonu + amend
+    m_tpl = new QComboBox(this);
+    m_tpl->setToolTip("İleti şablonu öneki");
+    m_tpl->addItem("Şablon…");
+    m_tpl->addItems(CommitMsg::templates());
+    connect(m_tpl, QOverload<int>::of(&QComboBox::activated), this, [this](int i) {
+        if (i <= 0) return;
+        m_msg->setText(CommitMsg::applyTemplate(m_tpl->itemText(i), m_msg->text()));
+        m_msg->setFocus();
+        m_tpl->setCurrentIndex(0);
+    });
+    m_amend = new QCheckBox("Amend", this);
+    m_amend->setToolTip("Son commit'i değiştir (commit --amend)");
+    cRow->addWidget(m_tpl, 1);
+    cRow->addWidget(m_amend);
+    auto* cRow2 = new QHBoxLayout();
     auto* bCommit = new QPushButton("Commit", this);
     auto* bPush = new QPushButton("Push", this);
     auto* bPull = new QPushButton("Pull", this);
-    cRow->addWidget(bCommit); cRow->addWidget(bPush); cRow->addWidget(bPull);
+    cRow2->addWidget(bCommit); cRow2->addWidget(bPush); cRow2->addWidget(bPull);
     lay->addWidget(m_msg);
     lay->addLayout(cRow);
+    lay->addLayout(cRow2);
 
     m_out = new QTextEdit(this);
     m_out->setReadOnly(true);
@@ -262,8 +281,10 @@ void GitPanel::setCommitMessage(const QString& msg) {
 void GitPanel::commit() {
     QString m = m_msg->text().trimmed();
     if (m.isEmpty()) { log("commit", "Önce commit mesajı yaz."); return; }
-    Cmd r = runGit({"commit", "-m", m});
-    log("commit -m \"" + m + "\"", r.out + r.err);
+    QStringList args = {"commit", "-m", m};
+    if (m_amend && m_amend->isChecked()) args = {"commit", "--amend", "-m", m};
+    Cmd r = runGit(args);
+    log(args.join(" "), r.out + r.err);
     m_msg->clear();
     refresh();
     refreshLog();

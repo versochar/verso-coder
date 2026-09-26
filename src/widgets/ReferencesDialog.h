@@ -3,6 +3,7 @@
 #include <QDialog>
 
 class QTreeWidget;
+class QTextEdit;
 
 // Stage 13: referanslar — dosyaya göre gruplu ağaç, çift tıkla satıra git.
 class ReferencesDialog : public QDialog {
@@ -14,8 +15,10 @@ public:
 
 private slots:
     void onJump();
+    void onPreview(); // Stage 24: bağlam önizlemesi
 
 private:
     LspLocation m_sel;
     QTreeWidget* m_tree;
+    QTextEdit* m_preview = nullptr; // Stage 24
 };

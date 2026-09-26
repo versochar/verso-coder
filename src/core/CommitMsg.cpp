@@ -36,3 +36,17 @@ QString CommitMsg::buildPrompt(const QString& diff) {
            "commit mesajı yaz (örn. \"feat(auth): token yenileme eklendi\"). "
            "SADECE mesajı döndür:\n```diff\n" + diff.left(6000) + "\n```";
 }
+
+QStringList CommitMsg::templates() {
+    QStringList out;
+    for (const QString& t : types()) out << t + ": ";
+    out << "fix!: " << "feat!: ";
+    return out;
+}
+
+QString CommitMsg::applyTemplate(const QString& tpl, const QString& subject) {
+    QString t = tpl.trimmed();
+    if (!t.endsWith(':')) t += ':';
+    const QString s = subject.trimmed();
+    return s.isEmpty() ? t + " " : t + " " + s;
+}

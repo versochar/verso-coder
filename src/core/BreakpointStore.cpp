@@ -19,6 +19,7 @@ void BreakpointStore::load(QList<Breakpoint>& out) const {
         b.enabled = p[2] != "0";
         if (p.size() > 3) b.condition = p[3];
         if (p.size() > 4) b.log = p[4];
+        if (p.size() > 5) b.hitCount = p[5].toInt(); // Stage 26
         if (!b.file.isEmpty() && b.line > 0) out << b;
     }
 }
@@ -28,12 +29,13 @@ void BreakpointStore::save(const QList<Breakpoint>& bps) const {
     q.beginGroup(kGroup);
     QStringList rows;
     for (const Breakpoint& b : bps)
-        rows << QString("%1\x1f%2\x1f%3\x1f%4\x1f%5")
+        rows << QString("%1\x1f%2\x1f%3\x1f%4\x1f%5\x1f%6")
                     .arg(b.file)
                     .arg(b.line)
                     .arg(b.enabled ? 1 : 0)
                     .arg(b.condition)
-                    .arg(b.log);
+                    .arg(b.log)
+                    .arg(b.hitCount);
     q.setValue(kKey, rows);
 }
 
@@ -85,6 +87,13 @@ void BreakpointStore::setCondition(const QString& file, int line, const QString&
     QList<Breakpoint> bps = all();
     for (Breakpoint& b : bps)
         if (b.file == file && b.line == line) b.condition = cond;
+    save(bps);
+}
+
+void BreakpointStore::setHitCount(const QString& file, int line, int n) {
+    QList<Breakpoint> bps = all();
+    for (Breakpoint& b : bps)
+        if (b.file == file && b.line == line) b.hitCount = qMax(0, n);
     save(bps);
 }
 

@@ -31,11 +31,15 @@ public:
 
 signals:
     void fileOpened(const QString& path);
+    void filePreviewRequested(const QString& path); // Stage 24: tek tık önizleme
     void compareRequested(const QString& path);  // seçili dosya: git ile karşılaştır
     void pathRenamed(const QString& oldPath, const QString& newPath); // taşı/yeniden adlandır
 
 private slots:
     void onContextMenu(const QPoint& pos);
+
+protected:
+    bool eventFilter(QObject* o, QEvent* e) override; // Stage 21: F2/Del/F5
 
 private:
     QString targetDir(const QModelIndex& proxyIdx) const;

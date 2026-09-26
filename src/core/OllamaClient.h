@@ -32,6 +32,12 @@ public:
                      const QString& userText, const QJsonObject& options,
                      QString& error, int timeoutMs = 180000);
 
+    // Yerel sunucu yönetimi (uygulama içinden "Ollama'yı Başlat")
+    static QString findServerBinary(); // PATH + ~/.local/bin + /usr/local/bin
+    static bool isServerUp(const QString& host, int timeoutMs = 2000);
+    // Kapalıysa detached başlatıp açılmasını bekler (GUI thread'de çağırma!)
+    static bool ensureServer(const QString& host, int timeoutMs = 25000);
+
 signals:
     void modelsReady(const QStringList& models);
     void chatReply(const QString& text);
@@ -47,6 +53,8 @@ signals:
 private:
     void parseStreamChunk(const QByteArray& data);
     void emitTokenCounts(const QJsonObject& obj);
+    // Stage 31: yanıt gelmezse iptal eden bekçi (sahiplik çağıranda)
+    static void armTimeout(QNetworkReply* r, int ms);
 
     QNetworkAccessManager m_net;
     QString m_host = "http://localhost:11434";

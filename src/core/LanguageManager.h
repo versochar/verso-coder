@@ -10,6 +10,9 @@ public:
     void setLanguage(const QString& lang); // "tr" | "en"
     QString lang() const { return m_lang; }
     QString t(const QString& key) const;   // çeviri al
+    // Stage 22: kapsama denetimi — tüm anahtarlar + dil varlığı
+    QStringList allKeys() const { return m_dict.keys(); }
+    bool hasTranslation(const QString& key, const QString& lang) const;
 private:
     LanguageManager();
     QString m_lang = "tr";

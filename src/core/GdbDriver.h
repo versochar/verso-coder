@@ -1,6 +1,8 @@
 #pragma once
 #include "MiParser.h"
+#include <QMap>
 #include <QObject>
+#include <QPair>
 #include <QProcess>
 #include <functional>
 
@@ -47,17 +49,46 @@ public:
     void breakInsert(const QString& file, int line1, const QString& cond,
                      std::function<void(QString)> done);
     void breakDelete(const QString& number);
+    // Stage 26: koşul/hit-count/sonradan koşul
+    void breakCondition(const QString& number, const QString& cond);
+    void breakAfter(const QString& number, int count);
+    void breakFunction(const QString& func, std::function<void(QString)> done);
+    void breakWatch(const QString& expr, const QString& access,
+                    std::function<void(QString)> done); // access: "" | "r" | "rw"
     // Yürütme
     void execRun();
     void execContinue();
     void execNext();
     void execStep();
     void execFinish();
+    void execStepInstruction(); // Stage 26: disas adımı
+    void execNextInstruction();
     void interrupt();
     // İnceleme
     void stackFrames(std::function<void(QList<DebugFrame>)> done);
     void stackVariables(int frame, std::function<void(QList<DebugVar>)> done);
     void evaluate(const QString& expr, std::function<void(QString)> done);
+    // Stage 26: izleme (varobj), yazmaç, bellek, disas, thread
+    void watchCreate(const QString& expr, std::function<void(QString)> done); // name döner
+    void watchUpdateAll(std::function<void(QVariantList)> done); // -var-update --all
+    void watchEvaluate(const QString& name, std::function<void(QString)> done);
+    void watchDelete(const QString& name);
+    void registers(std::function<void(QList<QPair<QString, QString>>)> done);
+    void memoryRead(const QString& addr, int count, std::function<void(QString)> done);
+    void disassemble(const QString& file, int line1, int count,
+                     std::function<void(QList<QMap<QString, QString>>)> done);
+    struct ThreadInfo { QString id; QString target; QString name; };
+    void threadList(std::function<void(QList<ThreadInfo>)> done);
+    void threadSelect(const QString& id);
+    // Stage 26: attach / core / kaynak eşleme
+    void attach(int pid, std::function<void(bool)> done);
+    void openCore(const QString& program, const QString& coreFile,
+                  std::function<void(bool)> done);
+    void substitutePath(const QString& from, const QString& to);
+    void setVariable(const QString& expr, const QString& value,
+                     std::function<void(bool)> done);
+    // MI alıntılama (saf, test edilebilir)
+    static QString miQuote(const QString& s);
     // Ham komut (konsol)
     int command(const QString& mi, std::function<void(QVariantMap)> done);
 

@@ -45,6 +45,8 @@ QList<TaskDef> TaskRunner::parseTasksJson(const QString& json, QString* error) {
             t.group = o.value("group").toObject().value("kind").toString();
         else if (o.value("group").isString())
             t.group = o.value("group").toString();
+        t.scheduleMin = qMax(0, o.value("scheduleMin").toInt());
+        t.watch = o.value("watch").toBool(); // Stage 28
         if (!t.label.isEmpty() && !t.command.isEmpty()) out << t;
     }
     if (out.isEmpty() && error && !arr.isEmpty()) *error = "geçerli görev yok";
@@ -72,11 +74,40 @@ QString TaskRunner::configPathForRoot(const QString& root) {
 
 bool TaskRunner::loadForRoot(const QString& root) {
     m_tasks.clear();
+    m_lastJson.clear();
     QFile f(configPathForRoot(root));
     if (!f.open(QIODevice::ReadOnly)) return false;
+    m_lastJson = QString::fromUtf8(f.readAll());
     QString err;
-    m_tasks = parseTasksJson(QString::fromUtf8(f.readAll()), &err);
+    m_tasks = parseTasksJson(m_lastJson, &err);
     return !m_tasks.isEmpty();
+}
+
+// Stage 28: tasks.json "inputs" bölümü (tipli)
+QList<TaskChain::TaskInput> TaskRunner::taskInputs() const {
+    QJsonDocument d = QJsonDocument::fromJson(m_lastJson.toUtf8());
+    if (!d.isObject()) return {};
+    return TaskChain::parseTaskInputs(d.object().value("inputs").toArray());
+}
+
+QJsonArray TaskRunner::tasksJsonArray() const {
+    QJsonDocument d = QJsonDocument::fromJson(m_lastJson.toUtf8());
+    if (d.isArray()) return d.array();
+    if (d.isObject()) return d.object().value("tasks").toArray();
+    return {};
+}
+
+void TaskRunner::runLabelExpanded(const QString& label, const QString& root,
+                                  const QMap<QString, QString>& inputs) {
+    for (int i = 0; i < m_tasks.size(); ++i) {
+        if (m_tasks[i].label.compare(label, Qt::CaseInsensitive) != 0) continue;
+        if (isRunning()) kill();
+        TaskDef t = m_tasks[i];
+        // Stage 28: ${input:} + ${workspaceFolder} genişletme
+        t.command = TaskChain::expand(t.command, root, QString(), inputs);
+        startProcess(t, root);
+        return;
+    }
 }
 
 void TaskRunner::startProcess(const TaskDef& t, const QString& root) {

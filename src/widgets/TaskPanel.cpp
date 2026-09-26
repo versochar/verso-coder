@@ -1,15 +1,22 @@
 #include "TaskPanel.h"
 #include <QColor>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QFileSystemWatcher>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTextCursor>
+#include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -61,6 +68,7 @@ TaskPanel::TaskPanel(QWidget* parent) : QWidget(parent) {
         m_run->setEnabled(true);
         m_stop->setEnabled(false);
         appendOut(QString("\n[%1 bitti — çıkış %2]\n").arg(label).arg(code));
+        emit taskDone(label, code); // Stage 30: zincir devamı
     });
 }
 
@@ -73,7 +81,9 @@ void TaskPanel::appendOut(const QString& text) {
 void TaskPanel::setRoot(const QString& root) {
     m_root = root;
     reload();
+    setupWatch(); // Stage 28
 }
+
 
 void TaskPanel::reload() {
     m_list->clear();
@@ -131,6 +141,7 @@ void TaskPanel::runTask(const QString& label) {
                     m_run->setEnabled(true);
                     m_stop->setEnabled(false);
                     p->deleteLater();
+                    emit taskDone(t.label, code); // Stage 30
                 });
                 p->start("bash", {"-lc", t.command});
                 return;
@@ -138,13 +149,105 @@ void TaskPanel::runTask(const QString& label) {
         }
         return;
     }
-    m_runner->runLabel(label.split("  [").first().trimmed(), m_root);
+    const QString clean = label.split("  [").first().trimmed();
+    const QMap<QString, QString> vals = resolveInputs();
+    if (!vals.isEmpty() || !m_runner->taskInputs().isEmpty())
+        m_runner->runLabelExpanded(clean, m_root, vals);
+    else
+        m_runner->runLabel(clean, m_root);
+}
+
+// Stage 28: tasks.json inputs → sorular (pickString/confirm/promptString)
+QMap<QString, QString> TaskPanel::resolveInputs() {
+    QMap<QString, QString> out;
+    const QList<TaskChain::TaskInput> ins = m_runner->taskInputs();
+    if (ins.isEmpty()) return out;
+    for (const TaskChain::TaskInput& in : ins) {
+        const QString title = in.description.isEmpty() ? in.id : in.description;
+        if (in.type == "pickString" && !in.options.isEmpty()) {
+            bool ok = false;
+            const QString v = QInputDialog::getItem(this, "Görev Girdisi", title,
+                                                    in.options, 0, false, &ok);
+            if (!ok) return {};
+            out[in.id] = v;
+        } else if (in.type == "confirm") {
+            auto r = QMessageBox::question(this, "Görev Girdisi", title,
+                                           QMessageBox::Yes | QMessageBox::No |
+                                               QMessageBox::Cancel);
+            if (r == QMessageBox::Cancel) return {};
+            out[in.id] = (r == QMessageBox::Yes) ? "true" : "false";
+        } else {
+            bool ok = false;
+            const QString v = QInputDialog::getText(this, "Görev Girdisi", title,
+                                                    QLineEdit::Normal, in.def, &ok);
+            if (!ok) return {};
+            out[in.id] = v;
+        }
+    }
+    return out;
+}
+
+// Stage 28: "watch":true görevleri dosya değişiminde yeniden koşar
+void TaskPanel::setupWatch() {
+    delete m_watchFiles;
+    m_watchFiles = nullptr;
+    delete m_watchTimer;
+    m_watchTimer = nullptr;
+    m_watchLabels.clear();
+    if (m_root.isEmpty() || m_usingDefault) return;
+    for (const TaskDef& t : m_runner->tasks())
+        if (t.watch) m_watchLabels << t.label;
+    if (m_watchLabels.isEmpty()) return;
+    m_watchFiles = new QFileSystemWatcher(this);
+    QStringList dirs = {m_root};
+    QDirIterator it(m_root, QDir::Dirs | QDir::NoDotAndDotDot,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext() && dirs.size() < 60) {
+        const QString d = it.next();
+        if (d.contains("/.git/") || d.contains("/build/") || d.contains("/node_modules/"))
+            continue;
+        dirs << d;
+    }
+    m_watchFiles->addPaths(dirs);
+    m_watchTimer = new QTimer(this);
+    m_watchTimer->setSingleShot(true);
+    m_watchTimer->setInterval(1500);
+    connect(m_watchTimer, &QTimer::timeout, this, [this]() {
+        if (m_runner->isRunning()) {
+            m_watchTimer->start(3000); // meşgulse ertele
+            return;
+        }
+        for (const QString& label : m_watchLabels) {
+            appendOut(QString("\n[izleme] yeniden: %1\n").arg(label));
+            runTask(label);
+            break; // tek seferde ilkini koştur (girdi sorularını yığma)
+        }
+    });
+    connect(m_watchFiles, &QFileSystemWatcher::directoryChanged, m_watchTimer,
+            QOverload<>::of(&QTimer::start));
+    // Stage 31: taşma koruması — patlamada tam tara (sayacı sıfırla)
+    connect(m_watchFiles, &QFileSystemWatcher::directoryChanged, this,
+            [this]() {
+                const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                if (now - m_watchLastMs > 5000) m_watchBursts = 0;
+                m_watchLastMs = now;
+                if (++m_watchBursts > 20) {
+                    m_watchBursts = 0;
+                    reload(); // liste/izleme hedeflerini baştan kur
+                    setupWatch();
+                }
+            });
 }
 
 void TaskPanel::createOrOpenConfig() {
     if (m_root.isEmpty()) return;
     const QString path = TaskRunner::configPathForRoot(m_root);
     if (!QFile::exists(path)) {
+        // Stage 22: yazmadan önce sor
+        auto r = QMessageBox::question(this, "tasks.json",
+            path + "\nbulunamadı. Varsayılan görevlerle oluşturulsun mu?",
+            QMessageBox::Yes | QMessageBox::Cancel);
+        if (r != QMessageBox::Yes) return;
         QDir().mkpath(QFileInfo(path).absolutePath());
         QFile f(path);
         if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))

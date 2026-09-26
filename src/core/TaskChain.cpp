@@ -35,6 +35,26 @@ QList<QString> TaskChain::order(const QMap<QString, QStringList>& deps,
     return out;
 }
 
+QList<TaskChain::TaskInput> TaskChain::parseTaskInputs(const QJsonArray& arr) {
+    QList<TaskInput> out;
+    for (const QJsonValue& v : arr) {
+        const QJsonObject o = v.toObject();
+        TaskInput t;
+        t.id = o.value("id").toString();
+        if (t.id.isEmpty()) continue;
+        t.type = o.value("type").toString("promptString");
+        t.def = o.value("default").toString();
+        t.description = o.value("description").toString();
+        for (const QJsonValue& op : o.value("options").toArray()) {
+            const QString s = op.isObject() ? op.toObject().value("label").toString()
+                                            : op.toString();
+            if (!s.isEmpty()) t.options << s;
+        }
+        out << t;
+    }
+    return out;
+}
+
 QMap<QString, QString> TaskChain::parseInputs(const QJsonArray& arr) {
     QMap<QString, QString> out;
     for (const QJsonValue& v : arr) {

@@ -20,6 +20,8 @@ public:
     bool restore(const QString& backupPath) const;                       // özgüne geri yazar
     bool remove(const QString& backupPath) const;
     int prune(int keepNewest);
+    // Stage 31: kota budama — bayt tavanı + gün yaşı (yeniden eskiye korur)
+    int pruneByQuota(qint64 maxBytes, int maxAgeDays);
     QString dir() const { return m_dir; }
 
 private:

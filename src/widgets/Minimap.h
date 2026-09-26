@@ -29,12 +29,14 @@ protected:
     void mousePressEvent(QMouseEvent* e) override;
     void mouseMoveEvent(QMouseEvent* e) override;
     void leaveEvent(QEvent* e) override;
+    void resizeEvent(QResizeEvent* e) override; // Stage 21
 
 private slots:
     void scheduleUpdate();
 
 private:
     void scrollTo(double frac);
+    void scrollToLine(int line0); // Stage 21: satır-merkezli atlama
     int lineAtY(int y) const;
     QPlainTextEdit* m_editor = nullptr;
     QMap<int, char> m_diff;     // 1-based

@@ -12,6 +12,24 @@ QStringList CommandPalette::recents() {
     return q.value("palette/recents").toStringList().mid(0, kMaxRecents);
 }
 
+// Stage 30: kullanım sayaçları (sık kullanılanlar öne çıkar)
+QMap<QString, int> CommandPalette::uses() {
+    QSettings q("Verso", "VersoCoder");
+    QMap<QString, int> out;
+    q.beginGroup("palette/uses");
+    for (const QString& k : q.childKeys()) out[k] = q.value(k).toInt();
+    q.endGroup();
+    return out;
+}
+
+void CommandPalette::recordUse(const QString& id) {
+    if (id.isEmpty()) return;
+    QSettings q("Verso", "VersoCoder");
+    q.beginGroup("palette/uses");
+    q.setValue(id, q.value(id, 0).toInt() + 1);
+    q.endGroup();
+}
+
 void CommandPalette::pushRecent(const QString& id) {
     QStringList r = recents();
     r.removeAll(id);
@@ -57,11 +75,19 @@ void CommandPalette::setCommands(const QList<PaletteCommand>& cmds) {
 int CommandPalette::matchScore(const QString& pattern, const QString& text) {
     if (pattern.isEmpty()) return 1000;
     QString p = pattern.toLower(), t = text.toLower();
+    if (p == t) return 100000; // birebir
     int ti = 0, score = 0, last = -1;
-    for (QChar c : p) {
+    auto atWordStart = [&](int i) {
+        return i == 0 || t[i - 1] == ' ' || t[i - 1] == '.' || t[i - 1] == '/'
+            || t[i - 1] == '_' || t[i - 1] == '-';
+    };
+    for (int pi = 0; pi < p.size(); ++pi) {
+        const QChar c = p[pi];
         int i = t.indexOf(c, ti);
         if (i < 0) return -1;
-        score += (last + 1 == i) ? 10 : 1;
+        if (pi == 0 && i == 0) score += 1000; // önek
+        else if (atWordStart(i)) score += 25; // kelime başı
+        else score += (last + 1 == i) ? 10 : 1; // bitişik +10
         last = i;
         ti = i + 1;
     }
@@ -73,11 +99,14 @@ void CommandPalette::refilter() {
     if (q.startsWith(">")) q = q.mid(1).trimmed();
     struct Hit { int score; PaletteCommand c; };
     QList<Hit> hits;
+    const QMap<QString, int> useCounts = uses(); // Stage 30
     for (const auto& c : m_cmds) {
         int s = matchScore(q, c.title + " " + c.id);
         if (s >= 0) {
             // Stage 10: son kullanılanlar öne gelir
             if (m_recents.contains(c.id)) s += 500;
+            // Stage 30: sık kullanılanlar (sorgusuzken belirleyici)
+            s += qMin(400, useCounts.value(c.id, 0) * 20);
             hits.append({s, c});
         }
     }

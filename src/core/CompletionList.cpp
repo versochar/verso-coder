@@ -16,6 +16,7 @@ QList<CompletionItem> CompletionList::parse(const QJsonObject& res) {
         CompletionItem it;
         it.label = o["label"].toString();
         if (it.label.isEmpty()) return;
+        it.raw = o; // Stage 27
         // labelDetails.detail
         it.detail = o["detail"].toString();
         const QJsonObject ld = o["labelDetails"].toObject();

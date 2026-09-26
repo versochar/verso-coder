@@ -35,6 +35,8 @@ public:
     // Renk körü modu: tokens() çıktısını dönüştürür ("none" = kapalı)
     void setVisionMode(const QString& mode) { m_vision = mode; }
     QString visionMode() const { return m_vision; }
+    // Stage 23: seçim zemini opaklığı (QSS'e işlenir)
+    void setSelectionOpacity(double o) { m_selOpacity = qBound(0.05, o, 1.0); }
 
 private:
     ThemeManager() = default;
@@ -50,4 +52,5 @@ private:
     ThemeTokens m_preview;
     bool m_hasPreview = false;
     QString m_vision = "none";
+    double m_selOpacity = 1.0; // Stage 23
 };

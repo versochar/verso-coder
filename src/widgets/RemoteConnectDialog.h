@@ -16,6 +16,7 @@ public:
 
 signals:
     void connectRequested(const ConnectionProfile& p);
+    void importSshRequested(); // Stage 30
 
 private slots:
     void refreshList();
@@ -24,6 +25,7 @@ private slots:
     void deleteCurrent();
     void newProfile();
     void doConnect();
+    void showFingerprint(); // Stage 22: known_hosts parmak izi
 
 private:
     void loadToUi(const ConnectionProfile& p);

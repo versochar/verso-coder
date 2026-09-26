@@ -16,6 +16,16 @@ public:
                           const QString& file, const QMap<QString, QString>& inputs);
     // tasks.json "inputs" bölümü: [{id, default}] → id→değer (varsayılanlarla)
     static QMap<QString, QString> parseInputs(const QJsonArray& arr);
+    // Stage 28: tipli girdiler — {id, type: promptString|pickString|confirm,
+    //   default, description, options[]}
+    struct TaskInput {
+        QString id;
+        QString type = "promptString";
+        QString def;
+        QString description;
+        QStringList options;
+    };
+    static QList<TaskInput> parseTaskInputs(const QJsonArray& arr);
     // problemMatcher ("$gcc" | {pattern}) → dosya:satır sorunları
     struct ChainIssue { QString file; int line1 = 1; int col1 = 1; QString message; };
     static QList<ChainIssue> matchProblems(const QString& output, const QString& matcher,

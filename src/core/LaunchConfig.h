@@ -16,4 +16,10 @@ struct LaunchConfig {
     static LaunchConfig defaults(const QString& root);
     QString resolvedProgram(const QString& root) const;
     QString resolvedCwd(const QString& root) const;
+    QStringList resolvedArgs(const QString& root, const QString& file = QString()) const;
+    // Stage 26: ${workspaceFolder} ${file} ${fileBasename} ${fileDirname} genişletme
+    static QString expandVars(const QString& text, const QString& root,
+                              const QString& file = QString());
+    static QStringList knownKeys();
+    static QStringList unknownKeys(const QString& root); // şema dışı anahtarlar
 };

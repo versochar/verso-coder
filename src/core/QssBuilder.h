@@ -13,6 +13,7 @@ public:
         QColor accentOverride;        // geçersizse tokens.accent kullanılır
         TypographySettings typo;
         double scale = 1.0;
+        double selectionOpacity = 1.0; // Stage 23: seçim zemini opaklığı
     };
 
     static QString build(const Input& in);

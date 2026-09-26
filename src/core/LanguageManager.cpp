@@ -53,3 +53,10 @@ QString LanguageManager::t(const QString& key) const {
     if (it == m_dict.end()) return key;
     return it->value(m_lang, key);
 }
+
+// Stage 22: kapsama denetimi — anahtar ilgili dilde ve boş değil mi?
+bool LanguageManager::hasTranslation(const QString& key, const QString& lang) const {
+    auto it = m_dict.find(key);
+    if (it == m_dict.end()) return false;
+    return !it->value(lang).trimmed().isEmpty();
+}

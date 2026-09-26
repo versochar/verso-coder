@@ -96,6 +96,23 @@ struct AppSettings {
     int     historyKeep = 50;         // Stage 17: dosya başına anlık görüntü
     QString version;                // Stage 18: uygulama sürümü
     bool  m_firstRun               = true; // Stage 18: ilk çalıştırma kontrolü
+    bool    newFileTemplate = true;   // Stage 20: yeni dosyaya dil iskeleti koy
+    // --- Stage 23: görünüm/izgara ---
+    QString editorFontFamily;           // boşsa varsayılan mono yığını
+    QString cursorStyle = "bar";        // "bar" | "block" | "underline"
+    int     cursorBlink = 0;            // ms (0 = sistem)
+    bool    smoothScroll = true;        // yumuşak kaydırma
+    double  lineHighlightOpacity = 1.0; // 0.1–1.0
+    double  selectionOpacity = 1.0;     // 0.2–1.0
+    QString bracketStyle = "renk";      // "renk" | "zemin" | "altcizgi"
+    bool    showLineEnds = false;       // satır sonu işaretleri (¶)
+    QString foldGutter = "sol";         // "sol" | "sag" | "gizli"
+    int     minimapWidth = 90;          // px
+    int     aiTokenBudget = 0;            // Stage 25: oturum token tavanı (0=kapalı)
+    bool    autoReload = false;           // Stage 28: harici değişiklikte sessiz yükle
+    bool    crashReport = false;          // Stage 31: çökme izi yaz (opt-in)
+    bool    testOnSave = false;           // Stage 25: kaydetmede ilgili testi koştur
+    int     aiScheduleMin = 0;            // Stage 30: periyodik AI denetimi (dk, 0=kapalı)
 };
 
 class SettingsManager {

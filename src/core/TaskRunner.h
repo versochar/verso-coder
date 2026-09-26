@@ -1,4 +1,6 @@
 #pragma once
+#include "TaskChain.h"
+#include <QJsonArray>
 #include <QObject>
 #include <QProcess>
 #include <QString>
@@ -9,6 +11,8 @@ struct TaskDef {
     QString command;
     QString cwd;    // boşsa proje kökü
     QString group;  // "build" | "test" | "" ...
+    int scheduleMin = 0; // Stage 25: >0 ise dakikada bir arka planda koşar
+    bool watch = false;   // Stage 28: dosya değişiminde yeniden koş
 };
 
 // tasks.json çalıştırıcı (VS Code benzeri minimal biçim).
@@ -28,6 +32,11 @@ public:
 
     void run(int index, const QString& root);
     void runLabel(const QString& label, const QString& root);
+    // Stage 28: ${input:} değerleriyle çalıştır
+    void runLabelExpanded(const QString& label, const QString& root,
+                          const QMap<QString, QString>& inputs);
+    QList<TaskChain::TaskInput> taskInputs() const;
+    QJsonArray tasksJsonArray() const; // Stage 30: dependsOn zinciri için
     void kill();
 
 signals:
@@ -39,6 +48,7 @@ private:
     void startProcess(const TaskDef& t, const QString& root);
 
     QList<TaskDef> m_tasks;
+    QString m_lastJson; // Stage 28: inputs bölümü için ham metin
     QProcess m_proc;
     QString m_current;
 };

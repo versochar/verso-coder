@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "1.0.0"; }
+QString AboutInfo::version() { return "1.4.0"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,14 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "1.4.0 (Stage 19-22)\n"
+        "  • Canlı işbirliği (WebSocket) + görev zinciri (dependsOn) + eklenti API v1\n"
+        "  • Yeni dosya dil seçimi (20 dil + iskelet) + ilk-çalıştırma sihirbazı\n"
+        "  • Pano halkası, çoklu imleç satır sonları, sekme sabitleme, commit şablonları\n"
+        "  • Erişilebilirlik + çeviri kapsama denetimleri, tanı raporu, fabrika ayarları\n"
+        "1.3.0 (Stage 15-18)\n"
+        "  • AI hattı (hayalet tamamlama, ajan, RAG) + uzaktan geliştirme (SSH)\n"
+        "  • Editör deneyimi (snippet, outline, yerel geçmiş) + çok köklü profil\n"
         "1.0.0 (Stage 8)\n"
         "  • Komut satırı argümanları + tek örnek (single instance)\n"
         "  • Araç zinciri teşhisi (git/clangd/pylsp/ollama/...)\n"

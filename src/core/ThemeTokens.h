@@ -29,4 +29,6 @@ struct ThemeTokens {
     // renk yardımcıları
     static QColor mix(const QColor& a, const QColor& b, double t); // t=0 → a
     static QColor withAlphaF(const QColor& c, double a);
+    // QSS'ye alfa korumalı renk: "#aarrggbb" (QColor::name() alfayı düşürür!)
+    static QString css(const QColor& c) { return c.name(QColor::HexArgb); }
 };

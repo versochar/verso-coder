@@ -11,6 +11,10 @@ CompletionPopup::CompletionPopup(QWidget* parent) : QListWidget(parent) {
         int r = row(it);
         if (r >= 0 && r < m_items.size()) emit chosen(m_items[r]);
     });
+    // Stage 27: vurgu değişince dokümantasyon isteği
+    connect(this, &QListWidget::currentRowChanged, this, [this](int r) {
+        if (r >= 0 && r < m_items.size()) emit highlighted(m_items[r]);
+    });
 }
 
 void CompletionPopup::showItems(const QList<CompletionItem>& items, const QPoint& globalPos) {

@@ -2,6 +2,7 @@
 #include "../core/AccentColor.h"
 #include "../core/Commands.h"
 #include "../core/KeymapPresets.h"
+#include "../core/ShortcutCheck.h"
 #include "../core/OllamaClient.h"
 #include "../core/SettingsIO.h"
 #include "../core/SettingsManager.h"
@@ -111,6 +112,12 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_spellLang->setCurrentText(s.spellLang);
     gf->addRow("Yazım dili:", m_spellLang);
     gf->addRow(m_autoSave);
+    m_autoReload = new QCheckBox("Harici değişiklikte otomatik yeniden yükle", general);
+    m_autoReload->setChecked(s.autoReload);
+    gf->addRow(m_autoReload); // Stage 28
+    m_crashReport = new QCheckBox("Çökme izi yaz (hata bildirimine yardımcı olur)", general);
+    m_crashReport->setChecked(s.crashReport);
+    gf->addRow(m_crashReport); // Stage 31
     gf->addRow(m_restore);
     auto* note = new QLabel("Dil ve tema Kaydet'e basınca anında uygulanır.", general);
     note->setWordWrap(true);
@@ -135,6 +142,13 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_ctx->setRange(512, 131072);
     m_ctx->setSingleStep(1024);
     m_ctx->setValue(s.contextWindow);
+    // Stage 25: token bütçesi (0 = kapalı)
+    m_budget = new QSpinBox(ai);
+    m_budget->setRange(0, 10000000);
+    m_budget->setSingleStep(10000);
+    m_budget->setSpecialValueText("Kapalı");
+    m_budget->setValue(s.aiTokenBudget);
+    m_budget->setToolTip("Oturum token tavanı; aşınca uyarı verilir");
 
     m_backend = new QComboBox(ai);
     m_backend->addItems({"CUDA", "ROCm", "Vulkan", "CPU"});
@@ -182,6 +196,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     af->addRow("", m_streaming);
     af->addRow("", m_ghost);
     af->addRow("Context Window:", m_ctx);
+    af->addRow("Token bütçesi:", m_budget);
     af->addRow("GPU Backend:", m_backend);
     af->addRow("GPU Offload (num_gpu):", m_gpu);
     af->addRow("Temperature:", tempRow);
@@ -267,18 +282,31 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     fontRow->addWidget(m_uiFont, 1);
     fontRow->addWidget(m_uiFontSize);
     lf->addRow("Arayüz fontu:", fontRow);
-    m_lineHeight = new QDoubleSpinBox(look);
-    m_lineHeight->setRange(1.0, 2.0);
-    m_lineHeight->setSingleStep(0.1);
-    m_lineHeight->setValue(s.lineHeight);
+    // Stage 23: satır yüksekliği kaydırıcısı (1.0–2.0)
+    m_lineHeight = new QSlider(Qt::Horizontal, look);
+    m_lineHeight->setRange(10, 20);
+    m_lineHeight->setValue(int(s.lineHeight * 10 + 0.5));
     m_lineHeight->setToolTip("Editörde satırlar arası boşluk çarpanı");
-    lf->addRow("Satır yüksekliği:", m_lineHeight);
-    m_letterSpacing = new QDoubleSpinBox(look);
-    m_letterSpacing->setRange(-5.0, 25.0);
-    m_letterSpacing->setSingleStep(1.0);
-    m_letterSpacing->setSuffix(" %");
-    m_letterSpacing->setValue(s.letterSpacing);
-    lf->addRow("Harf aralığı:", m_letterSpacing);
+    m_lineHeightVal = new QLabel(QString::number(s.lineHeight, 'f', 1) + "×", look);
+    connect(m_lineHeight, &QSlider::valueChanged, this, [this](int v) {
+        m_lineHeightVal->setText(QString::number(v / 10.0, 'f', 1) + "×");
+    });
+    auto* lhRow = new QHBoxLayout();
+    lhRow->addWidget(m_lineHeight, 1);
+    lhRow->addWidget(m_lineHeightVal);
+    lf->addRow("Satır yüksekliği:", lhRow);
+    // Stage 23: harf aralığı kaydırıcısı (-5…+25 %)
+    m_letterSpacing = new QSlider(Qt::Horizontal, look);
+    m_letterSpacing->setRange(-5, 25);
+    m_letterSpacing->setValue(int(s.letterSpacing));
+    m_letterSpacingVal = new QLabel(QString::number(int(s.letterSpacing)) + " %", look);
+    connect(m_letterSpacing, &QSlider::valueChanged, this, [this](int v) {
+        m_letterSpacingVal->setText(QString::number(v) + " %");
+    });
+    auto* lsRow = new QHBoxLayout();
+    lsRow->addWidget(m_letterSpacing, 1);
+    lsRow->addWidget(m_letterSpacingVal);
+    lf->addRow("Harf aralığı:", lsRow);
     m_ligatures = new QCheckBox("Ligature (birleşik glifler, örn. => ve !=)", look);
     m_ligatures->setChecked(s.ligatures);
     lf->addRow(m_ligatures);
@@ -287,9 +315,60 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_cursorWidth->setSuffix(" px");
     m_cursorWidth->setValue(s.cursorWidth);
     lf->addRow("İmleç genişliği:", m_cursorWidth);
+    // Stage 23: imleç stili + yanıp sönme
+    m_cursorStyle = new QComboBox(look);
+    m_cursorStyle->addItems({"bar: Çubuk", "block: Blok", "underline: Alt çizgi"});
+    for (int i = 0; i < m_cursorStyle->count(); ++i)
+        if (m_cursorStyle->itemText(i).startsWith(s.cursorStyle + ":")) {
+            m_cursorStyle->setCurrentIndex(i);
+            break;
+        }
+    lf->addRow("İmleç stili:", m_cursorStyle);
+    m_cursorBlink = new QSpinBox(look);
+    m_cursorBlink->setRange(0, 2000);
+    m_cursorBlink->setSingleStep(100);
+    m_cursorBlink->setSpecialValueText("Sistem");
+    m_cursorBlink->setSuffix(" ms");
+    m_cursorBlink->setValue(s.cursorBlink);
+    m_cursorBlink->setToolTip("0 = sistem varsayılanı");
+    lf->addRow("İmleç yanıp sönme:", m_cursorBlink);
+    m_smoothScroll = new QCheckBox("Yumuşak kaydırma", look);
+    m_smoothScroll->setChecked(s.smoothScroll);
+    lf->addRow(m_smoothScroll);
     m_lineHighlight = new QCheckBox("Aktif satır vurgusu", look);
     m_lineHighlight->setChecked(s.lineHighlightOn);
     lf->addRow(m_lineHighlight);
+    // Stage 23: vurgu opaklıkları + parantez stili
+    m_lineHiOpacity = new QSlider(Qt::Horizontal, look);
+    m_lineHiOpacity->setRange(10, 100);
+    m_lineHiOpacity->setValue(int(s.lineHighlightOpacity * 100 + 0.5));
+    m_lineHiOpacityVal = new QLabel(QString::number(int(s.lineHighlightOpacity * 100)) + " %", look);
+    connect(m_lineHiOpacity, &QSlider::valueChanged, this, [this](int v) {
+        m_lineHiOpacityVal->setText(QString::number(v) + " %");
+    });
+    auto* lhoRow = new QHBoxLayout();
+    lhoRow->addWidget(m_lineHiOpacity, 1);
+    lhoRow->addWidget(m_lineHiOpacityVal);
+    lf->addRow("Satır vurgusu:", lhoRow);
+    m_selOpacity = new QSlider(Qt::Horizontal, look);
+    m_selOpacity->setRange(20, 100);
+    m_selOpacity->setValue(int(s.selectionOpacity * 100 + 0.5));
+    m_selOpacityVal = new QLabel(QString::number(int(s.selectionOpacity * 100)) + " %", look);
+    connect(m_selOpacity, &QSlider::valueChanged, this, [this](int v) {
+        m_selOpacityVal->setText(QString::number(v) + " %");
+    });
+    auto* soRow = new QHBoxLayout();
+    soRow->addWidget(m_selOpacity, 1);
+    soRow->addWidget(m_selOpacityVal);
+    lf->addRow("Seçim opaklığı:", soRow);
+    m_bracketStyle = new QComboBox(look);
+    m_bracketStyle->addItems({"renk: Renkli", "zemin: Zemin", "altcizgi: Alt çizgi"});
+    for (int i = 0; i < m_bracketStyle->count(); ++i)
+        if (m_bracketStyle->itemText(i).startsWith(s.bracketStyle + ":")) {
+            m_bracketStyle->setCurrentIndex(i);
+            break;
+        }
+    lf->addRow("Parantez vurgusu:", m_bracketStyle);
     // Stage 10: azaltılmış hareket (erişilebilirlik)
     m_reducedMotion = new QCheckBox("Azaltılmış hareket (animasyonları kapat)", look);
     m_reducedMotion->setToolTip("Animasyonlu geçişler anında uygulanır");
@@ -299,6 +378,23 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_showWhitespace = new QCheckBox("Boşluk karakterlerini göster ( · → ¶ )", look);
     m_showWhitespace->setChecked(s.showWhitespace);
     lf->addRow(m_showWhitespace);
+    // Stage 23: satır sonu işaretleri + katlama oku konumu + minimap genişliği
+    m_showLineEnds = new QCheckBox("Satır sonu işaretlerini göster (¶)", look);
+    m_showLineEnds->setChecked(s.showLineEnds);
+    lf->addRow(m_showLineEnds);
+    m_foldGutter = new QComboBox(look);
+    m_foldGutter->addItems({"sol: Sol", "sag: Sağ", "gizli: Gizli"});
+    for (int i = 0; i < m_foldGutter->count(); ++i)
+        if (m_foldGutter->itemText(i).startsWith(s.foldGutter + ":")) {
+            m_foldGutter->setCurrentIndex(i);
+            break;
+        }
+    lf->addRow("Katlama oku:", m_foldGutter);
+    m_minimapWidth = new QSpinBox(look);
+    m_minimapWidth->setRange(40, 220);
+    m_minimapWidth->setSuffix(" px");
+    m_minimapWidth->setValue(s.minimapWidth);
+    lf->addRow("Minimap genişliği:", m_minimapWidth);
     m_ruler = new QSpinBox(look);
     m_ruler->setRange(0, 240);
     m_ruler->setSpecialValueText("Kapalı");
@@ -409,8 +505,16 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
         auto* edit = new QKeySequenceEdit(effectiveKeys(s.shortcuts, cmds[i]));
         edit->setClearButtonEnabled(true);
         m_keys->setCellWidget(i, 1, edit);
+        connect(edit, &QKeySequenceEdit::editingFinished, this,
+                &SettingsDialog::updateKeyWarn);
     }
     kl->addWidget(m_keys);
+    // Stage 21: çakışma uyarısı
+    m_keyWarn = new QLabel(keys);
+    m_keyWarn->setWordWrap(true);
+    m_keyWarn->setStyleSheet("color:#f44747;");
+    m_keyWarn->setVisible(false);
+    kl->addWidget(m_keyWarn);
     auto* ktop = new QHBoxLayout();
     ktop->addWidget(new QLabel("Kısayol profili:", keys));
     auto* presetBox = new QComboBox(keys);
@@ -427,7 +531,9 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
             if (!edit) continue;
             if (p.contains(id)) edit->setKeySequence(QKeySequence(p.value(id)));
         }
+        updateKeyWarn();
     });
+    updateKeyWarn();
     tabs->addTab(keys, "Kısayollar");
 
     auto* buttons = new QHBoxLayout();
@@ -532,14 +638,29 @@ void SettingsDialog::filterPages(const QString& text) {
     }
 }
 
-void SettingsDialog::saveAll() {
-    AppSettings cur = SettingsManager::instance().load(); // oturum alanlarını koru
+// Stage 21: tablodaki kısayolları topla, çakışmaları uyarı satırında göster
+void SettingsDialog::updateKeyWarn() {
+    QMap<QString, QString> m;
+    for (int i = 0; i < m_keys->rowCount(); ++i) {
+        auto* it = m_keys->item(i, 0);
+        auto* edit = qobject_cast<QKeySequenceEdit*>(m_keys->cellWidget(i, 1));
+        if (!it || !edit) continue;
+        m[it->data(Qt::UserRole).toString()] = edit->keySequence().toString();
+    }
+    const QStringList bad = ShortcutCheck::findConflicts(m);
+    m_keyWarn->setVisible(!bad.isEmpty());
+    if (!bad.isEmpty())
+        m_keyWarn->setText("⚠ Çakışan kısayollar: " + bad.join("  ·  "));
+}
+
+void SettingsDialog::saveAll() {    AppSettings cur = SettingsManager::instance().load(); // oturum alanlarını koru
     AppSettings s = cur;
     s.language = (m_lang->currentIndex() == 1) ? "en" : "tr";
     s.theme = m_theme->currentText();
     s.ollamaHost = m_host->text().trimmed();
     s.ollamaModel = m_model->currentText().trimmed();
     s.contextWindow = m_ctx->value();
+    s.aiTokenBudget = m_budget ? m_budget->value() : 0; // Stage 25
     s.gpuBackend = m_backend->currentText();
     s.gpuLayers = (s.gpuBackend == "CPU") ? 0 : m_gpu->value();
     s.temperature = m_tempSlider->value() / 100.0;
@@ -548,6 +669,8 @@ void SettingsDialog::saveAll() {
     s.fontSize = m_fontSize->value();
     s.tabWidth = m_tabWidth->value();
     s.autoSave = m_autoSave->isChecked();
+    s.autoReload = m_autoReload->isChecked(); // Stage 28
+    s.crashReport = m_crashReport->isChecked(); // Stage 31
     s.restoreSession = m_restore->isChecked();
     s.aiStreaming = m_streaming->isChecked();
     s.aiGhost = m_ghost->isChecked(); // Stage 15
@@ -571,10 +694,20 @@ void SettingsDialog::saveAll() {
                                          : AccentColor::preset(acc).name();
     s.uiFontFamily = m_uiFont->currentFont().family();
     s.uiFontSize = m_uiFontSize->value();
-    s.lineHeight = m_lineHeight->value();
+    s.lineHeight = m_lineHeight->value() / 10.0;
     s.letterSpacing = m_letterSpacing->value();
     s.ligatures = m_ligatures->isChecked();
     s.cursorWidth = m_cursorWidth->value();
+    // Stage 23
+    s.cursorStyle = m_cursorStyle->currentText().section(':', 0, 0);
+    s.cursorBlink = m_cursorBlink->value();
+    s.smoothScroll = m_smoothScroll->isChecked();
+    s.lineHighlightOpacity = m_lineHiOpacity->value() / 100.0;
+    s.selectionOpacity = m_selOpacity->value() / 100.0;
+    s.bracketStyle = m_bracketStyle->currentText().section(':', 0, 0);
+    s.showLineEnds = m_showLineEnds->isChecked();
+    s.foldGutter = m_foldGutter->currentText().section(':', 0, 0);
+    s.minimapWidth = m_minimapWidth->value();
     s.lineHighlightOn = m_lineHighlight->isChecked();
     s.reducedMotion = m_reducedMotion->isChecked(); // Stage 10
     s.showWhitespace = m_showWhitespace->isChecked(); // Stage 11

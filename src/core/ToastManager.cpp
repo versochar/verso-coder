@@ -53,6 +53,13 @@ int ToastManager::visibleCount() const {
 
 void ToastManager::show(ToastType type, const QString& message, int ms) {
     if (!m_host || !m_overlay || message.trimmed().isEmpty()) return;
+    // Stage 28: geçmişe kaydet (tekrarları üste taşı)
+    {
+        const QString h = QString("[%1] %2").arg(typeString(type), message.left(200));
+        m_history.removeAll(h);
+        m_history.prepend(h);
+        while (m_history.size() > 50) m_history.removeLast();
+    }
 
     // Aynı mesaj görünüyorsa: yenisini ekleme, süresini tazele
     const auto toasts = m_overlay->findChildren<QFrame*>(QString(), Qt::FindDirectChildrenOnly);

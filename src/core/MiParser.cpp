@@ -31,6 +31,7 @@ QVariant MiParser::parseValue(const QString& s, int& pos) {
         ++pos;
         QVariantMap m;
         while (pos < s.size() && s[pos] != '}') {
+            const int mark = pos; // Stage 31: ilerleme garantisi (fuzz bulgusu)
             skipWs(s, pos);
             QString key;
             while (pos < s.size() && (s[pos].isLetterOrNumber() || s[pos] == '_' || s[pos] == '-'))
@@ -39,6 +40,7 @@ QVariant MiParser::parseValue(const QString& s, int& pos) {
             m[key] = parseValue(s, pos);
             skipWs(s, pos);
             if (pos < s.size() && s[pos] == ',') ++pos;
+            if (pos == mark) ++pos; // çöp karakter: zorla ilerle
         }
         if (pos < s.size() && s[pos] == '}') ++pos;
         return m;

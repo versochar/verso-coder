@@ -11,6 +11,7 @@ struct CompletionItem {
     int kind = 1; // 1 Text ... 3 Function, 6 Variable, 7 Class, 14 Keyword
     QString sortText;
     QString filterText;
+    QJsonObject raw; // Stage 27: completionItem/resolve için ham öğe
 };
 
 class CompletionList {

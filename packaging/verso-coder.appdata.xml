@@ -5,6 +5,8 @@
   <summary>Hafif, VS Code tarzı kod editörü</summary>
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
+  <url type="homepage">https://github.com/versochar/verso-coder</url>
+  <developer><name>versochar</name></developer>
   <description>
     <p>
       Verso Coder; çoklu imleç, kod katlama, LSP (clangd/pylsp), Git entegrasyonu,
@@ -13,6 +15,9 @@
   </description>
   <launchable type="desktop-id">verso-coder.desktop</launchable>
   <releases>
+    <release version="1.4.0" date="2026-09-26">
+      <description><p>Canlı işbirliği, görev zinciri, eklenti API, yeni dosya akışı, üretkenlik paketi, sürüm olgunluğu.</p></description>
+    </release>
     <release version="1.0.0" date="2026-09-24">
       <description><p>İlk sürüm: 20 + 71 özellik, 12 stage.</p></description>
     </release>

@@ -1,4 +1,5 @@
 #pragma once
+#include <QCheckBox>
 #include <QComboBox>
 #include <QLineEdit>
 #include <QListWidget>
@@ -42,4 +43,6 @@ private:
     QListWidget* m_files;
     QTextEdit* m_out;
     QLineEdit* m_msg;
+    QComboBox* m_tpl = nullptr; // Stage 21: ileti şablonu
+    QCheckBox* m_amend = nullptr; // Stage 21: commit --amend
 };

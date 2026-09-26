@@ -160,6 +160,188 @@ void GdbDriver::evaluate(const QString& expr, std::function<void(QString)> done)
          });
 }
 
+// Stage 26: MI alıntılama — tersbölü + çift tırnak kaçar
+QString GdbDriver::miQuote(const QString& s) {
+    QString e = s;
+    e.replace('\\', "\\\\");
+    e.replace('"', "\\\"");
+    return '"' + e + '"';
+}
+
+void GdbDriver::breakCondition(const QString& number, const QString& cond) {
+    if (!number.isEmpty()) command("-break-condition " + number + " " + miQuote(cond), nullptr);
+}
+
+void GdbDriver::breakAfter(const QString& number, int count) {
+    if (!number.isEmpty() && count > 0)
+        command(QString("-break-after %1 %2").arg(number).arg(count), nullptr);
+}
+
+void GdbDriver::breakFunction(const QString& func, std::function<void(QString)> done) {
+    command("-break-insert " + miQuote(func.trimmed()), [done](QVariantMap r) {
+        if (done) done(r.value("bkpt").toMap().value("number").toString());
+    });
+}
+
+void GdbDriver::breakWatch(const QString& expr, const QString& access,
+                            std::function<void(QString)> done) {
+    QString cmd = "-break-watch";
+    if (access == "r") cmd += " -r";
+    else if (access == "rw" || access == "a") cmd += " -a";
+    cmd += " " + miQuote(expr.trimmed());
+    command(cmd, [done](QVariantMap r) {
+        if (done) done(r.value("wpt").toMap().value("number").toString());
+    });
+}
+
+void GdbDriver::execStepInstruction() { command("-exec-step-instruction", nullptr); }
+void GdbDriver::execNextInstruction() { command("-exec-next-instruction", nullptr); }
+
+void GdbDriver::watchCreate(const QString& expr, std::function<void(QString)> done) {
+    static int seq = 0;
+    const QString name = QString("vverso%1").arg(++seq);
+    command("-var-create " + name + " * " + miQuote(expr.trimmed()),
+            [done, name](QVariantMap r) {
+                if (done) done(r.value("_class").toString() == "error" ? QString() : name);
+            });
+}
+
+void GdbDriver::watchUpdateAll(std::function<void(QVariantList)> done) {
+    command("-var-update --all *", [done](QVariantMap r) {
+        if (done) done(r.value("changelist").toList());
+    });
+}
+
+void GdbDriver::watchEvaluate(const QString& name, std::function<void(QString)> done) {
+    command("-var-evaluate-expression " + name, [done](QVariantMap r) {
+        if (done) done(r.value("value").toString());
+    });
+}
+
+void GdbDriver::watchDelete(const QString& name) {
+    if (!name.isEmpty()) command("-var-delete " + name, nullptr);
+}
+
+void GdbDriver::registers(std::function<void(QList<QPair<QString, QString>>)> done) {
+    command("-data-list-register-names", [this, done](QVariantMap rn) {
+        const QVariantList names = rn.value("register-names").toList();
+        command("-data-list-register-values x", [done, names](QVariantMap rv) {
+            QList<QPair<QString, QString>> out;
+            const QVariantList vals = rv.value("register-values").toList();
+            for (const QVariant& v : vals) {
+                const QVariantMap m = v.toMap();
+                const int n = m.value("number").toInt();
+                const QString nm = (n >= 0 && n < names.size()) ? names[n].toString()
+                                                                : QString("r%1").arg(n);
+                out << qMakePair(nm, m.value("value").toString());
+            }
+            if (done) done(out);
+        });
+    });
+}
+
+void GdbDriver::memoryRead(const QString& addr, int count,
+                            std::function<void(QString)> done) {
+    command(QString("-data-read-memory-bytes %1 %2").arg(addr.trimmed()).arg(qMax(1, count)),
+            [done](QVariantMap r) {
+                QString out;
+                for (const QVariant& v : r.value("memory").toList()) {
+                    const QVariantMap m = v.toMap();
+                    out += m.value("address").toString() + ": ";
+                    QStringList bytes;
+                    for (const QVariant& b : m.value("data").toList())
+                        bytes << b.toString();
+                    out += bytes.join(" ") + "\n";
+                    QString ascii;
+                    for (const QVariant& b : m.value("data").toList()) {
+                        bool ok = false;
+                        const int byte = QString(b.toString()).toInt(&ok, 0);
+                        ascii += (ok && byte >= 32 && byte < 127) ? QChar(byte) : '.';
+                    }
+                    out += "  [" + ascii + "]\n";
+                }
+                if (done) done(out.trimmed());
+            });
+}
+
+void GdbDriver::disassemble(const QString& file, int line1, int count,
+                             std::function<void(QList<QMap<QString, QString>>)> done) {
+    command(QString("-data-disassemble -f %1 -l %2 -n %3 -- 0")
+                .arg(miQuote(file))
+                .arg(qMax(1, line1))
+                .arg(qMax(1, count)),
+            [done](QVariantMap r) {
+                QList<QMap<QString, QString>> out;
+                for (const QVariant& v : r.value("asm_insns").toList()) {
+                    const QVariantMap m = v.toMap();
+                    QMap<QString, QString> row;
+                    row["address"] = m.value("address").toString();
+                    row["func"] = m.value("func-name").toString();
+                    row["offset"] = m.value("offset").toString();
+                    row["inst"] = m.value("inst").toString();
+                    out << row;
+                }
+                if (done) done(out);
+            });
+}
+
+void GdbDriver::threadList(std::function<void(QList<ThreadInfo>)> done) {
+    command("-thread-info", [done](QVariantMap r) {
+        QList<ThreadInfo> out;
+        for (const QVariant& v : r.value("threads").toList()) {
+            const QVariantMap m = v.toMap();
+            ThreadInfo t;
+            t.id = m.value("id").toString();
+            t.target = m.value("target-id").toString();
+            t.name = m.value("name").toString();
+            if (t.name.isEmpty()) t.name = m.value("details").toString();
+            out << t;
+        }
+        if (done) done(out);
+    });
+}
+
+void GdbDriver::threadSelect(const QString& id) {
+    if (!id.isEmpty()) command("-thread-select " + id, nullptr);
+}
+
+void GdbDriver::attach(int pid, std::function<void(bool)> done) {
+    if (pid <= 0) {
+        if (done) done(false);
+        return;
+    }
+    command(QString("-target-attach %1").arg(pid), [done](QVariantMap r) {
+        if (done) done(r.value("_class").toString() != "error");
+    });
+}
+
+void GdbDriver::openCore(const QString& program, const QString& coreFile,
+                          std::function<void(bool)> done) {
+    command("-file-exec-and-symbols " + miQuote(program), [this, coreFile, done](QVariantMap r) {
+        if (r.value("_class").toString() == "error") {
+            if (done) done(false);
+            return;
+        }
+        command("-target-select core " + miQuote(coreFile), [done](QVariantMap r2) {
+            if (done) done(r2.value("_class").toString() != "error");
+        });
+    });
+}
+
+void GdbDriver::substitutePath(const QString& from, const QString& to) {
+    if (!from.trimmed().isEmpty())
+        command("-gdb-set substitute-path " + miQuote(from.trimmed()) + " " + miQuote(to),
+                nullptr);
+}
+
+void GdbDriver::setVariable(const QString& expr, const QString& value,
+                             std::function<void(bool)> done) {
+    command("-gdb-set variable " + expr.trimmed() + " = " + value.trimmed(),
+            [done](QVariantMap r) {
+                if (done) done(r.value("_class").toString() != "error");
+            });
+}
+
 void GdbDriver::onReadyRead() {
     m_buf += m_proc.readAllStandardOutput();
     while (true) {

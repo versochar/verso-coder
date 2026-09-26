@@ -11,6 +11,10 @@
 #include <QSet>
 #include <QSyntaxHighlighter>
 
+class QPropertyAnimation;
+class QTimer;
+class QProcess;
+
 class CodeHighlighter : public QSyntaxHighlighter {
 public:
     explicit CodeHighlighter(QTextDocument* doc);
@@ -39,6 +43,12 @@ public:
     void setFilePath(const QString& p) { m_path = p; }
     bool loadFile(const QString& path);
     bool saveFile(const QString& path = QString());
+    // Stage 20: yeni dosya dili ("python" | "plain" | "") + Adsız sayaç
+    QString lang() const { return m_lang; }
+    void setLang(const QString& id);
+    int untitledNo() const { return m_untitledNo; }
+    void setUntitledNo(int n) { m_untitledNo = n; }
+    bool isUntitled() const { return m_path.isEmpty(); }
     // Stage 16: uzak belge — içerik ssh ile gelir, yol "ssh://..." biçimindedir
     bool isRemote() const { return m_path.startsWith("ssh://"); }
     // Stage 16: önişlemci içeriği uzaktan gelen belge (kaydetme MainWindow'da)
@@ -66,6 +76,21 @@ public:
     int cursorOffset() const;
     void setCursorOffset(int pos);
     QString lineEnding() const { return m_crlf ? "CRLF" : "LF"; }
+    void setCrlf(bool on); // Stage 21: belgeyi dönüştürerek satır sonunu değiştirir
+    // Stage 23: görünüm — imleç stili, kaydırma, parantez, katlama oku
+    void setCursorStyle(const QString& st); // "bar" | "block" | "underline"
+    void setCursorBlinkMs(int ms);          // 0 = sistem
+    void setSmoothScroll(bool on);
+    void setBracketStyle(const QString& st); // "renk" | "zemin" | "altcizgi"
+    void setFoldGutter(const QString& pos);  // "sol" | "sag" | "gizli"
+    void setLineHiOpacity(double o);
+    void setShowLineEnds(bool on);
+    void setCodeLens(const QList<struct InlayHint>& lens); // Stage 27: gönderme sayısı
+    struct ColorBox { int line0 = -1; int start = -1; int end = -1; QColor color; };
+    void setColorBoxes(const QList<ColorBox>& boxes); // Stage 27: renk kutuları
+    void setBookmarks(const QList<int>& lines1); // Stage 28: yer imleri (1-based)
+    void refreshBlame();      // Stage 24: imleç satırının blame'i (debounce'lu)
+    void refreshBlameAges();  // Stage 24: tüm dosya yaşları (ısı haritası)
 
     // Stage 4 API
     void setDiagnostics(const QList<LspDiag>& diags);
@@ -154,6 +179,7 @@ public:
 signals:
     void externalChangeDetected(CodeEditor* editor);
     void breakpointToggleRequested(int line1); // Stage 14: gutter tıklaması
+    void colorBoxClicked(int line0);           // Stage 27: renk kutusu
 
 protected:
     void resizeEvent(QResizeEvent* e) override;
@@ -163,6 +189,7 @@ protected:
     void mouseMoveEvent(QMouseEvent* e) override;
     void mouseReleaseEvent(QMouseEvent* e) override;
     void paintEvent(QPaintEvent* e) override;
+    void wheelEvent(QWheelEvent* e) override; // Stage 23: yumuşak kaydırma
     void contextMenuEvent(QContextMenuEvent* e) override;
 
 private slots:
@@ -183,6 +210,23 @@ private:
 
     QWidget* m_gutter;
     QString m_path;
+    QString m_lang;      // Stage 20: yeni dosya dili (boş = dosya uzantısından)
+    // Stage 23: görünüm durumu
+    QString m_cursorStyle = "bar";
+    QTimer* m_blinkTimer = nullptr;
+    bool m_blinkOn = true;
+    bool m_smooth = true;
+    QString m_bracketStyle = "renk";
+    QString m_foldGutter = "sol";
+    double m_lineHiOpacity = 1.0;
+    QPropertyAnimation* m_smoothAnim = nullptr;
+    // Stage 24: blame hayaleti + ısı haritası
+    QTimer* m_blameTimer = nullptr;
+    QProcess* m_blameProc = nullptr;
+    int m_blameLine = -1; // 0-based, istenen satır
+    QList<struct InlayHint> m_blame;
+    QMap<int, qint64> m_blameAges; // 1-based satır → author-time
+    int m_untitledNo = 0; // Stage 20: Adsız-N sayacı (0 = normal dosya)
     CodeHighlighter* m_highlighter;
     QDateTime m_lastMtime;
     bool m_crlf = false;
@@ -218,6 +262,9 @@ private:
     QList<struct SemanticToken> m_semantic;
     QStringList m_semLegend;
     QList<struct InlayHint> m_inlay;
+    QList<struct InlayHint> m_lens;      // Stage 27: code lens (gönderme sayısı)
+    QList<ColorBox> m_colorBoxes;        // Stage 27
+    QList<int> m_bookmarks;               // Stage 28: yer imi satırları (1-based)
     // Stage 14
     QSet<int> m_breakpoints;   // 1-based kesme satırları
     int m_frameLine = -1;      // 0-based çalışan çerçeve

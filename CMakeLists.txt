@@ -57,6 +57,21 @@ set(SOURCES
     src/core/ToastManager.cpp
     src/core/LayoutPresets.cpp
     src/core/UiProfile.cpp
+    src/core/A11yCheck.cpp
+    src/core/GridCheck.cpp
+    src/core/LspServers.cpp
+    src/core/MergeParse.cpp
+    src/core/SshConfig.cpp
+    src/core/Stability.cpp
+    src/core/BackupManager.cpp
+    src/core/CrashHandler.cpp
+    src/core/WorkspaceSymbols.cpp
+    src/core/CodeMetrics.cpp
+    src/core/DuplicateFinder.cpp
+    src/core/GitBlame.cpp
+    src/core/PromptVars.cpp
+    src/core/MacroRecorder.cpp
+    src/core/ExternalTools.cpp
     src/core/TaskChain.cpp
     src/core/PluginEngine.cpp
     src/core/CollabMerge.cpp
@@ -158,6 +173,23 @@ set(SOURCES
     src/widgets/OutlinePanel.cpp
     src/widgets/TimelinePanel.cpp
     src/widgets/SnippetDialog.cpp
+    src/widgets/NewFileDialog.cpp
+    src/widgets/FirstRunDialog.cpp
+    src/widgets/ShortcutDialog.cpp
+    src/widgets/SymbolSearchDialog.cpp
+    src/widgets/MetricsDialog.cpp
+    src/widgets/BulkRenameDialog.cpp
+    src/widgets/BookmarkDialog.cpp
+    src/widgets/MarkdownPreviewDialog.cpp
+    src/widgets/ImageViewerDialog.cpp
+    src/widgets/HexViewDialog.cpp
+    src/widgets/GitHistoryDialog.cpp
+    src/widgets/GitTagsDialog.cpp
+    src/widgets/PluginManagerDialog.cpp
+    src/widgets/MergeEditorDialog.cpp
+    src/widgets/SearchEditorDialog.cpp
+    src/widgets/NewProjectDialog.cpp
+    src/widgets/ClipboardDialog.cpp
     src/widgets/PromptLibraryDialog.cpp
 )
 set(HEADERS
@@ -210,6 +242,23 @@ set(HEADERS
     src/core/CacheCleaner.h
     src/core/ThreadMonitor.h
     src/core/LanguageSupport.h
+    src/core/ClipboardRing.h
+    src/core/ShortcutCheck.h
+    src/core/A11yCheck.h
+    src/core/GridCheck.h
+    src/core/LspServers.h
+    src/core/MergeParse.h
+    src/core/SshConfig.h
+    src/core/Stability.h
+    src/core/BackupManager.h
+    src/core/CrashHandler.h
+    src/core/WorkspaceSymbols.h
+    src/core/CodeMetrics.h
+    src/core/DuplicateFinder.h
+    src/core/GitBlame.h
+    src/core/PromptVars.h
+    src/core/MacroRecorder.h
+    src/core/ExternalTools.h
     src/core/WordDiff.h
     src/core/BracketDepth.h
     src/core/ScopeChain.h
@@ -304,6 +353,24 @@ set(HEADERS
     src/widgets/TimelinePanel.h
     src/widgets/SnippetDialog.h
     src/widgets/PromptLibraryDialog.h
+    src/widgets/NewFileDialog.h
+    src/widgets/FirstRunDialog.h
+    src/widgets/ShortcutDialog.h
+    src/widgets/SymbolSearchDialog.h
+    src/widgets/MetricsDialog.h
+    src/widgets/BulkRenameDialog.h
+    src/widgets/BookmarkDialog.h
+    src/widgets/MarkdownPreviewDialog.h
+    src/widgets/ImageViewerDialog.h
+    src/widgets/HexViewDialog.h
+    src/widgets/GitHistoryDialog.h
+    src/widgets/GitTagsDialog.h
+    src/widgets/PluginManagerDialog.h
+    src/widgets/MergeEditorDialog.h
+    src/widgets/SearchEditorDialog.h
+    src/widgets/NewProjectDialog.h
+    src/widgets/ClipboardDialog.h
+    src/core/BookmarkStore.h
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
@@ -314,6 +381,10 @@ if(LIBSSH2_FOUND)
     target_link_libraries(${PROJECT_NAME} PRIVATE ${LIBSSH2_LIBRARIES})
 endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE Qt6::Widgets Qt6::Network Qt6::Concurrent Qt6::Svg Qt6::Qml Qt6::WebSockets ${HUNSPELL_LIBRARIES})
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Stage 31: çökme izinde sembol adları (backtrace_symbols)
+    target_link_options(${PROJECT_NAME} PRIVATE "LINKER:--export-dynamic")
+endif()
 
 # --- Stage 19: birim testleri (saf mantık; widgets yok) ---
 add_executable(test_stage19
@@ -328,8 +399,135 @@ add_executable(test_stage19
     src/core/LanguageSupport.cpp
 )
 target_include_directories(test_stage19 PRIVATE src)
-target_link_libraries(test_stage19 PRIVATE Qt6::Core Qt6::Network Qt6::Concurrent Qt6::Qml Qt6::WebSockets)
+target_link_libraries(test_stage19 PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Concurrent Qt6::Qml Qt6::WebSockets)
 add_test(NAME stage19 COMMAND test_stage19)
+
+# --- Stage 20: yeni dosya dilleri (saf mantık) ---
+add_executable(test_stage20
+    tests/test_stage20.cpp
+    src/core/LanguageSupport.cpp
+)
+target_include_directories(test_stage20 PRIVATE src)
+target_link_libraries(test_stage20 PRIVATE Qt6::Core)
+add_test(NAME stage20 COMMAND test_stage20)
+
+# --- Stage 21: pano + çakışma + skor + bütçe + şablon ---
+add_executable(test_stage21
+    tests/test_stage21.cpp
+    src/widgets/CommandPalette.cpp
+    src/core/ContextBudget.cpp
+    src/core/CommitMsg.cpp
+)
+target_include_directories(test_stage21 PRIVATE src)
+target_link_libraries(test_stage21 PRIVATE Qt6::Core Qt6::Widgets)
+add_test(NAME stage21 COMMAND test_stage21)
+
+# --- Stage 22: erişilebilirlik + çeviri kapsama ---
+add_executable(test_stage22
+    tests/test_stage22.cpp
+    src/core/A11yCheck.cpp
+    src/core/LanguageManager.cpp
+    src/core/ThemeTokens.cpp
+)
+target_include_directories(test_stage22 PRIVATE src)
+target_link_libraries(test_stage22 PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+add_test(NAME stage22 COMMAND test_stage22)
+
+# --- Stage 23: piksel-hizalı ızgara ---
+add_executable(test_stage23
+    tests/test_stage23.cpp
+    src/core/GridCheck.cpp
+)
+target_include_directories(test_stage23 PRIVATE src)
+target_link_libraries(test_stage23 PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+add_test(NAME stage23 COMMAND test_stage23)
+
+# --- Stage 24: sembol/metrik/kopya/blame/todo ---
+add_executable(test_stage24
+    tests/test_stage24.cpp
+    src/core/WorkspaceSymbols.cpp
+    src/core/CodeMetrics.cpp
+    src/core/DuplicateFinder.cpp
+    src/core/GitBlame.cpp
+    src/widgets/TodoPanel.cpp
+)
+target_include_directories(test_stage24 PRIVATE src)
+target_link_libraries(test_stage24 PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent)
+add_test(NAME stage24 COMMAND test_stage24)
+
+# --- Stage 25: istem/makro/araç ---
+add_executable(test_stage25
+    tests/test_stage25.cpp
+    src/core/PromptVars.cpp
+    src/core/MacroRecorder.cpp
+    src/core/ExternalTools.cpp
+)
+target_include_directories(test_stage25 PRIVATE src)
+target_link_libraries(test_stage25 PRIVATE Qt6::Core)
+add_test(NAME stage25 COMMAND test_stage25)
+
+# --- Stage 26: MI + launch ---
+add_executable(test_stage26
+    tests/test_stage26.cpp
+    src/core/MiParser.cpp
+    src/core/GdbDriver.cpp
+    src/core/LaunchConfig.cpp
+)
+target_include_directories(test_stage26 PRIVATE src)
+target_link_libraries(test_stage26 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
+add_test(NAME stage26 COMMAND test_stage26)
+
+# --- Stage 27: sunucu tablosu + venv + URI ---
+add_executable(test_stage27
+    tests/test_stage27.cpp
+    src/core/LspServers.cpp
+    src/core/LspClient.cpp
+)
+target_include_directories(test_stage27 PRIVATE src)
+target_link_libraries(test_stage27 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
+add_test(NAME stage27 COMMAND test_stage27)
+
+# --- Stage 28: yer imi + yorum + girdi + shebang ---
+add_executable(test_stage28
+    tests/test_stage28.cpp
+    src/core/LanguageSupport.cpp
+    src/core/TaskChain.cpp
+)
+target_include_directories(test_stage28 PRIVATE src)
+target_link_libraries(test_stage28 PRIVATE Qt6::Core Qt6::Widgets)
+add_test(NAME stage28 COMMAND test_stage28)
+
+# --- Stage 29: eklenti v2 ---
+add_executable(test_stage29
+    tests/test_stage29.cpp
+    src/core/PluginEngine.cpp
+)
+target_include_directories(test_stage29 PRIVATE src)
+target_link_libraries(test_stage29 PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Qml)
+add_test(NAME stage29 COMMAND test_stage29)
+
+# --- Stage 30: birleştirme + ssh + pano + zincir ---
+add_executable(test_stage30
+    tests/test_stage30.cpp
+    src/core/MergeParse.cpp
+    src/core/SshConfig.cpp
+    src/core/TaskChain.cpp
+)
+target_include_directories(test_stage30 PRIVATE src)
+target_link_libraries(test_stage30 PRIVATE Qt6::Core Qt6::Widgets)
+add_test(NAME stage30 COMMAND test_stage30)
+
+# --- Stage 31: bütünlük + geri çekilme + rotasyon + kota + MI fuzz ---
+add_executable(test_stage31
+    tests/test_stage31.cpp
+    src/core/Stability.cpp
+    src/core/BackupManager.cpp
+    src/core/CrashHandler.cpp
+    src/core/MiParser.cpp
+)
+target_include_directories(test_stage31 PRIVATE src)
+target_link_libraries(test_stage31 PRIVATE Qt6::Core Qt6::Widgets)
+add_test(NAME stage31 COMMAND test_stage31)
 
 # QSS dosyalarını binary yanına kopyala
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD

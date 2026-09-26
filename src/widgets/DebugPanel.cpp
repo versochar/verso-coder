@@ -1,8 +1,11 @@
 #include "DebugPanel.h"
 #include "../core/BreakpointStore.h"
 #include <QAction>
+#include <QCompleter>
 #include <QFileInfo>
+#include <QKeyEvent>
 #include <QLineEdit>
+#include <QPushButton>
 #include <QListWidget>
 #include <QTabWidget>
 #include <QTextEdit>
@@ -45,6 +48,11 @@ DebugPanel::DebugPanel(QWidget* parent) : QWidget(parent) {
     m_vars = new QTreeWidget(varTab);
     m_vars->setHeaderLabels({"Ad", "Değer", "Tür"});
     m_vars->setRootIsDecorated(false);
+    m_vars->setToolTip("Değeri değiştirmek için çift tıklayın");
+    connect(m_vars, &QTreeWidget::itemDoubleClicked, this,
+            [this](QTreeWidgetItem* it, int) {
+                if (it && !it->text(0).isEmpty()) emit variableEditRequested(it->text(0));
+            });
     vlay->addWidget(m_vars, 1);
     m_eval = new QLineEdit(varTab);
     m_eval->setPlaceholderText("İfade değerlendir (Enter)...");
@@ -55,12 +63,81 @@ DebugPanel::DebugPanel(QWidget* parent) : QWidget(parent) {
     vlay->addWidget(m_eval);
     m_tabs->addTab(varTab, "Değişkenler");
 
+    // Stage 26: izleme (watch) sekmesi
+    auto* watchTab = new QWidget(this);
+    auto* wlay = new QVBoxLayout(watchTab);
+    wlay->setContentsMargins(0, 0, 0, 0);
+    m_watch = new QTreeWidget(watchTab);
+    m_watch->setHeaderLabels({"İfade", "Değer"});
+    m_watch->setRootIsDecorated(false);
+    wlay->addWidget(m_watch, 1);
+    auto* wrow = new QHBoxLayout();
+    m_watchEdit = new QLineEdit(watchTab);
+    m_watchEdit->setPlaceholderText("İzlenecek ifade (Enter)...");
+    auto* wAdd = new QPushButton("Ekle", watchTab);
+    auto* wDel = new QPushButton("Sil", watchTab);
+    wrow->addWidget(m_watchEdit, 1);
+    wrow->addWidget(wAdd);
+    wrow->addWidget(wDel);
+    wlay->addLayout(wrow);
+    connect(m_watchEdit, &QLineEdit::returnPressed, this, [this]() {
+        const QString t = m_watchEdit->text().trimmed();
+        if (!t.isEmpty()) { emit watchAddRequested(t); m_watchEdit->clear(); }
+    });
+    connect(wAdd, &QPushButton::clicked, m_watchEdit, &QLineEdit::returnPressed);
+    connect(wDel, &QPushButton::clicked, this, [this]() {
+        auto* it = m_watch->currentItem();
+        if (it) emit watchRemoveRequested(it->data(0, Qt::UserRole).toString());
+    });
+    m_tabs->addTab(watchTab, "İzleme");
+
     m_bps = new QListWidget(this);
     connect(m_bps, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* it) {
         emit breakpointToggled(it->data(Qt::UserRole).toString(),
                                it->data(Qt::UserRole + 1).toInt());
     });
     m_tabs->addTab(m_bps, "Kesme Noktaları");
+
+    // Stage 26: yazmaçlar
+    m_regs = new QTreeWidget(this);
+    m_regs->setHeaderLabels({"Yazmaç", "Değer"});
+    m_regs->setRootIsDecorated(false);
+    m_tabs->addTab(m_regs, "Yazmaçlar");
+
+    // Stage 26: bellek görüntüleyici
+    auto* memTab = new QWidget(this);
+    auto* mlay = new QVBoxLayout(memTab);
+    mlay->setContentsMargins(0, 0, 0, 0);
+    auto* mrow = new QHBoxLayout();
+    m_memAddr = new QLineEdit(memTab);
+    m_memAddr->setPlaceholderText("Adres (örn. $sp, 0x... )");
+    auto* mGo = new QPushButton("Oku", memTab);
+    mrow->addWidget(m_memAddr, 1);
+    mrow->addWidget(mGo);
+    mlay->addLayout(mrow);
+    m_mem = new QTextEdit(memTab);
+    m_mem->setReadOnly(true);
+    m_mem->setFontFamily("monospace");
+    mlay->addWidget(m_mem, 1);
+    connect(mGo, &QPushButton::clicked, this, [this]() {
+        const QString a = m_memAddr->text().trimmed();
+        if (!a.isEmpty()) emit memoryReadRequested(a);
+    });
+    connect(m_memAddr, &QLineEdit::returnPressed, mGo, &QPushButton::click);
+    m_tabs->addTab(memTab, "Bellek");
+
+    // Stage 26: disassembly
+    m_disas = new QTreeWidget(this);
+    m_disas->setHeaderLabels({"Adres", "Fonksiyon", "Komut"});
+    m_disas->setRootIsDecorated(false);
+    m_tabs->addTab(m_disas, "Disas");
+
+    // Stage 26: iş parçacıkları
+    m_threads = new QListWidget(this);
+    connect(m_threads, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* it) {
+        emit threadSelected(it->data(Qt::UserRole).toString());
+    });
+    m_tabs->addTab(m_threads, "Threads");
 
     auto* conTab = new QWidget(this);
     auto* clay = new QVBoxLayout(conTab);
@@ -71,9 +148,25 @@ DebugPanel::DebugPanel(QWidget* parent) : QWidget(parent) {
     clay->addWidget(m_console, 1);
     m_cmd = new QLineEdit(conTab);
     m_cmd->setPlaceholderText("gdb komutu (örn. print x)...");
+    // Stage 26: geçmiş (Yukarı/Aşağı) + komut tamamlama
+    static const QStringList gdbWords = {"print ", "info ", "info registers", "info threads",
+        "info breakpoints", "backtrace", "frame ", "break ", "watch ", "delete ",
+        "continue", "next", "step", "finish", "until", "call ", "set variable ",
+        "x/", "disassemble", "thread ", "help "};
+    auto* comp = new QCompleter(gdbWords, m_cmd);
+    comp->setCaseSensitivity(Qt::CaseInsensitive);
+    m_cmd->setCompleter(comp);
+    m_cmd->installEventFilter(this);
     connect(m_cmd, &QLineEdit::returnPressed, this, [this]() {
         const QString t = m_cmd->text().trimmed();
-        if (!t.isEmpty()) { emit consoleRequested(t); m_cmd->clear(); }
+        if (!t.isEmpty()) {
+            m_cmdHist.removeAll(t);
+            m_cmdHist.prepend(t);
+            while (m_cmdHist.size() > 50) m_cmdHist.removeLast();
+            m_histPos = -1;
+            emit consoleRequested(t);
+            m_cmd->clear();
+        }
     });
     clay->addWidget(m_cmd);
     m_tabs->addTab(conTab, "Konsol");
@@ -146,4 +239,56 @@ void DebugPanel::appendOutput(const QString& text, bool isError) {
 
 void DebugPanel::clearOutput() {
     m_console->clear();
+}
+
+// Stage 26: konsol geçmişi (Yukarı/Aşağı)
+bool DebugPanel::eventFilter(QObject* o, QEvent* e) {
+    if (o == m_cmd && e->type() == QEvent::KeyPress) {
+        auto* k = static_cast<QKeyEvent*>(e);
+        if ((k->key() == Qt::Key_Up || k->key() == Qt::Key_Down) && !m_cmdHist.isEmpty()) {
+            if (k->key() == Qt::Key_Up) m_histPos = qMin(m_histPos + 1, m_cmdHist.size() - 1);
+            else m_histPos = qMax(m_histPos - 1, -1);
+            m_cmd->setText(m_histPos < 0 ? QString() : m_cmdHist[m_histPos]);
+            return true;
+        }
+    }
+    return QWidget::eventFilter(o, e);
+}
+
+void DebugPanel::setWatches(const QList<QPair<QString, QString>>& items) {
+    m_watch->clear();
+    for (const auto& it : items) {
+        auto* r = new QTreeWidgetItem(m_watch, {it.first, it.second});
+        r->setData(0, Qt::UserRole, it.first);
+    }
+}
+
+void DebugPanel::setRegisters(const QList<QPair<QString, QString>>& regs) {
+    m_regs->clear();
+    for (const auto& r : regs) new QTreeWidgetItem(m_regs, {r.first, r.second});
+}
+
+void DebugPanel::setMemory(const QString& addr, const QString& dump) {
+    m_mem->setPlainText(addr + "\n" + dump);
+}
+
+void DebugPanel::setDisas(const QList<QMap<QString, QString>>& rows) {
+    m_disas->clear();
+    for (const auto& r : rows)
+        new QTreeWidgetItem(m_disas, {r.value("address"), r.value("func"), r.value("inst")});
+}
+
+void DebugPanel::setThreads(const QList<QPair<QString, QString>>& threads,
+                            const QString& current) {
+    m_threads->clear();
+    for (const auto& t : threads) {
+        auto* it = new QListWidgetItem(t.second, m_threads);
+        it->setData(Qt::UserRole, t.first);
+        if (t.first == current) {
+            QFont f = it->font();
+            f.setBold(true);
+            it->setFont(f);
+            m_threads->setCurrentItem(it);
+        }
+    }
 }

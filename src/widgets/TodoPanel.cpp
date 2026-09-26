@@ -10,6 +10,7 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QTreeWidget>
+#include <algorithm>
 #include <QVBoxLayout>
 #include <QtConcurrent>
 
@@ -65,10 +66,22 @@ QList<TodoHit> TodoPanel::scanSync(const QString& root, const QString& pattern, 
         QByteArray raw = f.read(1 << 20);
         if (raw.contains('\0')) { ++scanned; continue; }
         const QStringList lines = QString::fromUtf8(raw).split('\n');
+        static QRegularExpression atRe("@([A-Za-z0-9_çğıöşüÇĞİÖŞÜ.-]+)");
+        static QRegularExpression prRe("!p([1-3])");
         for (int i = 0; i < lines.size() && out.size() < maxHits; ++i) {
             auto m = rx.match(lines[i]);
-            if (m.hasMatch())
-                out.append({p, i + 1, m.captured(1).toUpper(), m.captured(2).trimmed().left(160)});
+            if (!m.hasMatch()) continue;
+            TodoHit h;
+            h.file = p;
+            h.line = i + 1;
+            h.tag = m.captured(1).toUpper();
+            h.text = m.captured(2).trimmed().left(160);
+            // Stage 24: "@kullanıcı" + "!p1..p3"
+            auto am = atRe.match(h.text);
+            if (am.hasMatch()) h.assignee = am.captured(1);
+            auto pm = prRe.match(h.text);
+            if (pm.hasMatch()) h.priority = pm.captured(1).toInt();
+            out.append(h);
         }
         ++scanned;
     }
@@ -87,6 +100,13 @@ void TodoPanel::runScan() {
 void TodoPanel::onScanDone() {
     if (m_watcher.isCanceled()) return;
     auto hits = m_watcher.result();
+    // Stage 24: öncelik → satır sırası
+    std::sort(hits.begin(), hits.end(), [](const TodoHit& a, const TodoHit& b) {
+        if (!!a.priority != !!b.priority) return a.priority > 0 && b.priority == 0;
+        if (a.priority != b.priority) return a.priority < b.priority;
+        if (a.file != b.file) return a.file < b.file;
+        return a.line < b.line;
+    });
     QMap<QString, QList<TodoHit>> byFile;
     QMap<QString, int> byTag;
     for (const auto& h : hits) {
@@ -101,8 +121,11 @@ void TodoPanel::onScanDone() {
         top->setData(0, Qt::UserRole + 2, it.value().first().line);
         top->setExpanded(true);
         for (const auto& h : it.value()) {
-            auto* child = new QTreeWidgetItem(
-                top, {QString("[%1] %2: %3").arg(h.tag).arg(h.line).arg(h.text)});
+            // Stage 24: "[TAG] satır: metin @kullanıcı !p1"
+            QString label = QString("[%1] %2: %3").arg(h.tag).arg(h.line).arg(h.text);
+            if (!h.assignee.isEmpty()) label += "  @" + h.assignee;
+            if (h.priority > 0) label += QString("  !p%1").arg(h.priority);
+            auto* child = new QTreeWidgetItem(top, {label});
             child->setData(0, Qt::UserRole + 1, h.file);
             child->setData(0, Qt::UserRole + 2, h.line);
         }

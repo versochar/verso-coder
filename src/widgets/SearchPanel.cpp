@@ -1,6 +1,8 @@
 #include "SearchPanel.h"
+#include "SearchEditorDialog.h"
 #include "../core/ReplaceEngine.h"
 #include <QCheckBox>
+#include <QCompleter>
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
@@ -11,6 +13,8 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QSettings>
+#include <QStringListModel>
 #include <QTextEdit>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -22,6 +26,10 @@ SearchPanel::SearchPanel(QWidget* parent) : QWidget(parent) {
     m_query = new QLineEdit(this);
     m_query->setPlaceholderText("Ara... (Enter)");
     m_query->setClearButtonEnabled(true);
+    // Stage 21: arama geçmişi (tamamlama + kalıcı)
+    m_completer = new QCompleter(searchHistory(), this);
+    m_completer->setCaseSensitivity(Qt::CaseInsensitive);
+    m_query->setCompleter(m_completer);
     m_replace = new QLineEdit(this);
     m_replace->setPlaceholderText("Değiştir...");
     m_filter = new QLineEdit(this);
@@ -47,6 +55,10 @@ SearchPanel::SearchPanel(QWidget* parent) : QWidget(parent) {
     btnRow->addWidget(m_btnSearch, 1);
     btnRow->addWidget(m_btnReplaceAll, 1);
     btnRow->addWidget(m_btnReplaceFile, 1);
+    auto* bEditor = new QPushButton("Düzenleyici", this); // Stage 30
+    bEditor->setToolTip("Sonuçları kalıcı listede aç (işaretle + toplu değiştir)");
+    btnRow->addWidget(bEditor, 1);
+    connect(bEditor, &QPushButton::clicked, this, &SearchPanel::openInEditor);
 
     m_status = new QLabel("", this);
     m_status->setStyleSheet("color:#858585;font-size:11px;");
@@ -165,6 +177,7 @@ void SearchPanel::runSearch() {
     m_results->clear();
     m_hits.clear();
     if (m_query->text().isEmpty() || m_root.isEmpty()) return;
+    pushHistory(m_query->text()); // Stage 21
     m_btnSearch->setEnabled(false);
     m_status->setText("Aranıyor (arka plan)...");
     QString q = m_query->text(), flt = m_filter->text(), root = m_root;
@@ -233,6 +246,20 @@ void SearchPanel::applyReplace(const QString& file, const QList<SearchHit>&) {
 }
 
 // Stage 17: seçili dosyanın değişiklik önizlemesi + tek dosyada uygulama
+// Stage 30: sonuçları düzenleyici diyaloğunda aç
+void SearchPanel::openInEditor() {
+    if (m_hits.isEmpty()) return;
+    auto* d = new SearchEditorDialog(m_root, m_hits, m_query->text(), m_replace->text(),
+                                     m_regex->isChecked(), m_caseSens->isChecked(), this);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    connect(d, &SearchEditorDialog::jumpRequested, this,
+            [this, d](const QString& path, int line) {
+                d->close();
+                emit fileOpened(path, line);
+            });
+    d->show();
+}
+
 void SearchPanel::previewReplaceFor(const QString& file) {
     QFile f(file);
     if (!f.open(QIODevice::ReadOnly)) return;
@@ -253,6 +280,64 @@ void SearchPanel::previewReplaceFor(const QString& file) {
     }
     if (edits.size() > 30) out << QString("  ... +%1 satır").arg(edits.size() - 30);
     m_preview->setPlainText(out.join('\n'));
+    highlightPreview(); // Stage 21: sorgu vurgusu
+}
+
+// Stage 21: önizlemedeki sorgu eşleşmelerini sarıyla vurgula
+void SearchPanel::highlightPreview() {
+    QList<QTextEdit::ExtraSelection> extra;
+    const QString q = m_query->text();
+    if (!q.isEmpty()) {
+        QTextCharFormat fmt;
+        fmt.setBackground(QColor("#665c1e"));
+        fmt.setForeground(QColor("#ffe690"));
+        QTextDocument* doc = m_preview->document();
+        if (m_regex->isChecked()) {
+            QRegularExpression re(q, m_caseSens->isChecked()
+                                         ? QRegularExpression::NoPatternOption
+                                         : QRegularExpression::CaseInsensitiveOption);
+            if (re.isValid()) {
+                int n = 0;
+                for (auto it = re.globalMatch(doc->toPlainText());
+                     it.hasNext() && n < 200;) {
+                    auto m = it.next();
+                    QTextCursor c(doc);
+                    c.setPosition(m.capturedStart());
+                    c.setPosition(m.capturedEnd(), QTextCursor::KeepAnchor);
+                    extra << QTextEdit::ExtraSelection{c, fmt};
+                    ++n;
+                }
+            }
+        } else {
+            const Qt::CaseSensitivity cs = m_caseSens->isChecked() ? Qt::CaseSensitive
+                                                                   : Qt::CaseInsensitive;
+            int pos = 0, n = 0;
+            const QString text = doc->toPlainText();
+            while (n < 200 && (pos = text.indexOf(q, pos, cs)) >= 0) {
+                QTextCursor c(doc);
+                c.setPosition(pos);
+                c.setPosition(pos + q.size(), QTextCursor::KeepAnchor);
+                extra << QTextEdit::ExtraSelection{c, fmt};
+                pos += qMax(1, q.size());
+                ++n;
+            }
+        }
+    }
+    m_preview->setExtraSelections(extra);
+}
+
+// Stage 21: arama geçmişi (kalıcı, en çok 10)
+QStringList SearchPanel::searchHistory() {
+    return QSettings("Verso", "VersoCoder").value("search/history").toStringList();
+}
+
+void SearchPanel::pushHistory(const QString& q) {
+    QStringList h = searchHistory();
+    h.removeAll(q);
+    h.prepend(q);
+    while (h.size() > 10) h.removeLast();
+    QSettings("Verso", "VersoCoder").setValue("search/history", h);
+    if (m_completer) m_completer->setModel(new QStringListModel(h, m_completer));
 }
 
 void SearchPanel::replaceFileSelected() {

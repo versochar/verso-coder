@@ -1,5 +1,7 @@
 #include "MainWindow.h"
 #include "core/AboutInfo.h"
+#include "core/CrashHandler.h"
+#include "core/PerfMonitor.h"
 #include "core/StartupArgs.h"
 #include <QApplication>
 #include <QLocalServer>
@@ -39,6 +41,11 @@ int main(int argc, char** argv) {
     app.setApplicationName("VersoCoder");
     app.setApplicationVersion(AboutInfo::version());
     app.setApplicationDisplayName("Verso Coder");
+    // Stage 31: çökme izi (opt-in ayar)
+    if (QSettings("Verso", "VersoCoder").value("app/crashReport", false).toBool())
+        CrashHandler::install();
+    PerfMonitor::instance().reset();      // Stage 22: başlangıç ölçümü
+    PerfMonitor::instance().mark("main"); // Stage 22
     migrateLegacySettings();
 
     const StartupOptions opts = StartupArgs::parse(app.arguments().mid(1));

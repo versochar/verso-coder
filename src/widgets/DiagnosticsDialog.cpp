@@ -1,7 +1,15 @@
 #include "DiagnosticsDialog.h"
+#include "../core/A11yCheck.h"
 #include "../core/BackupManager.h"
+#include "../core/GitVersionManager.h"
+#include "../core/LanguageManager.h"
 #include "../core/PerfMonitor.h"
+#include "../core/PluginEngine.h"
+#include "../core/ThemeManager.h"
+#include <QCoreApplication>
 #include <QDateTime>
+#include <QFile>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -28,6 +36,14 @@ DiagnosticsDialog::DiagnosticsDialog(QWidget* parent) : QDialog(parent) {
     m_about = new QTextBrowser(aboutTab);
     m_about->setHtml(AboutInfo::aboutHtml());
     aboutLay->addWidget(m_about, 1);
+    // Stage 22: git sürümü (repo içindeyse; örn. geliştirme derlemesi)
+    {
+        GitVersionManager g;
+        g.setRepoRoot(QCoreApplication::applicationDirPath());
+        const QString v = g.currentVersion();
+        if (!v.isEmpty())
+            m_about->append(QString("<p><b>Git:</b> %1</p>").arg(v.toHtmlEscaped()));
+    }
     aboutLay->addWidget(new QLabel("Güncelleme manifesti (JSON) yapıştır:", aboutTab));
     m_updateIn = new QTextEdit(aboutTab);
     m_updateIn->setMaximumHeight(70);
@@ -87,6 +103,39 @@ DiagnosticsDialog::DiagnosticsDialog(QWidget* parent) : QDialog(parent) {
     connect(refBtn, &QPushButton::clicked, this, &DiagnosticsDialog::refreshBackups);
     m_tabs->addTab(bakTab, "Yedekler");
 
+    // --- Stage 22: erişilebilirlik + çeviri kapsama ---
+    auto* a11yTab = new QWidget(this);
+    auto* a11yLay = new QVBoxLayout(a11yTab);
+    m_a11y = new QTextEdit(a11yTab);
+    m_a11y->setReadOnly(true);
+    m_a11y->setFont(QFont("Consolas, monospace", 10));
+    auto* aBtn = new QPushButton("Denetle", a11yTab);
+    a11yLay->addWidget(m_a11y, 1);
+    a11yLay->addWidget(aBtn);
+    connect(aBtn, &QPushButton::clicked, this, &DiagnosticsDialog::refreshA11y);
+    m_tabs->addTab(a11yTab, "Erişilebilirlik");
+
+    // --- Stage 29: eklentiler ---
+    auto* plugTab = new QWidget(this);
+    auto* plugLay = new QVBoxLayout(plugTab);
+    m_plugins = new QTextEdit(plugTab);
+    m_plugins->setReadOnly(true);
+    m_plugins->setFont(QFont("Consolas, monospace", 10));
+    auto* plBtn = new QPushButton("Yenile", plugTab);
+    plugLay->addWidget(m_plugins, 1);
+    plugLay->addWidget(plBtn);
+    connect(plBtn, &QPushButton::clicked, this, &DiagnosticsDialog::refreshPlugins);
+    m_tabs->addTab(plugTab, "Eklentiler");
+
+    // --- Stage 22: alt şerit — tanı raporu ---
+    auto* botRow = new QHBoxLayout();
+    auto* eBtn = new QPushButton("Tanı Raporunu Kaydet...", this);
+    eBtn->setToolTip("Sürüm + araçlar + performans + erişilebilirlik özeti");
+    botRow->addStretch(1);
+    botRow->addWidget(eBtn);
+    lay->addLayout(botRow);
+    connect(eBtn, &QPushButton::clicked, this, &DiagnosticsDialog::exportReport);
+
     connect(&m_probeWatcher, &QFutureWatcher<QList<ToolInfo>>::finished, this, [this]() {
         if (m_probeWatcher.isCanceled()) return;
         m_tools->setPlainText(ToolchainProbe::report(m_probeWatcher.result()));
@@ -95,6 +144,8 @@ DiagnosticsDialog::DiagnosticsDialog(QWidget* parent) : QDialog(parent) {
     refreshToolchain();
     refreshPerformance();
     refreshBackups();
+    refreshA11y();
+    refreshPlugins();
 }
 
 void DiagnosticsDialog::setBackupManager(BackupManager* bm) {
@@ -146,9 +197,67 @@ void DiagnosticsDialog::restoreBackup() {
     if (m_bm->restore(path)) emit backupRestored(original);
 }
 
+void DiagnosticsDialog::setPluginEngine(PluginEngine* eng) {
+    m_pluginEng = eng;
+    refreshPlugins();
+}
+
+void DiagnosticsDialog::refreshPlugins() {
+    if (!m_pluginEng) {
+        m_plugins->setPlainText("(eklenti motoru yok)");
+        return;
+    }
+    QStringList out;
+    for (const auto& p : m_pluginEng->plugins())
+        out << QString("%1 v%2 — %3").arg(p.name, p.version.isEmpty() ? "?" : p.version,
+                                          p.quarantined ? "KARANTİNADA"
+                                          : p.loaded    ? "yüklendi"
+                                                        : "pasif (" + p.error + ")");
+    out << "";
+    out << "== Günlük ==";
+    out << m_pluginEng->logLines();
+    m_plugins->setPlainText(out.join("\n"));
+}
+
 void DiagnosticsDialog::deleteBackup() {
     QTreeWidgetItem* it = m_backups->currentItem();
     if (!it || !m_bm) return;
     m_bm->remove(it->data(0, Qt::UserRole).toString());
     refreshBackups();
+}
+
+// Stage 22: erişilebilirlik + çeviri kapsama denetimi
+void DiagnosticsDialog::refreshA11y() {
+    QStringList out;
+    out << "== Tema kontrastı (" + ThemeManager::instance().current() + ") ==";
+    out << A11yCheck::checkTheme(ThemeManager::instance().tokens());
+    out << "";
+    out << "== Çeviri kapsama (tr/en) ==";
+    const QStringList keys = LanguageManager::instance().allKeys();
+    QStringList missing;
+    for (const QString& k : keys) {
+        if (!LanguageManager::instance().hasTranslation(k, "tr")) missing << k + " [tr]";
+        if (!LanguageManager::instance().hasTranslation(k, "en")) missing << k + " [en]";
+    }
+    out << (missing.isEmpty() ? QString("%1 anahtar — tamamı çevrili ✓").arg(keys.size())
+                              : "Eksik:\n" + missing.join("\n"));
+    m_a11y->setPlainText(out.join("\n"));
+}
+
+// Stage 22: tanı raporunu metin dosyası olarak kaydet
+void DiagnosticsDialog::exportReport() {
+    const QString p = QFileDialog::getSaveFileName(this, "Tanı Raporunu Kaydet",
+                                                   "verso-tani-raporu.txt",
+                                                   "Metin (*.txt)");
+    if (p.isEmpty()) return;
+    QString r;
+    r += "Verso Coder tanı raporu — " +
+         QDateTime::currentDateTime().toString(Qt::ISODate) + "\n\n";
+    r += "== Hakkında ==\n" + AboutInfo::appName() + " " + AboutInfo::version() + "\n" +
+         AboutInfo::buildInfo() + "\n\n";
+    r += "== Araç Zinciri ==\n" + m_tools->toPlainText() + "\n\n";
+    r += "== Performans ==\n" + m_perf->toPlainText() + "\n\n";
+    r += "== Erişilebilirlik ==\n" + m_a11y->toPlainText() + "\n";
+    QFile f(p);
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) f.write(r.toUtf8());
 }

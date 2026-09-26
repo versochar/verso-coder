@@ -26,6 +26,7 @@ signals:
 
 private slots:
     void saveAll();
+    void updateKeyWarn(); // Stage 21: çakışan kısayolları listele
 
 private:
     QComboBox* m_lang;
@@ -34,6 +35,7 @@ private:
     QComboBox* m_backend;   // CUDA | ROCm | Vulkan | CPU
     QComboBox* m_model;
     QSpinBox* m_ctx;        // context window
+    QSpinBox* m_budget = nullptr; // Stage 25: token bütçesi
     QSpinBox* m_threads;    // cpu threads
     QSpinBox* m_gpu;        // num_gpu
     QSlider* m_tempSlider;
@@ -43,6 +45,8 @@ private:
     QSpinBox* m_fontSize;
     QSpinBox* m_tabWidth;
     QCheckBox* m_autoSave;
+    QCheckBox* m_autoReload = nullptr; // Stage 28
+    QCheckBox* m_crashReport = nullptr; // Stage 31
     QCheckBox* m_restore;
     // Stage 3: AI
     QCheckBox* m_streaming;
@@ -54,6 +58,7 @@ private:
     QLineEdit* m_shell;
     QLineEdit* m_gdbPath; // Stage 14
     QTableWidget* m_keys;
+    QLabel* m_keyWarn = nullptr; // Stage 21: kısayol çakışma uyarısı
     QPushButton* m_themeImport;
     // Stage 5
     QCheckBox* m_editorConfig;
@@ -62,8 +67,10 @@ private:
     QComboBox* m_accent;
     QFontComboBox* m_uiFont;
     QSpinBox* m_uiFontSize;
-    QDoubleSpinBox* m_lineHeight;
-    QDoubleSpinBox* m_letterSpacing;
+    QSlider* m_lineHeight;
+    QLabel* m_lineHeightVal = nullptr;
+    QSlider* m_letterSpacing;
+    QLabel* m_letterSpacingVal = nullptr;
     QCheckBox* m_ligatures;
     QSpinBox* m_cursorWidth;
     QCheckBox* m_lineHighlight;
@@ -75,6 +82,18 @@ private:
     void filterPages(const QString& text); // ayar arama
     // Stage 11
     QCheckBox* m_showWhitespace;
+    // Stage 23
+    QComboBox* m_cursorStyle;
+    QSpinBox* m_cursorBlink;
+    QCheckBox* m_smoothScroll;
+    QSlider* m_lineHiOpacity;
+    QLabel* m_lineHiOpacityVal = nullptr;
+    QSlider* m_selOpacity;
+    QLabel* m_selOpacityVal = nullptr;
+    QComboBox* m_bracketStyle;
+    QCheckBox* m_showLineEnds;
+    QComboBox* m_foldGutter;
+    QSpinBox* m_minimapWidth;
     QSpinBox* m_ruler;
     QCheckBox* m_stickyScroll;
     // Stage 12

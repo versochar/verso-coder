@@ -58,6 +58,9 @@ QString QssBuilder::build(const Input& in) {
     // ---- girişler ----
     const QString inputs = "QLineEdit, QPlainTextEdit, QTextEdit, QComboBox, QSpinBox, "
                            "QDoubleSpinBox, QKeySequenceEdit";
+    // Stage 23: seçim opaklığı (ayarlanabilir)
+    QColor selBg = t.selection;
+    selBg.setAlphaF(qBound(0.05, selBg.alphaF() * in.selectionOpacity, 1.0));
     q += QString(
              "%1 { background: %2; color: %3; border: 1px solid %4;\n"
              "  border-radius: %5px; padding: %6px %7px; selection-background-color: %8; }\n"
@@ -69,7 +72,7 @@ QString QssBuilder::build(const Input& in) {
              .arg(inputs, t.dark ? ThemeTokens::mix(t.bg, t.textStrong, 0.04).name() : t.surface.name(),
                   t.text.name(), t.border.name())
              .arg(QString::number(r), QString::number(sp), QString::number(sp))
-             .arg(t.selection.name(), accent.name(), t.textDim.name(), accentSoft.name());
+             .arg(ThemeTokens::css(selBg), accent.name(), t.textDim.name(), accentSoft.name());
 
     // ---- menüler ----
     q += QString(
@@ -99,7 +102,7 @@ QString QssBuilder::build(const Input& in) {
              .arg(t.border.name(), t.surface.name(), t.textDim.name())
              .arg(QString::number(int(7 * in.scale + 0.5)),
                    QString::number(int(12 * in.scale + 0.5)), QString::number(r))
-             .arg(t.text.name(), ThemeTokens::withAlphaF(t.textStrong, 0.04).name(), t.bg.name(),
+             .arg(t.text.name(), ThemeTokens::css(ThemeTokens::withAlphaF(t.textStrong, 0.04)), t.bg.name(),
                   accent.name());
 
     // ---- ağaçlar / listeler / tablolar ----
@@ -150,7 +153,7 @@ QString QssBuilder::build(const Input& in) {
              "QScrollBar::handle:horizontal:hover { background: %2; }\n"
              "QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }\n"
              "QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }\n")
-             .arg(ThemeTokens::withAlphaF(t.scrollbar, t.dark ? 0.75 : 1.0).name(),
+             .arg(ThemeTokens::css(ThemeTokens::withAlphaF(t.scrollbar, t.dark ? 0.75 : 1.0)),
                   ThemeTokens::mix(t.scrollbar, accent, 0.35).name());
 
     // ---- kalıtım/görsel parçalar ----
@@ -205,7 +208,7 @@ QString QssBuilder::build(const Input& in) {
              .arg(QString::number(qMax(18, in.typo.uiSize + 10)), t.textStrong.name(),
                   t.textDim.name(), t.text.name(), QString::number(qMax(9, in.typo.uiSize - 1)),
                   t.surface.name(), t.border.name(), QString::number(rLg),
-                  QString::number(r), ThemeTokens::withAlphaF(t.text, 0.06).name(),
+                  QString::number(r), ThemeTokens::css(ThemeTokens::withAlphaF(t.text, 0.06)),
                   t.dark ? ThemeTokens::mix(t.accent, t.textStrong, 0.6).name() : t.accent.name(),
                   t.surfaceAlt.name(),
                   QString::number(qMax(14, in.typo.uiSize + 4)));
@@ -227,9 +230,9 @@ QString QssBuilder::build(const Input& in) {
              " text-align: left; padding-left: 8px; color: %8; }\n"
              "QPushButton#stickyBar:hover { color: %10; }\n")
              .arg(QString::number(qMax(6, int(10 * in.scale + 0.5))),
-                  ThemeTokens::withAlphaF(t.textDim, 0.45).name(),
+                  ThemeTokens::css(ThemeTokens::withAlphaF(t.textDim, 0.45)),
                   QString::number(qMax(2, r / 2)),
-                  ThemeTokens::withAlphaF(t.textDim, 0.75).name(),
+                  ThemeTokens::css(ThemeTokens::withAlphaF(t.textDim, 0.75)),
                   t.surface.name(), t.border.name(), QString::number(r),
                   t.textDim.name(), t.accent.name(), t.textStrong.name());
 
@@ -245,7 +248,7 @@ QString QssBuilder::build(const Input& in) {
              "QPushButton#titleCloseBtn:hover { background: %7; color: #ffffff; }\n")
              .arg(t.surface.name(), t.border.name(), t.textDim.name(),
                   QString::number(qMax(9, in.typo.uiSize - 1)),
-                  ThemeTokens::withAlphaF(t.text, 0.10).name(), t.textStrong.name(),
+                  ThemeTokens::css(ThemeTokens::withAlphaF(t.text, 0.10)), t.textStrong.name(),
                   t.error.name());
 
     return q.arg(t.name);

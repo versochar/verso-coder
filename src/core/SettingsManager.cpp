@@ -50,6 +50,22 @@ AppSettings SettingsManager::load() const {
     s.profilesJson  = q.value("ai/profiles", "[]").toString();
     s.version           = q.value("app/version", "1.0.0").toString();
     s.m_firstRun        = q.value("app/firstRun", true).toBool();
+    s.newFileTemplate   = q.value("editor/fileTemplate", true).toBool();
+    s.editorFontFamily  = q.value("editor/fontFamily", "").toString();
+    s.cursorStyle       = q.value("editor/cursorStyle", "bar").toString();
+    s.cursorBlink       = q.value("editor/cursorBlink", 0).toInt();
+    s.smoothScroll      = q.value("editor/smoothScroll", true).toBool();
+    s.lineHighlightOpacity = qBound(0.1, q.value("editor/lineHighlightOpacity", 1.0).toDouble(), 1.0);
+    s.selectionOpacity  = qBound(0.2, q.value("editor/selectionOpacity", 1.0).toDouble(), 1.0);
+    s.bracketStyle      = q.value("editor/bracketStyle", "renk").toString();
+    s.showLineEnds      = q.value("editor/showLineEnds", false).toBool();
+    s.foldGutter        = q.value("editor/foldGutter", "sol").toString();
+    s.minimapWidth      = qBound(40, q.value("editor/minimapWidth", 90).toInt(), 220);
+    s.aiTokenBudget     = qMax(0, q.value("ai/tokenBudget", 0).toInt());
+    s.testOnSave        = q.value("test/onSave", false).toBool();
+    s.aiScheduleMin     = qMax(0, q.value("ai/scheduleMin", 0).toInt());
+    s.autoReload        = q.value("editor/autoReload", false).toBool();
+    s.crashReport       = q.value("app/crashReport", false).toBool();
     // Stage 9: görünüm
     s.accentColor    = q.value("ui/accent", "").toString();
     s.uiFontFamily   = q.value("ui/fontFamily", "").toString();
@@ -176,4 +192,20 @@ void SettingsManager::save(const AppSettings& s) const {
     q.setValue("history/keep", s.historyKeep);
     q.setValue("app/version", s.version);
     q.setValue("app/firstRun", s.m_firstRun);
+    q.setValue("editor/fileTemplate", s.newFileTemplate);
+    q.setValue("editor/fontFamily", s.editorFontFamily);
+    q.setValue("editor/cursorStyle", s.cursorStyle);
+    q.setValue("editor/cursorBlink", s.cursorBlink);
+    q.setValue("editor/smoothScroll", s.smoothScroll);
+    q.setValue("editor/lineHighlightOpacity", s.lineHighlightOpacity);
+    q.setValue("editor/selectionOpacity", s.selectionOpacity);
+    q.setValue("editor/bracketStyle", s.bracketStyle);
+    q.setValue("editor/showLineEnds", s.showLineEnds);
+    q.setValue("editor/foldGutter", s.foldGutter);
+    q.setValue("editor/minimapWidth", s.minimapWidth);
+    q.setValue("ai/tokenBudget", s.aiTokenBudget);
+    q.setValue("test/onSave", s.testOnSave);
+    q.setValue("ai/scheduleMin", s.aiScheduleMin);
+    q.setValue("editor/autoReload", s.autoReload);
+    q.setValue("app/crashReport", s.crashReport);
 }

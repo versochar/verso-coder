@@ -85,6 +85,25 @@ bool BackupManager::remove(const QString& backupPath) const {
     return QFile::remove(meta);
 }
 
+int BackupManager::pruneByQuota(qint64 maxBytes, int maxAgeDays) {
+    QList<BackupEntry> all = list(); // yeniden eskiye
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    int removed = 0;
+    qint64 total = 0;
+    for (const BackupEntry& e : all) total += e.size;
+    for (int i = all.size() - 1; i >= 0; --i) { // en eskiden başla
+        const BackupEntry& e = all[i];
+        const bool tooOld = maxAgeDays > 0 && (now - e.whenMs) > qint64(maxAgeDays) * 86400000LL;
+        if (tooOld || total > maxBytes) {
+            if (remove(e.backupPath)) {
+                ++removed;
+                total -= e.size;
+            }
+        }
+    }
+    return removed;
+}
+
 int BackupManager::prune(int keepNewest) {
     QList<BackupEntry> all = list();
     int removed = 0;

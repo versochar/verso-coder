@@ -12,6 +12,8 @@ struct TodoHit {
     int line = 0;
     QString tag;
     QString text;
+    QString assignee; // Stage 24: "@ad" eki
+    int priority = 0; // Stage 24: "!p1"→1 … (0 = yok)
 };
 
 // TODO/FIXME/HACK tarayıcı (arka plan taramalı).

@@ -6,6 +6,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
+#include <QKeyEvent>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
@@ -55,6 +56,13 @@ ExplorerPanel::ExplorerPanel(QWidget* parent) : QWidget(parent) {
     lay->addWidget(openBtn);
     lay->addWidget(m_tree, 1);
 
+    // Stage 24: tek tık önizleme (çift tık tam açar)
+    connect(m_tree, &QTreeView::clicked, this, [this](const QModelIndex& proxyIdx) {
+        QModelIndex idx = m_proxy->mapToSource(proxyIdx);
+        if (!idx.isValid()) return;
+        QString p = m_model->filePath(idx);
+        if (!m_model->isDir(idx)) emit filePreviewRequested(p);
+    });
     connect(m_tree, &QTreeView::doubleClicked, this, [this](const QModelIndex& proxyIdx) {
         QModelIndex idx = m_proxy->mapToSource(proxyIdx);
         if (!idx.isValid()) return;
@@ -62,6 +70,8 @@ ExplorerPanel::ExplorerPanel(QWidget* parent) : QWidget(parent) {
         if (!m_model->isDir(idx)) emit fileOpened(p);
     });
     connect(m_tree, &QTreeView::customContextMenuRequested, this, &ExplorerPanel::onContextMenu);
+    // Stage 21: klavye kısayolları — F2 yeniden adlandır, Del çöp kutusu, F5 yenile
+    m_tree->installEventFilter(this);
 
     // Taşıma / yeniden adlandırmada açık sekmeleri güncelle + filtre tazele
     auto renamed = [this](const QString& a, const QString& b) {
@@ -86,8 +96,30 @@ void ExplorerPanel::setRoot(const QString& path) {
         m_tree->expand(m_tree->rootIndex());
 }
 
-QString ExplorerPanel::targetDir(const QModelIndex& proxyIdx) const {
-    QModelIndex idx = m_proxy->mapToSource(proxyIdx);
+// Stage 21: ağaç odaktayken F2 / Del / F5
+bool ExplorerPanel::eventFilter(QObject* o, QEvent* e) {
+    if (o == m_tree && e->type() == QEvent::KeyPress) {
+        auto* k = static_cast<QKeyEvent*>(e);
+        const QModelIndex proxyIdx = m_tree->currentIndex();
+        const QModelIndex idx = m_proxy->mapToSource(proxyIdx);
+        const QString sel = idx.isValid() ? m_model->filePath(idx) : QString();
+        if (k->key() == Qt::Key_F2 && !sel.isEmpty()) {
+            renamePath(sel, QString());
+            return true;
+        }
+        if ((k->key() == Qt::Key_Delete || k->key() == Qt::Key_Backspace) && !sel.isEmpty()) {
+            removePath(sel);
+            return true;
+        }
+        if (k->key() == Qt::Key_F5) {
+            m_proxy->refresh();
+            return true;
+        }
+    }
+    return QWidget::eventFilter(o, e);
+}
+
+QString ExplorerPanel::targetDir(const QModelIndex& proxyIdx) const {    QModelIndex idx = m_proxy->mapToSource(proxyIdx);
     if (!idx.isValid()) return m_root;
     QString p = m_model->filePath(idx);
     return m_model->isDir(idx) ? p : QFileInfo(p).absolutePath();

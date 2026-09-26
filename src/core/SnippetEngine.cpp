@@ -1,5 +1,7 @@
 #include "SnippetEngine.h"
+#include <QDate>
 #include <QMap>
+#include <QProcess>
 #include <QRegularExpression>
 #include <QSet>
 #include <algorithm>
@@ -103,6 +105,26 @@ QString SnippetEngine::expandVars(QString body, const QString& fileName,
     body.replace("$TM_FILENAME", fileName);
     body.replace("${TM_SELECTED_TEXT}", selected);
     body.replace("$TM_SELECTED_TEXT", selected);
+    // Stage 25: tarih + yazar değişkenleri
+    const QString today = QDate::currentDate().toString(Qt::ISODate);
+    const QString year = QString::number(QDate::currentDate().year());
+    QString author = qEnvironmentVariable("VERSO_AUTHOR");
+    if (author.isEmpty()) {
+        QProcess git;
+        git.start("git", {"config", "user.name"});
+        if (git.waitForFinished(2000)) author = QString::fromUtf8(git.readAllStandardOutput()).trimmed();
+        if (author.isEmpty()) author = qEnvironmentVariable("USER");
+    }
+    for (const char* k : {"CURRENT_DATE", "TM_DATE"}) {
+        body.replace(QString("${%1}").arg(k), today);
+        body.replace(QString("$%1").arg(k), today);
+    }
+    for (const char* k : {"CURRENT_YEAR", "TM_YEAR"}) {
+        body.replace(QString("${%1}").arg(k), year);
+        body.replace(QString("$%1").arg(k), year);
+    }
+    body.replace("${TM_AUTHOR}", author);
+    body.replace("$TM_AUTHOR", author);
     // $CLIPBOARD expand() içinde işlenir (clipboard parametresi)
     return body;
 }

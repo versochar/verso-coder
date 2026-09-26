@@ -1,4 +1,6 @@
 #include "TestExplorer.h"
+#include "../core/SettingsManager.h"
+#include <QCheckBox>
 #include <QLabel>
 #include <QProgressBar>
 #include <QSplitter>
@@ -16,6 +18,16 @@ TestExplorer::TestExplorer(QWidget* parent) : QWidget(parent) {
     m_bar->addAction("🔍 Keşfet", this, &TestExplorer::discoverRequested);
     m_bar->addAction("▶ Tümünü Çalıştır", this, &TestExplorer::runAllRequested);
     m_bar->addAction("■ Durdur", this, &TestExplorer::stopRequested);
+    // Stage 25: kaydetmede ilgili testi koştur
+    auto* bAuto = new QCheckBox("Otomatik (kaydetmede)", this);
+    bAuto->setToolTip("Kaydedilen dosyanın ilgili testini arka planda koşturur");
+    bAuto->setChecked(SettingsManager::instance().load().testOnSave);
+    connect(bAuto, &QCheckBox::toggled, this, [](bool on) {
+        AppSettings s = SettingsManager::instance().load();
+        s.testOnSave = on;
+        SettingsManager::instance().save(s);
+    });
+    m_bar->addWidget(bAuto);
     lay->addWidget(m_bar);
 
     auto* split = new QSplitter(Qt::Vertical, this);

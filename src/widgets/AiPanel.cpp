@@ -6,8 +6,10 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFile>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
 #include <QJsonArray>
@@ -20,6 +22,7 @@
 #include <QRegularExpression>
 #include <QSpinBox>
 #include <QStandardPaths>
+#include <QTextBrowser>
 #include <QVBoxLayout>
 #include <QtConcurrent>
 
@@ -54,8 +57,13 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     auto* bReload = new QPushButton("⟳", this);
     bReload->setFixedWidth(32);
     bReload->setToolTip("Modelleri yenile (GET /api/tags)");
+    auto* bStart = new QPushButton("▶", this);
+    bStart->setFixedWidth(32);
+    bStart->setToolTip("Ollama kapalıysa başlat (uygulama içinden)");
     top->addWidget(m_models, 1);
+    top->addWidget(bStart);
     top->addWidget(bReload);
+    connect(bStart, &QPushButton::clicked, this, &AiPanel::ensureServerAsync);
 
     // Bağlam + stream satırı
     auto* cRow = new QHBoxLayout();
@@ -96,9 +104,17 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     infoRow->addWidget(m_ragLabel, 1);
     infoRow->addWidget(m_tokenLabel);
 
-    m_view = new QTextEdit(this);
+    m_view = new QTextBrowser(this);
     m_view->setReadOnly(true);
+    m_view->setOpenLinks(false); // Stage 30: chat: bağlantıları içeride yakala
     m_view->setPlaceholderText("Ollama AI asistan. Bağlam modunu seç, sor ve Gönder'e bas.");
+    // Stage 30: sohbet arama bağlantıları (chat:<id>)
+    connect(m_view, &QTextBrowser::anchorClicked, this, [this](const QUrl& url) {
+        if (url.scheme() == "chat" && !url.path().mid(1).isEmpty())
+            loadSession(url.path().mid(1));
+        else if (url.scheme().startsWith("http"))
+            QDesktopServices::openUrl(url);
+    });
 
     // Hazır komutlar
     auto* qRow = new QHBoxLayout();
@@ -108,7 +124,22 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     auto* bCommit = new QPushButton("Commit msg", this);
     auto* bApply = new QPushButton("Dosyaya uygula", this);
     bApply->setToolTip("Son AI yanıtındaki kod bloğunu diff onayıyla editöre uygula");
+    auto* bExport = new QPushButton("MD", this);
+    bExport->setToolTip("Sohbeti markdown olarak dışa aktar");
+    bExport->setFixedWidth(36);
+    connect(bExport, &QPushButton::clicked, this, &AiPanel::exportChatMarkdown);
+    auto* bCompare = new QPushButton("⇄", this);
+    bCompare->setToolTip("İki modelle karşılaştır (geçerli soru)");
+    bCompare->setFixedWidth(36);
+    connect(bCompare, &QPushButton::clicked, this, &AiPanel::sendCompare);
+    auto* bUndo = new QPushButton("↩", this);
+    bUndo->setToolTip("Son yanıtı geri al (dallan)");
+    bUndo->setFixedWidth(36);
+    connect(bUndo, &QPushButton::clicked, this, &AiPanel::undoLastAnswer);
     for (auto* b : {bExplain, bFix, bTest, bCommit, bApply}) qRow->addWidget(b);
+    qRow->addWidget(bExport);
+    qRow->addWidget(bCompare);
+    qRow->addWidget(bUndo);
 
     auto* row = new QHBoxLayout();
     m_input = new QLineEdit(this);
@@ -134,7 +165,7 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     hRow->addWidget(bHistSave);
     hRow->addWidget(bHistClear);
 
-    auto* hint = new QLabel("Ollama çalışmıyorsa:  `ollama serve`  +  `ollama pull llama3.1`", this);
+    auto* hint = new QLabel("Ollama kapalıysa yukarıdaki ▶ düğmesi başlatır (yoksa: `ollama serve`)", this);
     hint->setWordWrap(true);
     hint->setStyleSheet("color:#858585;font-size:11px;");
 
@@ -149,11 +180,7 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     lay->addLayout(hRow);
     lay->addWidget(hint);
 
-    connect(bReload, &QPushButton::clicked, this, [this]() {
-        AppSettings s = SettingsManager::instance().load();
-        m_client.setHost(s.ollamaHost);
-        m_client.fetchModels();
-    });
+    connect(bReload, &QPushButton::clicked, this, &AiPanel::refreshModels);
     connect(m_models, &QComboBox::currentTextChanged, this, [this](const QString& t) {
         AppSettings s = SettingsManager::instance().load();
         s.ollamaModel = t;
@@ -166,7 +193,13 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     connect(bProfDel, &QPushButton::clicked, this, &AiPanel::deleteProfile);
     connect(m_profiles, &QComboBox::currentTextChanged, this, &AiPanel::onProfileChanged);
     connect(bIndex, &QPushButton::clicked, this, [this, bIndex]() {
-        if (m_ragWatcher.isRunning()) return;
+        // Stage 31: çalışırken iptal yolu
+        if (m_ragWatcher.isRunning()) {
+            m_ragWatcher.cancel();
+            m_ragLabel->setText("indeksleme iptal edildi");
+            bIndex->setEnabled(true);
+            return;
+        }
         QString root;
         emit projectRootRequested(root);
         m_ragLabel->setText("indeksleniyor (arka plan)...");
@@ -222,11 +255,22 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     connect(m_history, &QComboBox::customContextMenuRequested, this, &AiPanel::openSessionMenu);
 
     connect(&m_client, &OllamaClient::modelsReady, this, [this](const QStringList& ms) {
+        emit aiModelsChanged(!ms.isEmpty()); // Stage 25
+        m_modelsPending = false;
         QString cur = m_models->currentText();
         m_models->clear();
         m_models->addItems(ms);
         if (!cur.isEmpty()) m_models->setCurrentText(cur);
-        if (ms.isEmpty()) m_view->append("<i>Model bulunamadı. Ollama çalışıyor mu?</i>");
+        if (!ms.isEmpty())
+            m_view->append(QString("<i>✓ %1 model yüklendi.</i>").arg(ms.size()));
+        if (ms.isEmpty()) {
+            // Stage 22: kurulum kılavuzu (boş-durum kartı)
+            m_view->append(
+                "<b>Ollama bulunamadı.</b><br>"
+                "1) <a href=\"https://ollama.com\">ollama.com</a> adresinden kurun ve çalıştırın<br>"
+                "2) Terminalde: <code>ollama pull gemma3</code> (veya Ayarlar → AI'daki model)<br>"
+                "3) Yukarıdaki ▶ düğmesiyle başlatıp ⟳ ile listeyi yenileyin");
+        }
     });
     connect(&m_client, &OllamaClient::chatReply, this, [this](const QString& t) {
         m_lastResponse = t;
@@ -244,10 +288,26 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
         m_view->append("<br>");
         persistMessage("ai", m_lastResponse);
         setBusy(false);
+        // Stage 25: karşılaştırmanın B ayağı (akışsız tek yanıt)
+        if (m_compareArmed && !m_compareModel.isEmpty()) {
+            m_compareArmed = false;
+            setBusy(true);
+            m_view->append("<hr><i>B yanıtı yazıyor...</i>");
+            m_client.chat(m_compareModel, m_compareSys, m_comparePrompt, m_compareOpts);
+        }
     });
     connect(&m_client, &OllamaClient::tokensUsed, this, [this](int p, int e) {
         m_tokens.add(p, e);
         m_tokenLabel->setText(m_tokens.summary(m_activeModel));
+        // Stage 25: oturum token bütçesi
+        const int budget = SettingsManager::instance().load().aiTokenBudget;
+        if (budget > 0 && !m_budgetWarned && m_tokens.total() > budget) {
+            m_budgetWarned = true;
+            m_view->append(QString("<i style='color:#f44747'>⚠ Token bütçesi aşıldı "
+                                   "(%1 &gt; %2).</i>")
+                               .arg(m_tokens.total())
+                               .arg(budget));
+        }
     });
     connect(&m_client, &OllamaClient::error, this, [this](const QString& e) {
         m_streamActive = false;
@@ -373,7 +433,7 @@ void AiPanel::reloadSettings() {
     int ctxIdx = (s.contextMode == "selection") ? 1 : (s.contextMode == "rag") ? 2 : (s.contextMode == "none") ? 3 : 0;
     m_ctxMode->setCurrentIndex(ctxIdx);
     refreshProfileBox();
-    m_client.fetchModels();
+    refreshModels();
 }
 
 QJsonObject AiPanel::currentOptions() const {
@@ -452,6 +512,7 @@ void AiPanel::setBusy(bool b) {
 void AiPanel::send(const QString& preset) {
     QString extra = m_input->text().trimmed();
     if (preset.isEmpty() && extra.isEmpty()) return;
+    m_budgetWarned = false; // Stage 25
     AppSettings s = SettingsManager::instance().load();
     s.aiStreaming = m_stream->isChecked();
     static const char* modes[] = {"file", "selection", "rag", "none"};
@@ -524,6 +585,138 @@ void AiPanel::loadChat(const QString& file) {
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return;
     QString t = QString::fromUtf8(f.readAll());
     m_view->setHtml(t.toHtmlEscaped().replace("\n", "<br>"));
+}
+
+// Stage 25: iki modelle karşılaştırma — A akar, bitince B (akışsız) koşar
+void AiPanel::sendCompare() {
+    const QString extra = m_input->text().trimmed();
+    if (extra.isEmpty()) {
+        m_view->append("<i>Önce soruyu yazın.</i>");
+        return;
+    }
+    if (m_models->count() < 2) {
+        m_view->append("<i>Karşılaştırma için en az 2 model gerekli (⟳ ile yükleyin).</i>");
+        return;
+    }
+    const QString a = m_models->currentText().trimmed();
+    QString b;
+    for (int i = 0; i < m_models->count(); ++i)
+        if (m_models->itemText(i) != a) { b = m_models->itemText(i); break; }
+    if (a.isEmpty() || b.isEmpty()) return;
+    AppSettings s = SettingsManager::instance().load();
+    m_compareModel = b;
+    m_compareSys = s.systemPrompt;
+    m_comparePrompt = extra + "\n" + buildContext(extra);
+    m_compareOpts = currentOptions();
+    m_compareArmed = true;
+    m_view->append(QString("<hr><b>⇄ Karşılaştırma:</b> %1 vs %2").arg(a.toHtmlEscaped(), b.toHtmlEscaped()));
+    send();
+}
+
+// Stage 30: eski sohbetlerde metin bul
+void AiPanel::searchChats(const QString& query) {
+    if (!m_chatStore || query.isEmpty()) return;
+    struct Hit { QString id; QString title; QString snippet; };
+    QList<Hit> hits;
+    for (const ChatSession& s : m_chatStore->sessions()) {
+        const ChatSession full = m_chatStore->load(s.id);
+        for (const ChatMessage& m : full.messages) {
+            const int at = m.text.indexOf(query, 0, Qt::CaseInsensitive);
+            if (at < 0) continue;
+            const int from = qMax(0, at - 40);
+            hits << Hit{s.id, full.title.isEmpty() ? s.id : full.title,
+                        m.text.mid(from, 120).replace('\n', ' ')};
+            break;
+        }
+        if (hits.size() >= 50) break;
+    }
+    if (hits.isEmpty()) {
+        m_view->append("<i>Sohbetlerde bulunamadı: " + query.toHtmlEscaped() + "</i>");
+        return;
+    }
+    QString html = "<b>Sohbet arama sonuçları:</b><br>";
+    for (int i = 0; i < hits.size(); ++i)
+        html += QString("%1. <a href='chat:%2'>%3</a> — %4<br>")
+                    .arg(i + 1)
+                    .arg(hits[i].id.toHtmlEscaped(), hits[i].title.toHtmlEscaped(),
+                         hits[i].snippet.toHtmlEscaped());
+    m_view->append(html);
+}
+
+// Stage 25: son AI yanıtını geri al — soru girişe döner (dallanma)
+void AiPanel::undoLastAnswer() {
+    if (!m_chatStore || m_activeSessionId.isEmpty()) return;
+    ChatSession sess = m_chatStore->load(m_activeSessionId);
+    if (sess.messages.isEmpty()) return;
+    QString lastUser;
+    while (!sess.messages.isEmpty() && sess.messages.last().role != "user")
+        sess.messages.removeLast();
+    if (!sess.messages.isEmpty()) lastUser = sess.messages.last().text;
+    m_chatStore->save(sess);
+    m_input->setText(lastUser);
+    m_input->setFocus();
+    m_view->append("<hr><i>↩ Son yanıt geri alındı — soru yukarıda, değiştirip tekrar gönderin.</i>");
+}
+
+// Uygulama içinden Ollama başlatma (arayüzü dondurmaz)
+void AiPanel::ensureServerAsync() {
+    AppSettings s = SettingsManager::instance().load();
+    m_client.setHost(s.ollamaHost);
+    const QString host = s.ollamaHost;
+    m_view->append("<i>Ollama denetleniyor/bağlatılıyor...</i>");
+    QFutureWatcher<bool>* w = new QFutureWatcher<bool>(this);
+    connect(w, &QFutureWatcher<bool>::finished, this, [this, w, host]() {
+        const bool ok = w->result();
+        w->deleteLater();
+        if (ok) {
+            m_view->append("<i>Ollama hazır ✓ — modeller yükleniyor...</i>");
+            emit aiModelsChanged(true);
+            refreshModels();
+        } else {
+            m_view->append("<i>Ollama başlatılamadı (ikili bulunamadı ya da port dolu). "
+                           "El ile: <code>ollama serve</code></i>");
+        }
+    });
+    w->setFuture(QtConcurrent::run([host]() { return OllamaClient::ensureServer(host); }));
+}
+
+void AiPanel::refreshModels() {
+    AppSettings s = SettingsManager::instance().load();
+    m_client.setHost(s.ollamaHost);
+    m_modelsPending = true;
+    m_client.fetchModels();
+    // Yanıt gelmezse takılı kalma: 10 sn sonra uyar
+    QTimer::singleShot(10000, this, [this]() {
+        if (m_modelsPending) {
+            m_modelsPending = false;
+            m_view->append("<i>Model listesi yanıt vermedi — ⟳ ile tekrar deneyin.</i>");
+        }
+    });
+}
+
+// Stage 21: etkin oturumu markdown olarak dışa aktar
+void AiPanel::exportChatMarkdown() {
+    QString md = "# Verso AI Sohbeti\n\n";
+    bool has = false;
+    if (m_chatStore && !m_activeSessionId.isEmpty()) {
+        const ChatSession s = m_chatStore->load(m_activeSessionId);
+        if (!s.title.isEmpty()) md += "## " + s.title + "\n\n";
+        for (const ChatMessage& m : s.messages) {
+            const QString who = (m.role == "user") ? "Sen" : "AI";
+            md += "### " + who + "\n\n" + m.text + "\n\n";
+            has = true;
+        }
+    }
+    if (!has) {
+        const QString t = m_view->toPlainText().trimmed();
+        if (t.isEmpty()) return;
+        md += t + "\n";
+    }
+    const QString p = QFileDialog::getSaveFileName(this, "Sohbeti Dışa Aktar", "",
+                                                   "Markdown (*.md)");
+    if (p.isEmpty()) return;
+    QFile f(p);
+    if (f.open(QIODevice::WriteOnly | QIODevice::Text)) f.write(md.toUtf8());
 }
 
 void AiPanel::refreshHistory() {
@@ -649,6 +842,22 @@ void AiPanel::runAgent(const QString& task) {
         return;
     }
 
+    // Stage 25: plan kapısı — çalıştırmadan önce onay
+    {
+        const int steps = m_agentSteps ? m_agentSteps->value() : 10;
+        auto r = QMessageBox::question(
+            this, "Ajan Planı",
+            QString("Görev: %1\n\nEn çok %2 adım, %3 araç kullanılabilir. Başlansın mı?")
+                .arg(task.left(300))
+                .arg(steps)
+                .arg("dosya/ara/komut/yama"),
+            QMessageBox::Yes | QMessageBox::Cancel);
+        if (r != QMessageBox::Yes) {
+            m_view->append("<i>Ajan iptal edildi (plan onaylanmadı).</i>");
+            return;
+        }
+        m_agentMaxSteps = steps;
+    }
     AgentTools tools(root);
     tools.setProblemsProvider([this]() { return problemsText(); });
     tools.setAllowCommand(m_agentCmd->isChecked());
@@ -669,7 +878,7 @@ void AiPanel::runAgent(const QString& task) {
                        msg.toHtmlEscaped() + "</span>");
     };
 
-    AgentLoop::Result r = AgentLoop::run(tools, system, task, m_agentSteps->value(), llm,
+    AgentLoop::Result r = AgentLoop::run(tools, system, task, m_agentMaxSteps, llm,
                                          [this](const ToolCall& c) { return approveTool(c); }, progress);
 
     if (!r.finalText.isEmpty()) {

@@ -11,6 +11,7 @@
 #include "core/PortForwarder.h"
 #include "core/RemoteFileSystem.h"
 #include "core/RemoteTaskRunner.h"
+#include "core/TaskRunner.h"
 #include "core/LocalHistory.h"
 #include "core/FoldingRanges.h"
 #include "core/PasteTransform.h"
@@ -19,9 +20,13 @@
 #include "core/AutoPairs.h"
 #include "core/LspTransport.h"
 #include "core/GitRunner.h"
+#include "core/LanguageSupport.h"
+#include "core/ClipboardRing.h"
 #include "core/PerfMonitor.h"
 #include "core/ProjectSessions.h"
 #include "core/SettingsManager.h"
+#include "core/SettingsIO.h"
+#include "core/ShortcutCheck.h"
 #include "core/SpellChecker.h"
 #include "core/Spelling.h"
 #include "core/StartupArgs.h"
@@ -103,6 +108,29 @@
 #include "widgets/TaskPanel.h"
 #include "widgets/TerminalPanel.h"
 #include "widgets/ThemeGalleryDialog.h"
+#include "widgets/NewFileDialog.h"
+#include "widgets/FirstRunDialog.h"
+#include "widgets/ShortcutDialog.h"
+#include "widgets/SymbolSearchDialog.h"
+#include "widgets/BookmarkDialog.h"
+#include "widgets/MarkdownPreviewDialog.h"
+#include "widgets/ImageViewerDialog.h"
+#include "widgets/HexViewDialog.h"
+#include "widgets/GitHistoryDialog.h"
+#include "widgets/PluginManagerDialog.h"
+#include "widgets/NewProjectDialog.h"
+#include "widgets/ClipboardDialog.h"
+#include "widgets/MergeEditorDialog.h"
+#include "core/SshConfig.h"
+#include "widgets/GitTagsDialog.h"
+#include "widgets/MetricsDialog.h"
+#include "widgets/BulkRenameDialog.h"
+#include "core/ExternalTools.h"
+#include "core/MacroRecorder.h"
+#include "core/PromptVars.h"
+#include "core/WorkspaceSymbols.h"
+#include "core/PluginEngine.h"
+#include <QDesktopServices>
 #include "widgets/WelcomeView.h"
 #include "widgets/TodoPanel.h"
 #include <QApplication>
@@ -115,6 +143,15 @@
 #include <QDirIterator>
 #include <QDockWidget>
 #include <QFileDialog>
+#include <QFontDialog>
+#include <QFontInfo>
+#include <QFutureWatcher>
+#include <QHelpEvent>
+#include <QtConcurrent>
+#include <QColorDialog>
+#include <QDateTime>
+#include <QTemporaryFile>
+#include <QTextBrowser>
 #include <QFileInfo>
 #include <QFile>
 #include <QHBoxLayout>
@@ -124,6 +161,8 @@
 #include <QLabel>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMimeData>
+#include <QMouseEvent>
 #include <QProcess>
 #include <QPushButton>
 #include <QStandardPaths>
@@ -146,13 +185,23 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Stage 9: tipografi + accent → token hattı
     TypographySettings typo;
     typo.uiFamily = s.uiFontFamily;
+    typo.editorFamily = s.editorFontFamily;
     typo.uiSize = s.uiFontSize;
     typo.lineHeight = s.lineHeight;
     typo.letterSpacing = s.letterSpacing;
     typo.ligatures = s.ligatures;
     ThemeManager::instance().setTypography(typo);
+    ThemeManager::instance().setSelectionOpacity(s.selectionOpacity);
     ThemeManager::instance().setAccent(s.accentColor.isEmpty() ? QColor() : QColor(s.accentColor));
     ThemeManager::instance().apply(s.theme);
+    // Stage 21: ilk-çalıştırma sihirbazı
+    if (s.m_firstRun) {
+        FirstRunDialog wiz(this);
+        if (wiz.exec() == QDialog::Accepted) s = SettingsManager::instance().load();
+        else { s.m_firstRun = false; SettingsManager::instance().save(s); }
+        LanguageManager::instance().setLanguage(s.language);
+        ThemeManager::instance().apply(s.theme);
+    }
     m_root = s.lastRoot.isEmpty() ? QDir::homePath() : s.lastRoot;
 
     // Stage 6 servisleri: .gitignore, çöp kutusu, proje oturumları
@@ -162,13 +211,24 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_sessions = new ProjectSessions(m_sessionStore);
     // Stage 8: zaman damgalı yedekler
     m_backups = new BackupManager(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/backups");
+    m_marks.load(); // Stage 28: yer imleri
 
     resize(1280, 800);
     setWindowTitle("Verso Coder");
 
     m_lspCpp = new LspClient(this);
     m_lspPy = new LspClient(this);
+    m_lspRs = new LspClient(this);  // Stage 27
+    m_lspGo = new LspClient(this);  // Stage 27
+    m_lspJs = new LspClient(this);  // Stage 27
     m_lspRemote = new LspClient(this); // Stage 16: ssh köprülü uzak LSP
+    // Stage 27: çökme kurtarma + ilerleme
+    for (LspClient* c : {m_lspCpp, m_lspPy, m_lspRs, m_lspGo, m_lspJs}) {
+        connect(c, &LspClient::progressUpdate, this, &MainWindow::onLspProgress);
+        connect(c, &LspClient::serverError, this, [this, c](const QString& e) {
+            onLspCrashed(c, e);
+        });
+    }
     connect(m_lspCpp, &LspClient::diagnosticsReady, this, &MainWindow::onDiagnostics);
     connect(m_lspPy, &LspClient::diagnosticsReady, this, &MainWindow::onDiagnostics);
     // Stage 16: uzak tanılar ssh:// URI'ye çevrilip aynı havuza girer
@@ -176,8 +236,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             [this](const QString& path, const QList<LspDiag>& diags) {
                 onDiagnostics(m_remoteProfile.toUri(path), diags);
             });
-    connect(m_lspCpp, &LspClient::serverError, this, [this](const QString& e) { m_status->setText(e); });
-    connect(m_lspPy, &LspClient::serverError, this, [this](const QString& e) { m_status->setText(e); });
 
     // --- Komut eylemleri (kısayollar ayarlardan uygulanır) ---
     auto mkAct = [this](const QString& id, const QString& title, auto&& fn) {
@@ -189,6 +247,59 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     };
     mkAct("file.openFolder", "Klasör Aç...", [this]() { openFolderDialog(); });
     mkAct("file.new", "Yeni Dosya", [this]() { newUntitledFile(); });
+    mkAct("file.language", "Dosya Dilini Değiştir", [this]() { changeFileLanguage(); });
+    mkAct("file.encodingInfo", "Dosya Kodlama Bilgisi", [this]() { showEncodingInfo(); });
+    mkAct("edit.toggleEol", "Satır Sonu Değiştir", [this]() { toggleEol(); });
+    mkAct("edit.pasteCycle", "Önceki Panoyu Yapıştır", [this]() { pasteCyclePrevious(); });
+    mkAct("edit.multiCaretLineEnds", "Satır Sonlarına İmleç", [this]() { multiCaretLineEnds(); });
+    mkAct("ai.exportChat", "Sohbeti Markdown Dışa Aktar", [this]() { if (m_ai) m_ai->exportChatMarkdown(); });
+    mkAct("view.font", "Editör Yazı Tipi...", [this]() { chooseEditorFont(); });
+    // Stage 24-25
+    mkAct("nav.symbol", "Sembol Ara", [this]() { runCommand("nav.symbol"); });
+    mkAct("view.radar", "Proje Radarı", [this]() { runCommand("view.radar"); });
+    mkAct("file.projectNotes", "Proje Notları", [this]() { runCommand("file.projectNotes"); });
+    mkAct("file.bulkRename", "Toplu Yeniden Adlandır", [this]() { runCommand("file.bulkRename"); });
+    mkAct("ai.compare", "AI Karşılaştırma", [this]() { runCommand("ai.compare"); });
+    mkAct("ai.undoAnswer", "Son Yanıtı Geri Al", [this]() { runCommand("ai.undoAnswer"); });
+    // Stage 28
+    mkAct("edit.toggleComment", "Satırı Yoruma Al/Çıkar", [this]() { runCommand("edit.toggleComment"); });
+    mkAct("edit.bookmarkToggle", "Yer İmi Aç/Kapa", [this]() { runCommand("edit.bookmarkToggle"); });
+    mkAct("edit.bookmarkNext", "Sonraki Yer İmi", [this]() { runCommand("edit.bookmarkNext"); });
+    mkAct("edit.bookmarkPrev", "Önceki Yer İmi", [this]() { runCommand("edit.bookmarkPrev"); });
+    mkAct("view.bookmarks", "Yer İmleri", [this]() { runCommand("view.bookmarks"); });
+    mkAct("view.markdownPreview", "Markdown Önizleme", [this]() { runCommand("view.markdownPreview"); });
+    mkAct("file.openHex", "Hex Görünümü", [this]() { runCommand("file.openHex"); });
+    mkAct("file.copyPath", "Tam Yolu Kopyala", [this]() { runCommand("file.copyPath"); });
+    mkAct("file.copyRelativePath", "Göreli Yolu Kopyala", [this]() { runCommand("file.copyRelativePath"); });
+    mkAct("file.copyFileName", "Dosya Adını Kopyala", [this]() { runCommand("file.copyFileName"); });
+    mkAct("edit.organizeImports", "Importları Düzenle", [this]() { runCommand("edit.organizeImports"); });
+    mkAct("git.history", "Dosya Geçmişi", [this]() { runCommand("git.history"); });
+    mkAct("git.tags", "Etiketler", [this]() { runCommand("git.tags"); });
+    mkAct("term.find", "Terminalde Bul", [this]() { runCommand("term.find"); });
+    mkAct("term.findNext", "Sonraki Eşleşme (terminal)", [this]() { runCommand("term.findNext"); });
+    mkAct("term.findPrev", "Önceki Eşleşme (terminal)", [this]() { runCommand("term.findPrev"); });
+    mkAct("view.notifications", "Bildirimler", [this]() { runCommand("view.notifications"); });
+    mkAct("file.projectNotes", "Proje Notları", [this]() { runCommand("file.projectNotes"); });
+    mkAct("file.bulkRename", "Toplu Yeniden Adlandır", [this]() { runCommand("file.bulkRename"); });
+    mkAct("debug.runFile", "Dosyayı Hata Ayıklayıcıda Çalıştır", [this]() { runCommand("debug.runFile"); });
+    mkAct("ai.undoEdit", "AI Düzenlemesini Geri Al", [this]() { runCommand("ai.undoEdit"); });
+    mkAct("workspace.trust", "Çalışma Alanı Güveni...", [this]() { runCommand("workspace.trust"); });
+    // Stage 30
+    mkAct("edit.merge", "Birleştirme Düzenleyicisi", [this]() { runCommand("edit.merge"); });
+    mkAct("search.editor", "Arama Düzenleyicisi", [this]() { runCommand("search.editor"); });
+    mkAct("file.newProject", "Yeni Proje...", [this]() { runCommand("file.newProject"); });
+    mkAct("file.newFromTemplate", "Şablondan Yeni Dosya", [this]() { runCommand("file.newFromTemplate"); });
+    mkAct("term.newTab", "Yeni Terminal Sekmesi", [this]() { runCommand("term.newTab"); });
+    mkAct("remote.importSsh", "SSH Config İçe Aktar", [this]() { runCommand("remote.importSsh"); });
+    mkAct("view.clipboard", "Pano Geçmişi", [this]() { runCommand("view.clipboard"); });
+    mkAct("task.chain", "Görev Zincirini Çalıştır", [this]() { runCommand("task.chain"); });
+    mkAct("remote.reconnect", "Yeniden Bağlan", [this]() { runCommand("remote.reconnect"); });
+    mkAct("ai.searchChats", "Sohbetlerde Ara", [this]() { runCommand("ai.searchChats"); });
+    mkAct("ai.reviewStaged", "AI Kod İncelemesi", [this]() { runCommand("ai.reviewStaged"); });
+    mkAct("test.runRelated", "İlgili Testi Çalıştır", [this]() { runCommand("test.runRelated"); });
+    mkAct("macro.record", "Makro Kaydet/Durdur", [this]() { runCommand("macro.record"); });
+    mkAct("macro.play", "Makroyu Oynat", [this]() { runCommand("macro.play"); });
+    mkAct("macro.clear", "Makroyu Temizle", [this]() { runCommand("macro.clear"); });
     mkAct("file.save", "Kaydet", [this]() { saveCurrent(); });
     mkAct("file.saveAll", "Tümünü Kaydet", [this]() { saveAll(); });
     mkAct("nav.quickOpen", "Hızlı Aç", [this]() { showQuickOpen(); });
@@ -228,8 +339,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     mkAct("edit.find", "Bul (editör içi)", [this]() { showFindBar(); });
     mkAct("edit.findNext", "Sonraki Eşleşme", [this]() { findNavigate(+1); });
     mkAct("edit.findPrev", "Önceki Eşleşme", [this]() { findNavigate(-1); });
-    mkAct("edit.expandSel", "Akıllı Seçimi Genişlet", [this]() {
-        if (auto* e = currentEditor()) e->expandSelection(); });
+    mkAct("edit.expandSel", "Akıllı Seçimi Genişlet", [this]() { expandSelectionSmart(); });
     // Stage 12: uyarlanabilir arayüz
     mkAct("view.themeEditor", "Tema Düzenleyici...", [this]() { openThemeEditor(); });
     mkAct("view.cycleDensity", "Yoğunluk Değiştir", [this]() { cycleDensity(); });
@@ -252,6 +362,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     mkAct("view.tasks", "Görevler (TODO) Paneli", [this]() { runCommand("view.tasks"); });
     mkAct("ai.agent", "AI Ajan Modu Aç/Kapa", [this]() { runCommand("ai.agent"); });
     mkAct("help.about", "Sistem Teşhisi / Hakkında", [this]() { runCommand("help.about"); });
+    mkAct("help.shortcuts", "Klavye Kısayolları", [this]() { showShortcutDialog(); });
+    mkAct("file.pluginsDir", "Eklentiler Klasörünü Aç", [this]() { openPluginsDir(); });
+    mkAct("view.plugins", "Eklenti Yöneticisi", [this]() { runCommand("view.plugins"); });
+    mkAct("file.factoryReset", "Fabrika Ayarlarına Dön...", [this]() { factoryReset(); });
     mkAct("task.run", "Görevi Çalıştır (tasks.json)", [this]() { runCommand("task.run"); });
     mkAct("task.panel", "Görev Panelini Aç", [this]() { runCommand("task.panel"); });
     mkAct("view.theme", "Tema Galerisi", [this]() { runCommand("view.theme"); });
@@ -270,10 +384,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     mkAct("lsp.rename", "Sembolü Yeniden Adlandır", [this]() { renameSymbol(); });
     mkAct("lsp.codeAction", "Hızlı Düzeltme...", [this]() { showCodeActions(); });
     mkAct("lsp.signature", "İmza Yardımı", [this]() { showSignatureHelp(false); });
+    mkAct("lsp.sigNext", "Sonraki İmza", [this]() { runCommand("lsp.sigNext"); });
+    mkAct("lsp.sigPrev", "Önceki İmza", [this]() { runCommand("lsp.sigPrev"); });
     mkAct("lsp.docSymbols", "Belge Simgeleri", [this]() { showDocSymbols(); });
     mkAct("lsp.wsSymbols", "Çalışma Alanı Simgesi", [this]() { showWorkspaceSymbols(); });
     mkAct("format.document", "Belgeyi Biçimlendir", [this]() { formatDocument(); });
     mkAct("lsp.calls", "Çağrı Hiyerarşisi", [this]() { showCallHierarchy(); });
+    // Stage 27
+    mkAct("lsp.openLink", "Bağlantıyı Aç (include/import)", [this]() { runCommand("lsp.openLink"); });
+    mkAct("lsp.typeHierarchy", "Tip Hiyerarşisi", [this]() { runCommand("lsp.typeHierarchy"); });
+    mkAct("lsp.pullDiagnostics", "Tanıları Yenile (çek)", [this]() { runCommand("lsp.pullDiagnostics"); });
+    mkAct("format.selection", "Seçimi Biçimlendir", [this]() { runCommand("format.selection"); });
+    mkAct("lsp.log", "LSP Trafiğini Göster", [this]() { runCommand("lsp.log"); });
+    mkAct("lsp.servers", "Dil Sunucuları...", [this]() { runCommand("lsp.servers"); });
     mkAct("view.inlayHints", "Satır İçi İpuçları (aç/kapa)", [this]() { toggleInlayHints(); });
     mkAct("view.semantic", "Semantik Renklendirme (aç/kapa)", [this]() { toggleSemantic(); });
     // Stage 14: hata ayıklama & test
@@ -284,6 +407,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     mkAct("debug.stepInto", "Adım İçi", [this]() { debugStep(); });
     mkAct("debug.stepOut", "Bitir", [this]() { debugFinish(); });
     mkAct("debug.toggleBp", "Kesme Noktası Aç/Kapa", [this]() { toggleBreakpointAtCursor(); });
+    // Stage 26
+    mkAct("debug.smartStep", "Akıllı Adım", [this]() { runCommand("debug.smartStep"); });
+    mkAct("debug.functionBp", "Fonksiyon Kesmesi", [this]() { runCommand("debug.functionBp"); });
+    mkAct("debug.watchpoint", "İzleme Noktası", [this]() { runCommand("debug.watchpoint"); });
+    mkAct("debug.attach", "Sürece Bağlan", [this]() { runCommand("debug.attach"); });
+    mkAct("debug.core", "Core ile Aç", [this]() { runCommand("debug.core"); });
+    mkAct("debug.substitutePath", "Kaynak Yolu Eşle", [this]() { runCommand("debug.substitutePath"); });
+    mkAct("debug.editBp", "Kesme Düzenle", [this]() { runCommand("debug.editBp"); });
+    mkAct("debug.toggleSkipped", "Lib Frame Gizle/Göster", [this]() { runCommand("debug.toggleSkipped"); });
+    mkAct("debug.setVariable", "Değeri Değiştir", [this]() { runCommand("debug.setVariable"); });
     mkAct("test.discover", "Testleri Keşfet", [this]() { discoverTests(); });
     mkAct("test.runAll", "Tüm Testleri Çalıştır", [this]() { runAllTests(); });
     mkAct("test.coverage", "Kapsama Çalıştır", [this]() { runCoverage(); });
@@ -299,6 +432,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     mkAct("ai.prompts", "İstem Kitaplığı", [this]() { promptLibrary(); });
     mkAct("ai.applyLast", "Son AI Kodunu Uygula", [this]() { applyLastAi(); });
     mkAct("ai.pullModel", "Ollama Modeli İndir", [this]() { pullModel(); });
+    mkAct("ai.startServer", "Ollama Sunucusunu Başlat", [this]() { runCommand("ai.startServer"); });
     // Stage 16: uzaktan geliştirme
     mkAct("remote.connect", "Uzağa Bağlan", [this]() { remoteConnectDialog(); });
     mkAct("remote.disconnect", "Uzak Bağlantıyı Kes", [this]() { remoteDisconnect(); });
@@ -329,6 +463,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     fileMenu->addAction(m_actions["file.save"]);
     fileMenu->addAction(m_actions["file.saveAll"]);
     fileMenu->addAction(m_actions["nav.quickOpen"]);
+    fileMenu->addSeparator();
+    fileMenu->addAction(m_actions["file.pluginsDir"]);
+    fileMenu->addAction(m_actions["file.factoryReset"]);
+
+    auto* helpMenu = menuBar()->addMenu("Yardım");
+    helpMenu->addAction(m_actions["help.shortcuts"]);
+    helpMenu->addAction(m_actions["help.about"]);
 
     auto* viewMenu = menuBar()->addMenu("Görünüm");
     m_actMinimap = viewMenu->addAction("Minimap");
@@ -479,6 +620,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_search = new SearchPanel(m_side);
     m_git = new GitPanel(m_side);
     m_ai = new AiPanel(m_side);
+    // Stage 25: AI çevrimdışı rozeti
+    connect(m_ai, &AiPanel::aiModelsChanged, this, [this](bool on) {
+        if (m_chipAi) m_chipAi->setText(on ? "AI ✓" : "AI ✗");
+    });
     m_problems = new ProblemsPanel(m_side);
     // Stage 16: uzak gezgin (SSH)
     m_ssh = new SshSession(this);
@@ -546,6 +691,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_tabs2, &QTabWidget::currentChanged, this, [this]() { onGroupCurrentChanged(1); });
 
     connect(m_explorer, &ExplorerPanel::fileOpened, this, &MainWindow::openFile);
+    connect(m_explorer, &ExplorerPanel::filePreviewRequested, this,
+            &MainWindow::openPreview); // Stage 24
     connect(m_explorer, &ExplorerPanel::compareRequested, this, &MainWindow::diffPath);
     connect(m_explorer, &ExplorerPanel::pathRenamed, this, &MainWindow::onPathRenamed);
     connect(m_search, &SearchPanel::fileOpened, this, &MainWindow::openFileAt);
@@ -588,7 +735,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     });
     connect(m_ai, &AiPanel::applyFileContentRequested, this,
             [this](const QString& path, const QString& content) {
-        QFile f(path);
+        QFile f(path); // Stage 28: önce eskiyi yedekle (geri alma)
+        QString old;
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            old = QString::fromUtf8(f.readAll());
+            f.close();
+        }
+        pushAiUndo(path, old, nullptr);
         if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             m_status->setText("Ajan yazımı başarısız: " + path);
             return;
@@ -677,6 +830,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_terminal = new TerminalPanel(this);
     m_terminal->setWorkdir(m_root);
     m_terminal->setShell(s.terminalShell);
+    if (m_minimap) m_minimap->setFixedWidth(qBound(40, s.minimapWidth, 220)); // Stage 23
+    // Stage 24: sekme grubu renkleri — 2. grup yeşilimsi seçili çizgisi
+    if (m_tabs2)
+        m_tabs2->tabBar()->setStyleSheet(
+            "QTabBar::tab:selected { border-bottom: 2px solid #4ec9b0; }");
     connect(m_terminal, &TerminalPanel::buildRequested, this, [this]() { runCommand("run.build"); });
     m_bottomTabs = new QTabWidget(this);
     m_bottomTabs->setDocumentMode(true);
@@ -731,6 +889,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_debug, &DebugPanel::finishRequested, this, &MainWindow::debugFinish);
     connect(m_debug, &DebugPanel::breakpointToggled, this, &MainWindow::toggleBreakpoint);
     connect(m_debug, &DebugPanel::evaluateRequested, this, &MainWindow::debugEvaluate);
+    // Stage 26: izleme + bellek + thread + değişken düzenleme
+    connect(m_debug, &DebugPanel::watchAddRequested, this, &MainWindow::debugAddWatch);
+    connect(m_debug, &DebugPanel::watchRemoveRequested, this, &MainWindow::debugRemoveWatch);
+    connect(m_debug, &DebugPanel::memoryReadRequested, this, &MainWindow::debugReadMemory);
+    connect(m_debug, &DebugPanel::threadSelected, this, &MainWindow::debugSelectThread);
+    connect(m_debug, &DebugPanel::variableEditRequested, this, &MainWindow::debugSetVariable);
     connect(m_debug, &DebugPanel::consoleRequested, this, &MainWindow::debugConsole);
     connect(m_debug, &DebugPanel::frameSelected, this, [this](int f) { refreshDebugVars(f); });
     connect(m_tests, &TestExplorer::discoverRequested, this, &MainWindow::discoverTests);
@@ -764,18 +928,23 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_chipGit = makeChip("Git dalı — Git panelini açar", "view.git");
     m_chipProblems = makeChip("Sorunlar — paneli açar", "view.problems");
     m_cursorLabel = makeChip("Satır:sütun — satıra git", "nav.gotoLine");
-    m_chipLang = makeChip("Dil / girinti", "file.settings");
-    m_chipEol = makeChip("Satır sonu biçimi", QString());
-    m_chipEnc = makeChip("Kodlama", QString());
+    m_chipLang = makeChip("Dil — değiştirmek için tıkla", "file.language");
+    m_chipGrid = makeChip("Izgara: harf hizalaması durumu", QString()); // Stage 23
+    m_chipEol = makeChip("Satır sonu — değiştirmek için tıkla", "edit.toggleEol");
+    m_chipEnc = makeChip("Kodlama bilgisi — tıklayın", "file.encodingInfo");
     m_chipProfile = makeChip("Görünüm profili — değiştirmek için tıkla", "ui.profiles"); // Stage 12
+    m_chipAi = makeChip("AI durumu", QString()); // Stage 25: çevrimdışı rozeti
+    m_chipAi->setText("AI ?");
     statusBar()->addWidget(m_status, 1);
     statusBar()->addPermanentWidget(m_chipGit);
     statusBar()->addPermanentWidget(m_chipProblems);
     statusBar()->addPermanentWidget(m_cursorLabel);
     statusBar()->addPermanentWidget(m_chipLang);
+    statusBar()->addPermanentWidget(m_chipGrid); // Stage 23
     statusBar()->addPermanentWidget(m_chipEol);
     statusBar()->addPermanentWidget(m_chipEnc);
     statusBar()->addPermanentWidget(m_chipProfile);
+    statusBar()->addPermanentWidget(m_chipAi); // Stage 25
     m_chipEol->setText("LF");
     m_chipEnc->setText("UTF-8");
 
@@ -800,6 +969,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     Animator::setReducedMotion(s.reducedMotion);
     if (LayoutPresets::isValid(s.layoutPreset)) applyLayoutPreset(s.layoutPreset);
     ToastManager::instance().attach(this);
+    // Stage 21: pano halkası — kopyalanan metinleri biriktir
+    connect(QApplication::clipboard(), &QClipboard::dataChanged, this,
+            &MainWindow::onClipboardChanged);
+    m_macro.load(); // Stage 25: kayıtlı makro
+    checkCrashDumps(); // Stage 31: önceki çökme izleri
+    // Stage 21: kurtarma yedekleri varsa bildir
+    if (m_backups) {
+        const int nb = m_backups->list().size();
+        if (nb > 0)
+            toast(2, QString("%1 kurtarma yedeği bulundu — Zaman Çizelgesi'nden geri yüklenebilir").arg(nb));
+    }
 
     // Stage 12: özel başlık + panel sırası + otomatik tema
     setCustomTitleBar(s.customTitleBar);
@@ -823,6 +1003,27 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_completion = new CompletionPopup(this);
     m_completion->hide();
     connect(m_completion, &CompletionPopup::chosen, this, &MainWindow::onCompletionChosen);
+    // Stage 27: vurgulanan öğenin dokümantasyonu (completionItem/resolve)
+    connect(m_completion, &CompletionPopup::highlighted, this,
+            [this](const CompletionItem& item) {
+                auto* e = currentEditor();
+                if (!e || item.raw.isEmpty()) return;
+                QString lang;
+                LspClient* c = lspClientFor(QFileInfo(e->filePath()).suffix(), lang);
+                if (!c || !c->isReady()) return;
+                c->request("completionItem/resolve", item.raw, [this](QJsonObject res) {
+                    if (!m_completion->isVisible()) return;
+                    QJsonObject r = res.contains("result") ? res["result"].toObject() : res;
+                    QString doc = r["documentation"].isObject()
+                        ? r["documentation"].toObject()["value"].toString()
+                        : r["documentation"].toString();
+                    doc = doc.trimmed().left(600);
+                    if (doc.isEmpty()) return;
+                    const QPoint p = m_completion->mapToGlobal(
+                        QPoint(m_completion->width(), 0));
+                    QToolTip::showText(p, doc, m_completion);
+                });
+            });
     m_completeTimer = new QTimer(this);
     m_completeTimer->setSingleShot(true);
     m_completeTimer->setInterval(350);
@@ -834,6 +1035,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_inlayTimer = new QTimer(this);
     m_inlayTimer->setSingleShot(true);
     m_inlayTimer->setInterval(800);
+    // Stage 27: lens + renk kutuları (yavaş devir, 8 sn)
+    m_lensTimer = new QTimer(this);
+    connect(m_lensTimer, &QTimer::timeout, this, [this]() {
+        if (auto* e = currentEditor()) {
+            refreshCodeLens(e);
+            refreshDocColors(e);
+        }
+    });
+    m_lensTimer->start(8000);
     connect(m_inlayTimer, &QTimer::timeout, this, [this]() {
         if (auto* e = currentEditor()) {
             refreshInlayHints(e);
@@ -863,6 +1073,24 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     updateCursorStatus();
     updateBreadcrumb();
     PerfMonitor::instance().mark("UI hazır");
+    // Stage 22: eklentiler ilk kareden sonra (başlangıcı yavaşlatmaz)
+    QTimer::singleShot(800, this, &MainWindow::loadPluginsDeferred);
+    // Ollama kapalıysa bir kez sessizce başlatmayı dene (sonuç toast)
+    QTimer::singleShot(2500, this, [this]() {
+        AppSettings s = SettingsManager::instance().load();
+        const QString host = s.ollamaHost;
+        QFutureWatcher<bool>* w = new QFutureWatcher<bool>(this);
+        connect(w, &QFutureWatcher<bool>::finished, this, [this, w]() {
+            const bool ok = w->result();
+            w->deleteLater();
+            if (ok && m_ai) {
+                m_ai->refreshModels();
+                toast(1, "Ollama hazır ✓");
+            }
+        });
+        w->setFuture(QtConcurrent::run(
+            [host]() { return OllamaClient::ensureServer(host, 12000); }));
+    });
     // Stage 9: tema/accent değişince tüm görselleri tazele
     ThemeManager::instance().onApplied([this]() {
         refreshActivityIcons();
@@ -900,6 +1128,7 @@ QTabWidget* MainWindow::makeTabWidget(int group) {
     t->setDocumentMode(true);
     // Stage 9: sekme çubuğu taşma menüsü — sağ tıkla açık sekmeler listesi
     t->tabBar()->setContextMenuPolicy(Qt::CustomContextMenu);
+    t->tabBar()->installEventFilter(this); // Stage 21: orta-tık + çift-tık
     connect(t->tabBar(), &QWidget::customContextMenuRequested, this, [this, t](const QPoint& pos) {
         if (t->count() == 0) return;
         QMenu menu;
@@ -919,9 +1148,97 @@ QTabWidget* MainWindow::activeTabs() const {
     return m_activeGroup == 0 ? m_tabs : m_tabs2;
 }
 
+// Stage 21: pano değişince halkaya ekle
+void MainWindow::onClipboardChanged() {
+    const QMimeData* md = QApplication::clipboard()->mimeData();
+    if (md && md->hasText()) m_clipRing.push(md->text().left(100000));
+}
+
+// Stage 21: seçimdeki metni halkanın sonraki girdisiyle değiştir (döner)
+void MainWindow::pasteCyclePrevious() {
+    CodeEditor* e = currentEditor();
+    if (!e) return;
+    if (m_clipRing.size() == 0) { toast(0, "Pano halkası boş — önce bir şey kopyalayın"); return; }
+    QTextCursor c = e->textCursor();
+    if (!c.hasSelection()) {
+        c.select(QTextCursor::WordUnderCursor);
+        if (!c.hasSelection()) { toast(0, "Önce değiştirilecek metni seçin"); return; }
+        e->setTextCursor(c);
+    }
+    c = e->textCursor();
+    c.beginEditBlock();
+    c.removeSelectedText();
+    c.insertText(m_clipRing.next());
+    c.endEditBlock();
+}
+
+// Stage 21: seçili satırların (yoksa tüm belgenin) sonlarına ek imleç
+void MainWindow::multiCaretLineEnds() {
+    CodeEditor* e = currentEditor();
+    if (!e) return;
+    QTextCursor cur = e->textCursor();
+    QTextDocument* doc = e->document();
+    int a, b;
+    if (cur.hasSelection()) {
+        a = doc->findBlock(cur.selectionStart()).blockNumber();
+        b = doc->findBlock(cur.selectionEnd()).blockNumber();
+    } else {
+        a = 0;
+        b = doc->blockCount() - 1;
+    }
+    int added = 0;
+    for (int ln = a; ln <= b && added < 300; ++ln) {
+        QTextBlock blk = doc->findBlockByNumber(ln);
+        if (!blk.isValid() || blk.text().isEmpty()) continue;
+        const int pos = blk.position() + blk.length();
+        if (pos == cur.position()) continue;
+        e->addCursorAt(pos);
+        ++added;
+    }
+    m_status->setText(added > 0 ? QString("%1 ek imleç").arg(added)
+                                : "Ek imleç konulacak satır yok");
+}
+
+// Stage 21: satır sonunu çevir (LF ↔ CRLF)
+void MainWindow::toggleEol() {
+    CodeEditor* e = currentEditor();
+    if (!e) return;
+    e->setCrlf(e->lineEnding() == "LF");
+    updateCursorStatus();
+    toast(1, "Satır sonu: " + e->lineEnding());
+}
+
+// Stage 21: dosya kodlama bilgisi
+void MainWindow::showEncodingInfo() {
+    CodeEditor* e = currentEditor();
+    if (!e) return;
+    QString bom = "yok";
+    qint64 size = -1;
+    if (!e->filePath().isEmpty()) {
+        QFile f(e->filePath());
+        size = f.size();
+        if (f.open(QIODevice::ReadOnly)) {
+            const QByteArray head = f.read(4);
+            if (head.startsWith("\xef\xbb\xbf")) bom = "UTF-8 BOM";
+            else if (head.startsWith("\xff\xfe") || head.startsWith("\xfe\xff"))
+                bom = "UTF-16 BOM";
+        }
+    }
+    QMessageBox::information(this, "Kodlama Bilgisi",
+        QString("Dosya: %1\nBoyut: %2\nKodlama: UTF-8 (varsayılan)\nBOM: %3\nSatır sonu: %4")
+            .arg(e->filePath().isEmpty() ? "(henüz kaydedilmedi)" : e->filePath())
+            .arg(size < 0 ? "?" : QString::number(size))
+            .arg(bom, e->lineEnding()));
+}
+
 void MainWindow::closeTabIn(QTabWidget* tabs, int i) {
+    if (isPinnedTab(tabs, i)) {
+        toast(0, "Sabit sekme — kapatmak için çift tıklayıp sabiti kaldırın");
+        return;
+    }
     if (auto* e = qobject_cast<CodeEditor*>(tabs->widget(i))) {
-        if (e->document()->isModified()) {
+        // Stage 20: içi boş sekme (Adsız + yazısız) sessiz kapanır
+        if (e->document()->isModified() && !e->toPlainText().trimmed().isEmpty()) {
             auto r = QMessageBox::question(this, "Kaydet?",
                 "Kaydedilmemiş değişiklik var. Kapatmadan önce kaydedilsin mi?",
                 QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
@@ -1027,6 +1344,13 @@ CodeEditor* MainWindow::openEditorFor(const QString& path, int group) {
                 if (e->filePath() == path) {
                     m_activeGroup = (t == m_tabs) ? 0 : 1;
                     t->setCurrentIndex(i);
+                    // Stage 24: önizleme sekmesi tam açılır
+                    if (e->previewMode() && e->loadFullPreview()) {
+                        t->setTabText(i, QFileInfo(path).fileName());
+                        t->setTabToolTip(i, path);
+                        setupLspFor(path, e->toPlainText());
+                        updateCursorStatus();
+                    }
                     return e;
                 }
     auto* e = new CodeEditor(this);
@@ -1035,6 +1359,49 @@ CodeEditor* MainWindow::openEditorFor(const QString& path, int group) {
     if (path.startsWith("ssh://")) e->setFilePath(path);
     else if (!e->loadFile(path)) { delete e; return nullptr; }
     return addEditorTab(e, QFileInfo(path).fileName(), path, group);
+}
+
+// Stage 23: piksel-hizalı ızgara garantisi — font monospace değilse geri dön
+void MainWindow::checkEditorGrid(CodeEditor* e) {
+    if (!e) return;
+    if (GridCheck::isMonospace(e->font())) {
+        m_gridOk = true;
+        return;
+    }
+    m_gridOk = false;
+    QFont f(GridCheck::systemMonospace());
+    f.setPointSize(e->font().pointSize());
+    e->setFont(f);
+    e->setTabStopDistance(4 * e->fontMetrics().horizontalAdvance(' '));
+    static bool warned = false;
+    if (!warned) {
+        warned = true;
+        toast(2, "Seçili font tek aralıklı değil — ızgara için monospace'e dönüldü");
+    }
+    m_gridOk = GridCheck::isMonospace(e->font());
+}
+
+// Stage 23: yazı tipi seçim diyaloğu (editör ailesi + boyut)
+void MainWindow::chooseEditorFont() {
+    AppSettings s = SettingsManager::instance().load();
+    QFont cur = ThemeManager::instance().typography().editorFamily.isEmpty()
+        ? QFont(GridCheck::systemMonospace())
+        : QFont(s.editorFontFamily);
+    cur.setPointSize(s.fontSize);
+    bool ok = false;
+    const QFont f = QFontDialog::getFont(&ok, cur, this, "Editör Yazı Tipi");
+    if (!ok) return;
+    // Izgara şartı: monospace değilse uyar, yine de uygula + denetim yakalar
+    if (!GridCheck::isMonospace(f))
+        toast(2, "Bu font tek aralıklı değil — ızgara bozulabilir");
+    s.editorFontFamily = QFontInfo(f).family();
+    s.fontSize = f.pointSize() > 0 ? f.pointSize() : s.fontSize;
+    SettingsManager::instance().save(s);
+    TypographySettings typo = ThemeManager::instance().typography();
+    typo.editorFamily = s.editorFontFamily;
+    ThemeManager::instance().setTypography(typo);
+    applyEditorSettingsToAll();
+    updateCursorStatus();
 }
 
 // Ortak sekme kablolama: sekmeye ekle + sinyaller + LSP + durum çubuğu
@@ -1047,7 +1414,7 @@ CodeEditor* MainWindow::addEditorTab(CodeEditor* e, const QString& title,
     connect(e, &QPlainTextEdit::cursorPositionChanged, this, &MainWindow::updateCursorStatus);
     connect(e, &QPlainTextEdit::textChanged, this, &MainWindow::updateCursorStatus);
     connect(e, &QPlainTextEdit::textChanged, this, &MainWindow::updateBreadcrumb);
-    connect(e, &QPlainTextEdit::textChanged, this, [this, e]() { pushDocToLsp(e); });
+    connect(e, &QPlainTextEdit::textChanged, this, [this, e]() { pushDocToLsp(e, false); });
     // Stage 15: hayalet — yazınca eskiyi temizle + yeniden kolla
     connect(e, &QPlainTextEdit::textChanged, this, [this, e]() {
         if (e != currentEditor()) return;
@@ -1087,34 +1454,125 @@ CodeEditor* MainWindow::addEditorTab(CodeEditor* e, const QString& title,
     connect(e, &CodeEditor::externalChangeDetected, this, &MainWindow::onExternalChange);
     connect(e, &CodeEditor::breakpointToggleRequested, this,
             [this, e](int line1) { toggleBreakpoint(e->filePath(), line1); });
+    connect(e, &CodeEditor::colorBoxClicked, this,
+            [this, e](int line0) { editColorBox(e, line0); }); // Stage 27
     // Stage 17: outline görünürken yazıldıkça tazele (debounce)
     connect(e, &QPlainTextEdit::textChanged, this, [this, e]() {
         if (e != currentEditor() || !m_outlineTimer) return;
         if (m_side && m_side->currentIndex() == 6) m_outlineTimer->start();
     });
     applyBpMarks(e);
+    applyBmMarks(e); // Stage 28
     applyCoverageMarks(e);
     target->addTab(e, title);
     target->setTabToolTip(target->count() - 1, tip);
     m_activeGroup = group;
     target->setCurrentWidget(e);
     m_minimap->setEditor(e);
-    if (!e->filePath().isEmpty()) setupLspFor(e->filePath(), e->toPlainText());
+    e->viewport()->installEventFilter(this); // Stage 26: debug hover
+    // Stage 21: büyük dosyada LSP ertelenir (tamamı yüklenince başlar)
+    if (!e->filePath().isEmpty() && !e->largeFileMode())
+        setupLspFor(e->filePath(), e->toPlainText());
+    // Stage 27: lens + renk (sunucu hazırsa)
+    QTimer::singleShot(2500, this, [this, e]() {
+        if (e->isRemote()) return;
+        refreshCodeLens(e);
+        refreshDocColors(e);
+    });
     refreshGitMarks(e); // Stage 11: gutter + minimap diff işaretleri
     updateCursorStatus();
     updateBreadcrumb();
     saveSession();
+    if (m_plugins && !e->filePath().isEmpty())
+        m_plugins->fireEvent("open", e->filePath()); // Stage 29
     return e;
 }
 
-// İsimsiz yeni dosya: boş sekme açılır, ilk Kaydet'te konum sorulur.
+// İsimsiz yeni dosya: önce dil sorulur, iskelet konur; ilk Kaydet'te
+// dile uygun ad + filtre önerilir.
+// Stage 30: dosya şablon dizini
+QString MainWindow::fileTemplateDir() const {
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/templates";
+}
+
+QStringList MainWindow::fileTemplateNames() const {
+    QDir d(fileTemplateDir());
+    if (!d.exists()) return {};
+    QStringList out;
+    for (const QFileInfo& fi : d.entryInfoList({"*.tpl"}, QDir::Files, QDir::Name))
+        out << fi.completeBaseName();
+    return out;
+}
+
+void MainWindow::newFileFromTemplate() {
+    const QStringList names = fileTemplateNames();
+    if (names.isEmpty()) {
+        toast(0, "Şablon yok — örnek için bir .tpl kaydedin: " + fileTemplateDir());
+        QDir().mkpath(fileTemplateDir());
+        return;
+    }
+    bool ok = false;
+    const QString sel = QInputDialog::getItem(this, "Şablondan Yeni Dosya", "Şablon:",
+                                              names, 0, false, &ok);
+    if (!ok) return;
+    QFile f(fileTemplateDir() + "/" + sel + ".tpl");
+    if (!f.open(QIODevice::ReadOnly)) return;
+    QString body = QString::fromUtf8(f.readAll());
+    // {{filename}} {{date}} {{author}} + snippet değişkenleri
+    const QString today = QDate::currentDate().toString(Qt::ISODate);
+    body.replace("{{date}}", today);
+    body.replace("{{filename}}", "adsiz");
+    body = SnippetEngine::expandVars(body, "adsiz", QString());
+    newUntitledFile();
+    if (auto* e = currentEditor()) {
+        e->setPlainText(body);
+        e->document()->setModified(true);
+    }
+}
+
 void MainWindow::newUntitledFile() {
+    NewFileDialog dlg(false, this);
+    if (dlg.exec() != QDialog::Accepted || dlg.selectedLang().isEmpty()) return;
+    const QString lang = dlg.selectedLang();
+    LanguageSupport::pushRecentLang(lang);
     auto* e = new CodeEditor(this);
     applyEditorSettingsTo(e);
+    e->setLang(lang);
     static int untitledNo = 1;
-    const QString title = QString("Adsız-%1").arg(untitledNo++);
+    e->setUntitledNo(untitledNo);
+    const QString skel = LanguageSupport::skeleton(lang);
+    AppSettings s = SettingsManager::instance().load();
+    if (s.newFileTemplate && !skel.isEmpty()) {
+        e->setPlainText(skel);
+        e->moveCursor(QTextCursor::Start);
+        e->document()->setModified(false);
+    }
+    const QString title = LanguageSupport::untitledTitle(untitledNo++, lang);
     addEditorTab(e, title, title);
     e->setFocus();
+}
+
+// Açık sekmenin dilini sonradan değiştir (Adsız sekmelerde başlık da güncellenir)
+void MainWindow::changeFileLanguage() {
+    CodeEditor* e = currentEditor();
+    if (!e) return;
+    NewFileDialog dlg(true, this);
+    if (dlg.exec() != QDialog::Accepted || dlg.selectedLang().isEmpty()) return;
+    const QString lang = dlg.selectedLang();
+    LanguageSupport::pushRecentLang(lang);
+    e->setLang(lang);
+    if (e->isUntitled() && e->untitledNo() > 0) {
+        const QString title = LanguageSupport::untitledTitle(e->untitledNo(), lang);
+        QTabWidget* t = activeTabs();
+        const int idx = t->indexOf(e);
+        if (idx >= 0) {
+            t->setTabText(idx, title);
+            t->setTabToolTip(idx, title);
+        }
+    }
+    updateCursorStatus();
+    saveSession();
+    if (m_plugins) m_plugins->fireEvent("language", lang); // Stage 29
 }
 
 void MainWindow::splitActiveToOther() {    auto* e = currentEditor();
@@ -1139,37 +1597,119 @@ void MainWindow::moveActiveTab() {
 
 // --- LSP ---
 LspClient* MainWindow::lspClientFor(const QString& suffix, QString& langId) {
-    static const QStringList cppExt = {"cpp", "h", "hpp", "c", "cc", "cxx"};
     AppSettings s = SettingsManager::instance().load();
     if (!s.lspEnabled) return nullptr;
-    QString suf = suffix.toLower();
-    if (cppExt.contains(suf)) {
-        langId = "cpp";
-        if (!m_lspCpp->isRunning() && !m_lspWarned) {
-            QString clangd = QStandardPaths::findExecutable("clangd");
-            if (clangd.isEmpty()) {
-                m_status->setText("clangd bulunamadı — C++ tanılama kapalı.");
-                return nullptr;
+    const LspServerDef* def = LspServers::forSuffix(suffix);
+    if (!def) return nullptr;
+    langId = def->lang;
+    LspClient* c = nullptr;
+    if (def->lang == "cpp") c = m_lspCpp;
+    else if (def->lang == "python") c = m_lspPy;
+    else if (def->lang == "rust") c = m_lspRs;
+    else if (def->lang == "go") c = m_lspGo;
+    else c = m_lspJs;
+    if (!c) return nullptr;
+    if (!c->isRunning() && !m_lspWarned) {
+        // Stage 31: 60 sn içinde 3+ çökme → 5 dk bekleme (fırtına koruması)
+        {
+            QList<qint64>& hist = m_lspRestarts[c];
+            const qint64 now = QDateTime::currentMSecsSinceEpoch();
+            while (!hist.isEmpty() && now - hist.first() > 60000) hist.removeFirst();
+            if (hist.size() >= 3) {
+                const qint64 wait = 300000 - (now - hist.first());
+                if (wait > 0) {
+                    m_status->setText(
+                        QString("LSP beklemede (çökme fırtınası) — %1 sn").arg(wait / 1000));
+                    return nullptr;
+                }
+                hist.clear();
             }
-            if (!m_lspCpp->start(clangd, {"--offset-encoding=utf-8"}, m_root))
-                return nullptr;
         }
-        return m_lspCpp->isRunning() ? m_lspCpp : nullptr;
-    }
-    if (suf == "py") {
-        langId = "python";
-        if (!m_lspPy->isRunning() && !m_lspWarned) {
-            QString pylsp = QStandardPaths::findExecutable("pylsp");
-            if (pylsp.isEmpty()) {
-                pylsp = QStandardPaths::findExecutable("pylsp");
-                m_status->setText("pylsp bulunamadı — Python tanılama kapalı.");
-                return nullptr;
-            }
-            if (!m_lspPy->start(pylsp, {}, m_root)) return nullptr;
+        QString prog;
+        QStringList args = def->args;
+        if (def->lang == "python") {
+            // Stage 27: proje venv'i öncelikli
+            prog = LspServers::pythonExe(m_root);
+            if (!LspServers::pythonVenvs(m_root).isEmpty())
+                m_status->setText("venv pylsp: " + prog);
+        } else {
+            prog = LspServers::findProgram(def->program);
         }
-        return m_lspPy->isRunning() ? m_lspPy : nullptr;
+        if (prog.isEmpty()) {
+            m_status->setText(def->program + " bulunamadı — " + def->installHint);
+            return nullptr;
+        }
+        if (!c->start(prog, args, m_root)) return nullptr;
+        m_lspRestarts[c] << QDateTime::currentMSecsSinceEpoch(); // Stage 31
+        reopenLspDocs(c, def->lang, def->suffixes); // Stage 27: çökme sonrası belgeleri geri aç
     }
-    return nullptr;
+    return c->isRunning() ? c : nullptr;
+}
+
+// Stage 27: ertelenmiş didChange'leri boşalt
+void MainWindow::flushLspDocs() {
+    const auto dirty = m_lspDirty;
+    m_lspDirty.clear();
+    for (const QPointer<CodeEditor>& e : dirty)
+        if (!e.isNull()) pushDocToLsp(e, true);
+}
+
+// Stage 27: derleme veritabanı değişince sunucuya bildir
+void MainWindow::watchLspConfig() {
+    if (!m_lspWatcher) {
+        m_lspWatcher = new QFileSystemWatcher(this);
+        m_lspBurstCount = 0;
+        m_lspBurstMs = 0;
+        connect(m_lspWatcher, &QFileSystemWatcher::fileChanged, this,
+                [this](const QString& path) {
+                    // Stage 31: taşmada sakinleş (10 sn içinde 5+)
+                    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                    if (now - m_lspBurstMs > 10000) m_lspBurstCount = 0;
+                    m_lspBurstMs = now;
+                    if (++m_lspBurstCount > 5) return;
+                    if (m_lspCpp && m_lspCpp->isReady())
+                        m_lspCpp->didChangeConfiguration(QJsonObject());
+                    toast(0, "Derleme yapılandırması değişti: " +
+                                 QFileInfo(path).fileName() + " (LSP bilgilendirildi)");
+                    // Tek seferlik tetiklenir; yeniden izle
+                    if (QFile::exists(path)) m_lspWatcher->addPath(path);
+                });
+    } else {
+        for (const QString& p : m_lspWatcher->files()) m_lspWatcher->removePath(p);
+    }
+    if (m_root.isEmpty()) return;
+    for (const QString& f : {".clangd", "compile_commands.json"}) {
+        const QString p = QDir(m_root).absoluteFilePath(f);
+        if (QFile::exists(p)) m_lspWatcher->addPath(p);
+    }
+}
+
+// Stage 27: (yeniden) başlatılan sunucuya açık belgeleri geri bildir
+void MainWindow::reopenLspDocs(LspClient* c, const QString& lang, const QStringList& suffixes) {
+    if (!c) return;
+    for (CodeEditor* e : allEditors()) {
+        if (e->filePath().isEmpty() || e->largeFileMode() || e->isRemote()) continue;
+        const QString suf = QFileInfo(e->filePath()).suffix().toLower();
+        if (!suffixes.contains(suf)) continue;
+        c->didOpen(e->filePath(), lang, e->toPlainText());
+    }
+}
+
+// Stage 27: çökme kurtarma — bildir + sonraki kullanımda otomatik başlar
+void MainWindow::onLspCrashed(LspClient* c, const QString& msg) {
+    Q_UNUSED(c);
+    m_status->setText(msg);
+    toast(2, "LSP sunucusu kapandı — sonraki istekte yeniden başlatılacak");
+}
+
+// Stage 27: indeksleme ilerlemesi durum çubuğunda
+void MainWindow::onLspProgress(const QString& kind, const QString& title, int percent) {
+    if (kind == "end" || percent >= 100) {
+        if (m_status->text().startsWith("LSP: ")) m_status->setText("");
+        return;
+    }
+    QString t = title.isEmpty() ? "LSP çalışıyor" : title;
+    m_status->setText(QString("LSP: %1%2").arg(t).arg(percent >= 0 ? QString(" %%%1").arg(percent) : ""));
 }
 
 void MainWindow::setupLspFor(const QString& path, const QString& text) {
@@ -1178,8 +1718,22 @@ void MainWindow::setupLspFor(const QString& path, const QString& text) {
         c->didOpen(path, lang, text);
 }
 
-void MainWindow::pushDocToLsp(CodeEditor* editor) {
+void MainWindow::pushDocToLsp(CodeEditor* editor, bool immediate) {
     if (!editor || editor->filePath().isEmpty() || editor->largeFileMode()) return;
+    // Stage 27: yazarken ertele (400 ms), istek öncesi anında gönder
+    if (!immediate) {
+        if (!m_lspFlushTimer) {
+            m_lspFlushTimer = new QTimer(this);
+            m_lspFlushTimer->setSingleShot(true);
+            connect(m_lspFlushTimer, &QTimer::timeout, this, &MainWindow::flushLspDocs);
+        }
+        m_lspDirty.removeAll(QPointer<CodeEditor>());
+        QPointer<CodeEditor> guard(editor);
+        if (!m_lspDirty.contains(guard)) m_lspDirty << guard;
+        m_lspFlushTimer->start(400);
+        if (editor == currentEditor() && m_inlayTimer) m_inlayTimer->start();
+        return;
+    }
     // Stage 16: uzak belge → uzak LSP (şeritli uzak yol ile)
     if (editor->isRemote()) {
         if (m_lspRemote && m_lspRemote->isReady()) {
@@ -1330,6 +1884,8 @@ void MainWindow::openFolderDialog() {
     if (d.isEmpty()) return;
     m_root = d;
     refreshProjectViews();
+    checkWorkspaceTrust();   // Stage 28
+    pushRecentProject(d);    // Stage 28
     AppSettings cur = SettingsManager::instance().load();
     cur.lastRoot = d;
     SettingsManager::instance().save(cur);
@@ -1347,6 +1903,11 @@ void MainWindow::refreshProjectViews() {
     m_stashTab->setWorkdir(m_root);
     m_remoteTab->setWorkdir(m_root);
     if (m_taskPanel) m_taskPanel->setRoot(m_root);
+    startScheduledTasks(); // Stage 25
+    loadExternalTools();   // Stage 25
+    watchLspConfig();      // Stage 27: .clangd izleme
+    if (m_plugins) m_plugins->setWorkspaceRoot(m_root); // Stage 29
+    startAiSchedule(); // Stage 30
     if (m_chipGit) refreshGitBranch();
     // Stage 8: .verso/workspace.json geçersiz kılmaları (font/tab)
     if (!m_root.isEmpty()) {
@@ -1362,8 +1923,68 @@ void MainWindow::refreshProjectViews() {
 }
 
 void MainWindow::runCommand(const QString& id) {
+    if (!m_macroPlaying) m_macro.push(id); // Stage 25: makro kaydı
+    // Stage 28: güvenilmez alanda tehlikeli komutlar kapalı
+    if (!m_trusted && (id.startsWith("ai.") || id.startsWith("plugin.") || id == "task.run")) {
+        if (!requireTrusted("Bu işlem")) return;
+    }
     if (id == "file.openFolder") openFolderDialog();
     else if (id == "file.new") newUntitledFile();
+    else if (id == "file.language") changeFileLanguage();
+    else if (id == "file.encodingInfo") showEncodingInfo();
+    else if (id == "edit.toggleEol") toggleEol();
+    else if (id == "edit.pasteCycle") pasteCyclePrevious();
+    else if (id == "edit.multiCaretLineEnds") multiCaretLineEnds();
+    else if (id == "ai.exportChat") { if (m_ai) m_ai->exportChatMarkdown(); }
+    else if (id == "ai.compare") { if (m_ai) m_ai->sendCompare(); }
+    else if (id == "ai.undoAnswer") { if (m_ai) m_ai->undoLastAnswer(); }
+    else if (id == "ai.undoEdit") undoAiEdit();
+    else if (id == "edit.toggleComment") toggleComment();
+    else if (id == "edit.bookmarkToggle") toggleBookmark();
+    else if (id == "edit.bookmarkNext") jumpBookmark(1);
+    else if (id == "edit.bookmarkPrev") jumpBookmark(-1);
+    else if (id == "view.bookmarks") showBookmarks();
+    else if (id == "view.markdownPreview") showMarkdownPreview();
+    else if (id == "file.openHex") showHexView();
+    else if (id == "file.copyPath") copyPath(0);
+    else if (id == "file.copyRelativePath") copyPath(1);
+    else if (id == "file.copyFileName") copyPath(2);
+    else if (id == "edit.organizeImports") organizeImports();
+    else if (id == "git.history") showGitHistory();
+    else if (id == "git.tags") showGitTags();
+    else if (id == "term.find") terminalFind(true);
+    else if (id == "term.findNext") { if (m_terminal && !m_terminal->findNext(true)) toast(0, "Eşleşme yok"); }
+    else if (id == "term.findPrev") { if (m_terminal && !m_terminal->findNext(false)) toast(0, "Eşleşme yok"); }
+    else if (id == "view.notifications") showNotifications();
+    else if (id == "file.projectNotes") openProjectNotes();
+    else if (id == "file.bulkRename") bulkRenameHere();
+    else if (id == "debug.runFile") debugRunFile();
+    else if (id == "edit.merge") openMergeEditor();
+    else if (id == "search.editor") { if (m_search) m_search->openInEditor(); }
+    else if (id == "file.newProject") newProjectWizard();
+    else if (id == "file.newFromTemplate") newFileFromTemplate();
+    else if (id == "term.newTab") { if (m_terminal) m_terminal->newSession(); }
+    else if (id == "remote.importSsh") importSshConfig();
+    else if (id == "view.clipboard") showClipboardManager();
+    else if (id == "task.chain") runTaskChain();
+    else if (id == "remote.reconnect") remoteReconnect();
+    else if (id == "ai.searchChats") searchAiChats();
+    else if (id == "workspace.trust") {
+        QSettings q("Verso", "VersoCoder");
+        q.remove("trust/roots");
+        q.remove("trust/denied");
+        checkWorkspaceTrust();
+    }
+    else if (id == "ai.reviewStaged") reviewStagedDiff();
+    else if (id == "nav.symbol") showSymbolSearch();
+    else if (id == "view.radar") showMetricsRadar();
+    else if (id == "file.projectNotes") openProjectNotes();
+    else if (id == "file.bulkRename") bulkRenameHere();
+    else if (id == "test.runRelated") { if (auto* e = currentEditor()) runRelatedTest(e->filePath()); }
+    else if (id == "macro.record") toggleMacroRecord();
+    else if (id == "macro.play") playMacro();
+    else if (id == "macro.clear") { m_macro.clear(); m_macro.save(); toast(0, "Makro temizlendi"); }
+    else if (id == "view.font") chooseEditorFont();
     else if (id == "file.save") saveCurrent();
     else if (id == "file.saveAll") saveAll();
     else if (id == "nav.quickOpen") showQuickOpen();
@@ -1414,6 +2035,16 @@ void MainWindow::runCommand(const QString& id) {
                              : "AI ajan modu kapalı.");
     }
     else if (id == "help.about" || id == "tool.diagnostics") showDiagnostics();
+    else if (id == "help.shortcuts") showShortcutDialog();
+    else if (id == "file.pluginsDir") openPluginsDir();
+    else if (id == "view.plugins") showPluginManager();
+    else if (id == "file.factoryReset") factoryReset();
+    else if (id.startsWith("plugin.")) {
+        if (m_pluginViews.contains(id)) showPluginView(id);
+        else runPluginCommand(id);
+    }
+    else if (id == "view.plugins") showPluginManager();
+    else if (id.startsWith("tool.")) runExternalTool(id);
     else if (id == "view.theme") openThemeGallery();
     else if (id == "view.git") showSidePanel(2);
     else if (id == "view.problems") showSidePanel(4);
@@ -1429,9 +2060,7 @@ void MainWindow::runCommand(const QString& id) {
     else if (id == "edit.find") showFindBar();
     else if (id == "edit.findNext") findNavigate(+1);
     else if (id == "edit.findPrev") findNavigate(-1);
-    else if (id == "edit.expandSel") {
-        if (auto* e = currentEditor()) e->expandSelection();
-    }
+    else if (id == "edit.expandSel") expandSelectionSmart();
     // Stage 12: uyarlanabilir arayüz
     else if (id == "view.themeEditor") openThemeEditor();
     else if (id == "view.cycleDensity") cycleDensity();
@@ -1451,6 +2080,14 @@ void MainWindow::runCommand(const QString& id) {
     else if (id == "lsp.wsSymbols") showWorkspaceSymbols();
     else if (id == "format.document") formatDocument();
     else if (id == "lsp.calls") showCallHierarchy();
+    else if (id == "lsp.openLink") openDocLink();
+    else if (id == "lsp.typeHierarchy") showTypeHierarchy();
+    else if (id == "lsp.pullDiagnostics") pullDiagnostics();
+    else if (id == "format.selection") formatSelection();
+    else if (id == "lsp.log") showLspLog();
+    else if (id == "lsp.servers") showLspServers();
+    else if (id == "lsp.sigNext") cycleSignature(1);
+    else if (id == "lsp.sigPrev") cycleSignature(-1);
     else if (id == "view.inlayHints") toggleInlayHints();
     else if (id == "view.semantic") toggleSemantic();
     // Stage 14: hata ayıklama & test
@@ -1461,6 +2098,24 @@ void MainWindow::runCommand(const QString& id) {
     else if (id == "debug.stepInto") debugStep();
     else if (id == "debug.stepOut") debugFinish();
     else if (id == "debug.toggleBp") toggleBreakpointAtCursor();
+    else if (id == "debug.smartStep") debugSmartStep();
+    else if (id == "debug.functionBp") debugFunctionBp();
+    else if (id == "debug.watchpoint") debugWatchpoint();
+    else if (id == "debug.attach") debugAttach();
+    else if (id == "debug.core") debugOpenCore();
+    else if (id == "debug.substitutePath") debugSubstitutePath();
+    else if (id == "debug.editBp") {
+        if (auto* e = currentEditor())
+            editBreakpoint(e->filePath(), e->textCursor().blockNumber() + 1);
+    } else if (id == "debug.toggleSkipped") {
+        m_debugSkipLib = !m_debugSkipLib;
+        toast(0, m_debugSkipLib ? "Lib frame'leri gizli" : "Lib frame'leri görünür");
+    } else if (id == "debug.setVariable") {
+        bool ok = false;
+        const QString ex = QInputDialog::getText(this, "Değeri Değiştir", "İfade:",
+                                                 QLineEdit::Normal, QString(), &ok);
+        if (ok && !ex.trimmed().isEmpty()) debugSetVariable(ex.trimmed());
+    }
     else if (id == "test.discover") discoverTests();
     else if (id == "test.runAll") runAllTests();
     else if (id == "test.coverage") runCoverage();
@@ -1476,6 +2131,10 @@ void MainWindow::runCommand(const QString& id) {
     else if (id == "ai.prompts") promptLibrary();
     else if (id == "ai.applyLast") applyLastAi();
     else if (id == "ai.pullModel") pullModel();
+    else if (id == "ai.startServer") {
+        toast(0, "Ollama başlatılıyor...");
+        if (m_ai) m_ai->ensureServerAsync();
+    }
     // Stage 16: uzaktan geliştirme
     else if (id == "remote.connect") remoteConnectDialog();
     else if (id == "remote.disconnect") remoteDisconnect();
@@ -1503,6 +2162,7 @@ void MainWindow::runCommand(const QString& id) {
         m_bottomTabs->setCurrentWidget(m_taskPanel);
     }
     else if (id == "task.run") {
+        if (!requireTrusted("Görev çalıştırma")) return; // Stage 28
         m_termDock->setVisible(true);
         m_bottomTabs->setCurrentWidget(m_taskPanel);
         m_taskPanel->runSelected();
@@ -1518,9 +2178,14 @@ void MainWindow::showPalette() {
     QList<PaletteCommand> cmds;
     for (const auto& c : defaultCommands())
         cmds << PaletteCommand{c.id, c.title, c.id, effectiveKeys(s.shortcuts, c)};
+    for (auto it = m_pluginCmds.constBegin(); it != m_pluginCmds.constEnd(); ++it)
+        cmds << PaletteCommand{it.key(), it.value(), it.key(), QString()}; // Stage 22
+    for (auto it = m_toolCmds.constBegin(); it != m_toolCmds.constEnd(); ++it)
+        cmds << PaletteCommand{it.key(), it.value().label, it.key(), QString()}; // Stage 25
     pal.setCommands(cmds);
     if (pal.exec() == QDialog::Accepted && !pal.selectedId().isEmpty()) {
         CommandPalette::pushRecent(pal.selectedId()); // Stage 10: son kullanılanlar
+        CommandPalette::recordUse(pal.selectedId());  // Stage 30: sıklık
         runCommand(pal.selectedId());
     }
 }
@@ -1558,6 +2223,15 @@ void MainWindow::applyEditorSettingsTo(CodeEditor* e) {
     e->applyEditorSettings(s.fontSize, s.tabWidth);
     // Stage 11: boşluk görünümü + cetvel + sticky
     e->setShowWhitespace(s.showWhitespace);
+    e->setShowLineEnds(s.showLineEnds); // Stage 23
+    // Stage 23: imleç + kaydırma + vurgular + katlama oku
+    e->setCursorStyle(s.cursorStyle);
+    e->setCursorBlinkMs(s.cursorBlink);
+    e->setSmoothScroll(s.smoothScroll);
+    e->setBracketStyle(s.bracketStyle);
+    e->setFoldGutter(s.foldGutter);
+    e->setLineHiOpacity(s.lineHighlightOpacity);
+    checkEditorGrid(e); // Stage 23: ızgara garantisi
     e->setRulerColumn(s.rulerColumn);
     e->refreshSticky();
     e->setFocusMode(s.focusMode); // Stage 12
@@ -1568,7 +2242,243 @@ void MainWindow::applyEditorSettingsToAll() {
 }
 
 void MainWindow::openFile(const QString& path) {
-    if (openEditorFor(path)) m_status->setText(path);
+    if (openSpecial(path)) { // Stage 28: görüntü/md dışı ikililer
+        m_status->setText(path);
+        return;
+    }
+    if (auto* e = openEditorFor(path)) {
+        // Stage 31: bellek tavanı — 8 MB üstü salt-okunur
+        if (QFileInfo(path).size() > qint64(8) * 1024 * 1024 && !e->isReadOnly()) {
+            e->setReadOnly(true);
+            toast(2, "Büyük dosya salt-okunur açıldı (8 MB+)");
+        }
+        m_status->setText(path);
+    }
+}
+
+// Stage 24: tek-tık önizleme — varsa önizleme sekmesini dönüştür, yoksa aç
+void MainWindow::openPreview(const QString& path) {
+    if (path.isEmpty() || !QFileInfo(path).isFile()) return;
+    for (QTabWidget* t : {m_tabs, m_tabs2}) {
+        for (int i = 0; i < t->count(); ++i) {
+            auto* e = qobject_cast<CodeEditor*>(t->widget(i));
+            if (!e) continue;
+            if (e->filePath() == path) { // zaten açık: tam yükle + odakla
+                if (e->previewMode()) e->loadFullPreview();
+                t->setCurrentIndex(i);
+                m_minimap->setEditor(e);
+                updateCursorStatus();
+                return;
+            }
+        }
+    }
+    // Başka dosyanın önizlemesi varsa onu dönüştür (tek önizleme sekmesi)
+    for (QTabWidget* t : {m_tabs, m_tabs2}) {
+        for (int i = 0; i < t->count(); ++i) {
+            auto* e = qobject_cast<CodeEditor*>(t->widget(i));
+            if (e && e->previewMode()) {
+                if (e->loadPreview(path)) {
+                    t->setTabText(i, QFileInfo(path).fileName() + "  ~");
+                    t->setTabToolTip(i, path + " (önizleme — çift tık tam açar)");
+                    t->setCurrentIndex(i);
+                    m_minimap->setEditor(e);
+                    updateCursorStatus();
+                    return;
+                }
+            }
+        }
+    }
+    auto* e = new CodeEditor(this);
+    applyEditorSettingsTo(e);
+    if (!e->loadPreview(path)) { delete e; return; }
+    addEditorTab(e, QFileInfo(path).fileName() + "  ~", path + " (önizleme)");
+}
+
+// Stage 24: tam açış önizlemeyi kalıcılaştırır
+// (openEditorFor içinde ele alınır — önizleme sekmesi aynı yola dönüşür)
+
+// Stage 24: Proje Radarı (metrik/kopya/kullanılmayan/bağımlılık)
+void MainWindow::showMetricsRadar() {
+    CodeEditor* e = currentEditor();
+    auto* d = new MetricsDialog(m_root, e ? e->filePath() : QString(), this);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    connect(d, &MetricsDialog::fileJumpRequested, this,
+            [this, d](const QString& path, int line) {
+                d->close();
+                openFileAt(path, line);
+            });
+    d->show();
+}
+
+// Stage 25: toplu yeniden adlandırma (etkin dosya dizini)
+void MainWindow::bulkRenameHere() {
+    CodeEditor* e = currentEditor();
+    QString dir = m_root;
+    if (e && !e->filePath().isEmpty() && !e->isRemote())
+        dir = QFileInfo(e->filePath()).absolutePath();
+    if (dir.isEmpty()) { toast(0, "Önce klasör açın"); return; }
+    BulkRenameDialog d(dir, this);
+    d.exec();
+    // QFileSystemModel dosya değişimlerini kendisi izler; ek tazeleme gerekmez
+}
+
+// Stage 25: zamanlanmış görevler (tasks.json scheduleMin)
+void MainWindow::startScheduledTasks() {
+    qDeleteAll(m_schedTimers);
+    m_schedTimers.clear();
+    if (!m_schedRunner) {
+        m_schedRunner = new TaskRunner(this);
+        connect(m_schedRunner, &TaskRunner::finished, this,
+                [this](const QString& label, int code) {
+                    toast(code == 0 ? 1 : 2,
+                          QString("Zamanlanmış '%1': çıkış %2").arg(label).arg(code));
+                });
+    }
+    if (m_root.isEmpty() || !m_schedRunner->loadForRoot(m_root)) return;
+    for (const TaskDef& t : m_schedRunner->tasks()) {
+        if (t.scheduleMin <= 0) continue;
+        auto* timer = new QTimer(this);
+        timer->setInterval(t.scheduleMin * 60000);
+        const QString label = t.label;
+        connect(timer, &QTimer::timeout, this, [this, label]() {
+            if (!m_schedRunner->isRunning()) m_schedRunner->runLabel(label, m_root);
+        });
+        timer->start();
+        m_schedTimers << timer;
+    }
+    if (!m_schedTimers.isEmpty())
+        m_status->setText(QString("%1 zamanlanmış görev").arg(m_schedTimers.size()));
+}
+
+// Stage 25: harici araçlar (.verso/tools.json → tool.* komutları)
+void MainWindow::loadExternalTools() {
+    m_toolCmds.clear();
+    if (m_root.isEmpty()) return;
+    QFile f(ExternalTools::configPathForRoot(m_root));
+    if (!f.open(QIODevice::ReadOnly)) return;
+    QString err;
+    for (const ToolDef& t : ExternalTools::parse(QString::fromUtf8(f.readAll()), &err))
+        m_toolCmds[ExternalTools::commandId(t.label)] = t;
+    if (!m_toolCmds.isEmpty())
+        m_status->setText(QString("%1 harici araç").arg(m_toolCmds.size()));
+}
+
+void MainWindow::runExternalTool(const QString& id) {
+    if (!m_toolCmds.contains(id)) return;
+    if (m_toolProc && m_toolProc->state() != QProcess::NotRunning) {
+        toast(0, "Bir araç zaten çalışıyor");
+        return;
+    }
+    const ToolDef t = m_toolCmds[id];
+    m_toolProc = new QProcess(this);
+    const QString dir = t.cwd.isEmpty() ? m_root : QDir(m_root).absoluteFilePath(t.cwd);
+    m_toolProc->setWorkingDirectory(dir);
+    connect(m_toolProc, &QProcess::readyReadStandardOutput, this, [this]() {
+        if (m_terminal)
+            m_terminal->appendOut(QString::fromUtf8(m_toolProc->readAllStandardOutput()));
+    });
+    connect(m_toolProc, &QProcess::readyReadStandardError, this, [this]() {
+        if (m_terminal)
+            m_terminal->appendOut(QString::fromUtf8(m_toolProc->readAllStandardError()),
+                                  QColor("#f44747"));
+    });
+    connect(m_toolProc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this, id](int code, QProcess::ExitStatus) {
+                toast(code == 0 ? 1 : 2, QString("%1: çıkış %2").arg(id).arg(code));
+                m_toolProc->deleteLater();
+                m_toolProc = nullptr;
+            });
+    if (m_terminal) m_terminal->appendOut("$ " + t.command + "\n", QColor("#569cd6"));
+    m_toolProc->start("bash", {"-lc", t.command});
+}
+
+// Stage 25: staged diff'e AI kod incelemesi
+void MainWindow::reviewStagedDiff() {
+    if (m_root.isEmpty()) return;
+    QProcess git;
+    git.setWorkingDirectory(m_root);
+    git.start("git", {"diff", "--cached", "--no-color"});
+    if (!git.waitForFinished(8000)) { toast(3, "git diff zaman aşımı"); return; }
+    const QString diff = QString::fromUtf8(git.readAllStandardOutput()).trimmed();
+    if (diff.isEmpty()) { toast(0, "Staged değişiklik yok (önce Stage yapın)"); return; }
+    askAi("Titiz kod inceleme asistanı. Kısa, maddeli, Türkçe yaz.",
+          "Aşağıdaki staged diff'i incele: hata riski, kenar durumları, stil. "
+          "Varsa en kritik 5 madde; yoksa 'Temiz ✓'.\n```diff\n" + diff.left(12000) + "\n```",
+          QJsonObject(), [this](QString reply, QString err) {
+              if (!err.isEmpty()) toast(3, "AI hatası: " + err.left(120));
+              else m_status->setText("İnceleme hazır — AI paneline bakın");
+              Q_UNUSED(reply);
+          });
+}
+
+// Stage 25: kaydetmede ilgili testi koştur (ayarlıysa)
+void MainWindow::runRelatedTest(const QString& sourcePath) {
+    if (sourcePath.isEmpty() || sourcePath.startsWith("ssh://")) return;
+    const QString target = TestGen::targetFor(sourcePath);
+    if (target.isEmpty() || !QFile::exists(target)) return;
+    const QString suf = QFileInfo(target).suffix().toLower();
+    QStringList args;
+    QString prog;
+    if (suf == "py") {
+        prog = "python3";
+        args = {"-m", "pytest", target, "-q"};
+    } else {
+        const QString buildDir = QDir(m_root).absoluteFilePath("build");
+        if (!QFileInfo::exists(buildDir + "/CTestTestfile.cmake")) return;
+        prog = "ctest";
+        args = {"--test-dir", buildDir, "-R",
+                QFileInfo(target).completeBaseName(), "--output-on-failure"};
+    }
+    auto* p = new QProcess(this);
+    p->setWorkingDirectory(QFileInfo(target).absolutePath());
+    connect(p, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this, target, p](int code, QProcess::ExitStatus) {
+                toast(code == 0 ? 1 : 2,
+                      QString("%1: %2").arg(QFileInfo(target).fileName(),
+                                            code == 0 ? "testler geçti ✓" : "test BAŞARISIZ"));
+                p->deleteLater();
+            });
+    m_status->setText("Test koşuyor: " + QFileInfo(target).fileName());
+    p->start(prog, args);
+}
+
+// Stage 24: proje notları (.verso/notes.md)
+void MainWindow::openProjectNotes() {
+    if (m_root.isEmpty()) { toast(0, "Önce klasör açın"); return; }
+    QDir().mkpath(m_root + "/.verso");
+    const QString p = m_root + "/.verso/notes.md";
+    if (!QFile::exists(p)) {
+        QFile f(p);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            f.write("# Proje Notları\n\n- \n");
+    }
+    openFile(p);
+}
+
+// Stage 24: çalışma alanı sembol araması (Ctrl+T)
+void MainWindow::showSymbolSearch() {
+    if (m_root.isEmpty()) { toast(0, "Önce klasör açın"); return; }
+    QMap<QString, QString> texts;
+    QDirIterator it(m_root, QDir::Files | QDir::NoDotAndDotDot,
+                    QDirIterator::Subdirectories);
+    int n = 0;
+    static const QStringList exts = {"c",  "h",  "cpp", "hpp", "cc", "py", "js",
+                                     "ts", "java", "go", "rs"};
+    while (it.hasNext() && n < 1200) {
+        const QString f = it.next();
+        if (f.contains("/.git/") || f.contains("/build/") || f.contains("/node_modules/"))
+            continue;
+        if (!exts.contains(QFileInfo(f).suffix().toLower())) continue;
+        QFile qf(f);
+        if (!qf.open(QIODevice::ReadOnly)) continue;
+        const QByteArray raw = qf.read(256 * 1024);
+        if (raw.contains('\0')) continue;
+        texts[f] = QString::fromUtf8(raw);
+        ++n;
+    }
+    SymbolSearchDialog d(WorkspaceSymbols::scanFiles(texts), this);
+    if (d.exec() == QDialog::Accepted && d.hasSelection())
+        openFileAt(d.selected().file, d.selected().line);
 }
 
 void MainWindow::openFileAt(const QString& path, int line) {
@@ -1585,7 +2495,19 @@ void MainWindow::saveCurrent() {
         // Stage 13: kaydetmede biçimlendir (async: yanıt gelince kaydet)
         if (formatOnSaveIfEnabled(e)) return;
         if (e->filePath().isEmpty()) {
-            QString p = QFileDialog::getSaveFileName(this, "Kaydet", m_root);
+            // Stage 20: dile uygun ad + filtre öner
+            QString suggest = m_root;
+            QString filter;
+            const QString ext = LanguageSupport::defaultExtension(e->lang());
+            if (!ext.isEmpty()) {
+                QString base = activeTabs()->tabText(activeTabs()->currentIndex());
+                base.remove(QRegularExpression(" • [^ ]+$"));
+                if (base.isEmpty()) base = "adsiz";
+                suggest = QDir(m_root).absoluteFilePath(base + "." + ext);
+                if (const LanguageSupport::LangDef* d = LanguageSupport::findLang(e->lang()))
+                    filter = QString("%1 (*.%2)").arg(d->title, ext);
+            }
+            QString p = QFileDialog::getSaveFileName(this, "Kaydet", suggest, filter);
             if (p.isEmpty()) return;
             e->saveFile(p);
             connect(e, &QPlainTextEdit::cursorPositionChanged, this, &MainWindow::updateCursorStatus, Qt::UniqueConnection);
@@ -1596,6 +2518,9 @@ void MainWindow::saveCurrent() {
             saveSession();
         } else e->saveFile();
         snapshotEditor(e); // Stage 17: yerel geçmiş
+        if (m_plugins) m_plugins->fireEvent("save", e->filePath()); // Stage 29
+        // Stage 25: kaydetmede ilgili test
+        if (SettingsManager::instance().load().testOnSave) runRelatedTest(e->filePath());
         m_status->setText("Kaydedildi: " + e->filePath());
         toast(1, "Kaydedildi: " + QFileInfo(e->filePath()).fileName()); // Stage 10
         refreshGitMarks(e); // Stage 11: diff işaretlerini güncelle
@@ -1652,10 +2577,18 @@ void MainWindow::updateCursorStatus() {
         {"cmake", "CMake"}, {"txt", "Düz metin"}, {"xml", "XML"}, {"yaml", "YAML"}};
     const QString suffix = QFileInfo(e->filePath()).suffix().toLower();
     AppSettings as = SettingsManager::instance().load();
-    const QString lang = langMap.value(suffix, suffix.isEmpty() ? "Metin" : suffix.toUpper());
+    // Stage 20: Adsız sekmede seçili dilin adı gösterilir
+    QString lang = langMap.value(suffix, suffix.isEmpty() ? "Metin" : suffix.toUpper());
+    if (e->isUntitled())
+        if (const LanguageSupport::LangDef* d = LanguageSupport::findLang(e->lang()))
+            lang = d->chip;
     m_chipLang->setText(QString("%1  ·  Boşluk: %2").arg(lang).arg(as.tabWidth));
     m_chipEol->setText(e->lineEnding());
     m_chipEnc->setText("UTF-8");
+    if (m_chipGrid) m_chipGrid->setText(m_gridOk ? "Izgara ✓" : "Izgara ✗");
+    // Stage 21: terminal dizin takibi
+    if (m_terminal && !e->filePath().isEmpty())
+        m_terminal->syncToDir(QFileInfo(e->filePath()).absolutePath());
     updateTabMarks();
 }
 
@@ -1666,6 +2599,15 @@ void MainWindow::updateBreadcrumb() {
 }
 
 void MainWindow::onExternalChange(CodeEditor* editor) {
+    // Stage 28: otomatik yeniden yükleme
+    if (SettingsManager::instance().load().autoReload) {
+        editor->reloadFromDisk();
+        pushDocToLsp(editor);
+        updateCursorStatus();
+        updateBreadcrumb();
+        toast(0, "Otomatik yüklendi: " + QFileInfo(editor->filePath()).fileName());
+        return;
+    }
     auto r = QMessageBox::question(this, "Dosya değişti",
         "Dosya diskte başka bir program tarafından değiştirilmiş:\n" + editor->filePath() +
         "\nYeniden yüklensin mi? (kaydedilmemiş değişikliklerin kaybolur)",
@@ -1682,17 +2624,21 @@ void MainWindow::applyAiEdit(const QString& newText, bool wholeFile, int selStar
     auto* e = currentEditor();
     if (!e) return;
     QTextCursor c = e->textCursor();
+    int sPos = 0;
     if (wholeFile) {
         c.select(QTextCursor::Document);
     } else {
         int maxPos = e->document()->characterCount() - 1;
-        int s = qBound(0, selStart, maxPos);
-        c.setPosition(s);
+        sPos = qBound(0, selStart, maxPos);
+        c.setPosition(sPos);
         c.setPosition(qBound(0, selStart + selLen, maxPos), QTextCursor::KeepAnchor);
     }
+    const QString oldFull = wholeFile ? e->toPlainText()
+        : e->document()->toPlainText().mid(sPos, selLen);
     c.insertText(newText);
     e->setTextCursor(c);
     e->setFocus();
+    pushAiUndo(e->filePath(), oldFull, e, wholeFile, sPos, selLen); // Stage 28
     pushDocToLsp(e);
     m_status->setText("AI düzenlemesi uygulandı (geri almak için Ctrl+Z).");
 }
@@ -1739,6 +2685,13 @@ void MainWindow::saveSession() {
     s.sessionActive = d.active;
     s.sessionActive2 = d.active2;
     SettingsManager::instance().save(s);
+    // Stage 31: oturum bütünlük mührü
+    QSettings q("Verso", "VersoCoder");
+    q.setValue("session/sha", Stability::shaData(
+                   (s.sessionFiles + s.sessionCursors + s.sessionFiles2 +
+                    s.sessionCursors2 + s.sessionFolds)
+                       .join("\n")
+                       .toUtf8()));
     if (!m_root.isEmpty())
         m_sessions->save(ProjectSessions::projectKey(m_root), d);
 }
@@ -1809,6 +2762,20 @@ void MainWindow::applyDocSession(const DocSession& s) {
 void MainWindow::restoreSession() {
     AppSettings s = SettingsManager::instance().load();
     if (!s.restoreSession) return;
+    // Stage 31: mühür tutmuyorsa güvenli kip (geri yükleme yok)
+    {
+        QSettings q("Verso", "VersoCoder");
+        const QString expect = q.value("session/sha").toString();
+        const QString actual = Stability::shaData(
+            (s.sessionFiles + s.sessionCursors + s.sessionFiles2 +
+             s.sessionCursors2 + s.sessionFolds)
+                .join("\n")
+                .toUtf8());
+        if (!expect.isEmpty() && expect != actual) {
+            toast(2, "Oturum dosyası bozuk — güvenli kipte açıldı (sekmeler geri yüklenmedi)");
+            return;
+        }
+    }
     DocSession d;
     d.root = s.lastRoot;
     d.files = s.sessionFiles;
@@ -1849,9 +2816,262 @@ void MainWindow::loadSnapshot() {
 }
 
 // --- Stage 8: Platform & Dağıtım ---
+// Stage 22: kısayol hile sayfası
+void MainWindow::showShortcutDialog() {
+    ShortcutDialog d(this);
+    d.exec();
+}
+
+// Stage 22: eklenti dizinini dosya yöneticisinde aç
+void MainWindow::openPluginsDir() {
+    QDir().mkpath(pluginDir());
+    QDesktopServices::openUrl(QUrl::fromLocalFile(pluginDir()));
+}
+
+QString MainWindow::pluginDir() const {
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/plugins";
+}
+
+// Stage 22: eklentileri gecikmeli yükle (başlangıç performansı) + örneği kopyala
+void MainWindow::loadPluginsDeferred() {
+    if (!m_trusted) return; // Stage 28: güvenilmez alanda eklenti yok
+    QDir().mkpath(pluginDir());
+    // Stage 29: örnek paketi ilk açılışta kopyala
+    for (const QString& s : {"echo.js", "selam.js", "notal.js"}) {
+        const QString dst = pluginDir() + "/" + s;
+        if (QFile::exists(dst)) continue;
+        const QString src =
+            QCoreApplication::applicationDirPath() + "/resources/plugins/" + s;
+        if (QFile::exists(src)) QFile::copy(src, dst);
+    }
+    if (!m_plugins) {
+        m_plugins = new PluginEngine(this);
+        connect(m_plugins, &PluginEngine::commandRegistered, this,
+                [this](const QString& id, const QString& title) {
+                    m_pluginCmds[id] = title;
+                });
+        connect(m_plugins, &PluginEngine::pluginLog, this,
+                [this](const QString& id, const QString& msg) {
+                    m_status->setText("[" + id + "] " + msg.left(80));
+                });
+        connect(m_plugins, &PluginEngine::permissionDenied, this,
+                [this](const QString& id, const QString& perm) {
+                    toast(2, "Eklenti izni reddedildi: " + id + " (" + perm + ")");
+                });
+        // Stage 29 v2 katkıları
+        connect(m_plugins, &PluginEngine::viewRegistered, this,
+                [this](const QString& id, const QString& title) {
+                    m_pluginCmds[id] = title;
+                    m_pluginViews[id] = title;
+                });
+        connect(m_plugins, &PluginEngine::themeRegistered, this,
+                &MainWindow::installPluginTheme);
+        connect(m_plugins, &PluginEngine::keybindingRegistered, this,
+                &MainWindow::installPluginKeybinding);
+        connect(m_plugins, &PluginEngine::execRequested, this,
+                [this](const QString& pid, const QString& cmd) {
+                    m_status->setText("[" + pid + "] → " + cmd);
+                    runCommand(cmd);
+                });
+        connect(m_plugins, &PluginEngine::statusRequested, this,
+                [this](const QString&, const QString& t, int ms) {
+                    m_status->setText(t);
+                    if (ms > 0) {
+                        QTimer::singleShot(ms, this, [this, t]() {
+                            if (m_status->text() == t) m_status->setText("");
+                        });
+                    }
+                });
+        connect(m_plugins, &PluginEngine::terminalRequested, this,
+                [this](const QString&, const QString& t) {
+                    m_termDock->setVisible(true);
+                    if (m_terminal) m_terminal->sendText(t);
+                });
+        connect(m_plugins, &PluginEngine::problemsReported, this,
+                &MainWindow::showPluginProblems);
+        connect(m_plugins, &PluginEngine::pluginQuarantined, this,
+                [this](const QString& pid, const QString& reason) {
+                    toast(3, "Eklenti karantinaya alındı: " + pid + " (" + reason + ")");
+                });
+    }
+    PerfMonitor::instance().mark("eklenti-tara-önce");
+    const auto pls = m_plugins->loadAll(pluginDir());
+    PerfMonitor::instance().mark("eklenti-tara-sonra");
+    int ok = 0;
+    for (const auto& pl : pls)
+        if (pl.loaded) ++ok;
+    if (ok > 0) toast(1, QString("%1 eklenti yüklendi").arg(ok));
+    if (m_plugins) {
+        m_plugins->setWorkspaceRoot(m_root);
+        m_plugins->fireEvent("startup"); // Stage 29
+    }
+}
+
+// Stage 22: kayıtlı eklenti komutunu çalıştır
+void MainWindow::runPluginCommand(const QString& id) {
+    if (!m_plugins) return;
+    QJSValue r = m_plugins->callCommand(id);
+    if (r.isError()) toast(3, "Eklenti hatası: " + r.toString().left(150));
+}
+
+// Stage 29: eklenti görünümünü pencerede göster
+void MainWindow::showPluginView(const QString& cmdId) {
+    if (!m_plugins) return;
+    const QString html = m_plugins->renderView(cmdId);
+    auto* d = new QDialog(this);
+    d->setWindowTitle(m_pluginViews.value(cmdId, "Eklenti görünümü"));
+    d->resize(560, 420);
+    auto* lay = new QVBoxLayout(d);
+    auto* view = new QTextBrowser(d);
+    view->setHtml(html.isEmpty() ? "<i>(boş)</i>" : html);
+    lay->addWidget(view, 1);
+    auto* box = new QDialogButtonBox(QDialogButtonBox::Close, d);
+    connect(box, &QDialogButtonBox::rejected, d, &QDialog::reject);
+    lay->addWidget(box);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    d->show();
+}
+
+// Stage 29: eklenti temasını içe aktar
+void MainWindow::installPluginTheme(const QString& pid, const QString& name,
+                                    const QString& json) {
+    Q_UNUSED(pid);
+    QTemporaryFile tf;
+    tf.setAutoRemove(false);
+    if (!tf.open()) {
+        toast(3, "Tema yazılamadı");
+        return;
+    }
+    tf.write(json.toUtf8());
+    const QString path = tf.fileName();
+    tf.close();
+    QString key;
+    if (ThemeStore::instance().importTheme(path, &key)) {
+        QFile::remove(path);
+        toast(1, "Tema yüklendi: " + key + " (galeriden uygulayın)");
+    } else {
+        QFile::remove(path);
+        toast(2, "Geçersiz tema JSON: " + name.left(40));
+    }
+}
+
+// Stage 29: eklenti tuş katkısı (çakışma denetimli)
+void MainWindow::installPluginKeybinding(const QString& pid, const QString& cmdId,
+                                         const QString& keys) {
+    Q_UNUSED(pid);
+    AppSettings s = SettingsManager::instance().load();
+    QMap<QString, QString> m = s.shortcuts;
+    m[cmdId] = keys;
+    const QStringList bad = ShortcutCheck::findConflicts(m);
+    bool clash = false;
+    for (const QString& b : bad)
+        if (b.startsWith(keys + ":")) clash = true;
+    if (clash) {
+        toast(2, "Tuş çakışması, atanmadı: " + keys);
+        return;
+    }
+    s.shortcuts[cmdId] = keys;
+    SettingsManager::instance().save(s);
+    applyShortcuts();
+    toast(1, "Tuş atandı: " + cmdId + " → " + keys);
+}
+
+// Stage 29: eklenti sorunlarını Sorunlar paneline işle
+void MainWindow::showPluginProblems(const QString& pid, const QString& json) {
+    const QJsonDocument d = QJsonDocument::fromJson(json.toUtf8());
+    const QJsonArray arr = d.isArray() ? d.array() : d.object().value("problems").toArray();
+    if (arr.isEmpty()) return;
+    QMap<QString, QList<LspDiag>> byFile;
+    for (const QJsonValue& v : arr) {
+        const QJsonObject o = v.toObject();
+        const QString file = o.value("file").toString();
+        if (file.isEmpty()) continue;
+        LspDiag dg;
+        dg.path = file;
+        dg.line = qMax(0, o.value("line").toInt(1) - 1);
+        dg.col = 0;
+        dg.severity = 2;
+        dg.message = o.value("message").toString().left(300);
+        dg.source = "eklenti:" + pid;
+        byFile[file] << dg;
+    }
+    for (auto it = byFile.constBegin(); it != byFile.constEnd(); ++it) {
+        QList<LspDiag> merged;
+        for (const LspDiag& old : m_diags.value(it.key()))
+            if (old.source != "eklenti:" + pid) merged << old;
+        merged << it.value();
+        onDiagnostics(it.key(), merged);
+    }
+    toast(1, "Eklenti sorunları işlendi: " + pid);
+}
+
+// Stage 29: eklenti yöneticisi
+void MainWindow::showPluginManager() {
+    if (!m_plugins) {
+        toast(0, "Eklenti motoru henüz hazır değil");
+        return;
+    }
+    auto* d = new PluginManagerDialog(m_plugins, this);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    connect(d, &QDialog::finished, this, [this]() {
+        // Yönetici değişiklikleri palete yansısın
+        m_pluginCmds.clear();
+        m_pluginViews.clear();
+        if (m_plugins) {
+            for (const auto& p : m_plugins->plugins())
+                for (const QString& c : p.commands) m_pluginCmds[c] = c;
+        }
+    });
+    d->show();
+}
+
+// Stage 22: fabrika ayarları — önce JSON yedeği, sonra sıfırla
+void MainWindow::factoryReset() {
+    auto r = QMessageBox::question(this, "Fabrika Ayarlarına Dön",
+        "Tüm ayarlar sıfırlanacak. Önce JSON yedeği alınsın mı?",
+        QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
+    if (r == QMessageBox::Cancel) return;
+    if (r == QMessageBox::Yes) {
+        QSettings q("Verso", "VersoCoder");
+        const QString bak = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+            + "/ayar-yedegi.json";
+        QString err;
+        if (!SettingsIO::writeFile(bak, q, &err)) {
+            toast(3, "Yedek alınamadı: " + err);
+            return;
+        }
+        toast(1, "Yedek alındı: " + bak);
+    }
+    QSettings("Verso", "VersoCoder").clear();
+    QSettings("Verso", "VersoCoderSessions").clear();
+    toast(1, "Ayarlar sıfırlandı — yeniden başlatın");
+}
+
+// Stage 25: makro kaydedici (komut dizisi)
+void MainWindow::toggleMacroRecord() {
+    if (m_macro.recording()) {
+        m_macro.stop();
+        m_macro.save();
+        toast(1, QString("Makro kaydedildi (%1 adım)").arg(m_macro.commands().size()));
+    } else {
+        m_macro.start();
+        toast(0, "Makro kaydı başladı — komutları çalıştırın, bitince tekrar seçin");
+    }
+}
+
+void MainWindow::playMacro() {
+    const QStringList cmds = m_macro.commands();
+    if (cmds.isEmpty()) { toast(0, "Kayıtlı makro yok"); return; }
+    m_macroPlaying = true;
+    for (const QString& c : cmds) runCommand(c);
+    m_macroPlaying = false;
+    toast(1, QString("Makro oynatıldı (%1 adım)").arg(cmds.size()));
+}
+
 void MainWindow::showDiagnostics() {
     DiagnosticsDialog d(this);
     d.setBackupManager(m_backups);
+    d.setPluginEngine(m_plugins); // Stage 29
     connect(&d, &DiagnosticsDialog::backupRestored, this, [this](const QString& path) {
         for (CodeEditor* e : allEditors())
             if (QFileInfo(e->filePath()) == QFileInfo(path)) {
@@ -1873,6 +3093,7 @@ void MainWindow::backupEditor(CodeEditor* e) {
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return;
     m_backups->save(e->filePath(), QString::fromUtf8(f.readAll()));
     m_backups->prune(30);
+    m_backups->pruneByQuota(qint64(50) * 1024 * 1024, 90); // Stage 31: 50MB/90gün
 }
 
 void MainWindow::applyStartupOptions(const StartupOptions& opts) {
@@ -1914,7 +3135,59 @@ bool MainWindow::eventFilter(QObject* o, QEvent* e) {
             const QString cmd = l->property("cmd").toString();
             if (!cmd.isEmpty()) { runCommand(cmd); return true; }
         }
+    // Stage 26: hata ayıklamada değişken hover balonu
+    if (e->type() == QEvent::ToolTip) {
+        for (CodeEditor* ed : allEditors()) {
+            if (o == ed->viewport() && m_gdb && m_gdb->isDebugging() && m_hasFrame) {
+                QTextCursor tc = ed->cursorForPosition(
+                    static_cast<QHelpEvent*>(e)->pos());
+                tc.select(QTextCursor::WordUnderCursor);
+                const QString w = tc.selectedText().trimmed();
+                if (!w.isEmpty() && w[0].isLetter()) {
+                    m_hoverWord = w;
+                    m_hoverPos = static_cast<QHelpEvent*>(e)->globalPos();
+                    m_gdb->evaluate(w, [this, w](QString v) {
+                        if (w == m_hoverWord && !v.isEmpty())
+                            QToolTip::showText(m_hoverPos, w + " = " + v.left(300));
+                    });
+                    return true;
+                }
+            }
+        }
+    }
+    // Stage 21: sekme çubuğu — orta-tık kapat, çift-tık sabitle
+    if (auto* bar = qobject_cast<QTabBar*>(o)) {
+        QTabWidget* tabs = (bar == m_tabs->tabBar()) ? m_tabs
+                           : (bar == m_tabs2->tabBar() ? m_tabs2 : nullptr);
+        if (tabs) {
+            if (e->type() == QEvent::MouseButtonPress) {
+                auto* m = static_cast<QMouseEvent*>(e);
+                if (m->button() == Qt::MiddleButton) {
+                    const int i = bar->tabAt(m->pos());
+                    if (i >= 0) closeTabIn(tabs, i);
+                    return true;
+                }
+            } else if (e->type() == QEvent::MouseButtonDblClick) {
+                auto* m = static_cast<QMouseEvent*>(e);
+                const int i = bar->tabAt(m->pos());
+                if (i >= 0) togglePinTab(tabs, i);
+                return true;
+            }
+        }
+    }
     return QMainWindow::eventFilter(o, e);
+}
+
+// Stage 21: sekme sabitleme (tabData="pinned", başlıkta ◆)
+bool MainWindow::isPinnedTab(QTabWidget* tabs, int i) const {
+    return tabs->tabBar()->tabData(i).toString() == "pinned";
+}
+
+void MainWindow::togglePinTab(QTabWidget* tabs, int i) {
+    tabs->tabBar()->setTabData(i, isPinnedTab(tabs, i) ? QVariant() : "pinned");
+    updateTabMarks();
+    toast(0, isPinnedTab(tabs, i) ? "Sekme sabitlendi (orta-tıkla kapanmaz)"
+                                  : "Sekme sabiti kaldırıldı");
 }
 
 void MainWindow::showSidePanel(int index) {
@@ -1967,8 +3240,12 @@ void MainWindow::updateTabMarks() {
             auto* e = qobject_cast<CodeEditor*>(t->widget(i));
             if (!e) continue;
             QString base = t->tabText(i);
+            if (base.startsWith("◆ ")) base = base.mid(2);
             if (base.startsWith("● ")) base = base.mid(2);
-            t->setTabText(i, e->document()->isModified() ? "● " + base : base);
+            QString pre;
+            if (isPinnedTab(t, i)) pre += "◆ ";
+            if (e->document()->isModified()) pre += "● ";
+            t->setTabText(i, pre + base);
         }
     }
 }
@@ -2075,11 +3352,13 @@ void MainWindow::applySettings() {
     // Stage 9: tipografi + accent + tema (Stage 12: yoğunluk font farkı eklenir)
     TypographySettings typo;
     typo.uiFamily = s.uiFontFamily;
+    typo.editorFamily = s.editorFontFamily; // Stage 23
     typo.uiSize = qBound(8, s.uiFontSize + Density::fontDelta(Density::fromName(s.density)), 22);
     typo.lineHeight = s.lineHeight;
     typo.letterSpacing = s.letterSpacing;
     typo.ligatures = s.ligatures;
     ThemeManager::instance().setTypography(typo);
+    ThemeManager::instance().setSelectionOpacity(s.selectionOpacity); // Stage 23
     ThemeManager::instance().setAccent(s.accentColor.isEmpty() ? QColor() : QColor(s.accentColor));
     ThemeManager::instance().setVisionMode(s.colorVision); // Stage 12 (apply öncesi)
     ThemeManager::instance().apply(s.theme);
@@ -2223,6 +3502,10 @@ void MainWindow::ensureWelcome(QTabWidget* tabs) {
         connect(w, &WelcomeView::fileRequested, this, [this](const QString& p) {
             openEditorFor(p);
         });
+    // Stage 28: son projeler
+    connect(w, &WelcomeView::projectRequested, this, [this](const QString& d) {
+        openRoot(d);
+    });
     }
     // Son dosyalar: her iki oturum listesinden, var olanlardan
     AppSettings s = SettingsManager::instance().load();
@@ -2231,6 +3514,9 @@ void MainWindow::ensureWelcome(QTabWidget* tabs) {
         recents << s.sessionFiles << s.sessionFiles2;
     }
     w->setRecentFiles(recents);
+    w->setRecentProjects(QSettings("Verso", "VersoCoder")
+                             .value("session/recentRoots")
+                             .toStringList()); // Stage 28
     tabs->addTab(w, "Hoş geldin");
     tabs->setTabToolTip(0, "Verso Coder");
 }
@@ -2670,12 +3956,24 @@ void MainWindow::renameSymbol() {
             for (const LspTextEdit& ed : edits)
                 if (!ed.file.isEmpty() && ed.file != path) { multi = true; break; }
             if (multi) {
-                // Önizlemesiz toplu uygula (her dosya açılıp yazılır)
+                // Stage 24: proje geneli önizleme + dosya dışlama
                 QMap<QString, QList<LspTextEdit>> byFile;
                 for (const LspTextEdit& ed : edits)
                     byFile[ed.file.isEmpty() ? path : ed.file] << ed;
+                RenamePreviewDialog md(sym, edits, oldText, this);
+                md.setFileList(byFile.keys());
+                if (md.exec() != QDialog::Accepted) return;
+                const QSet<QString> excl(md.excludedFiles().begin(),
+                                         md.excludedFiles().end());
+                QList<LspTextEdit> sim = edits;
+                for (LspTextEdit& ed : sim) ed.newText = md.newName();
+                QMap<QString, QList<LspTextEdit>> keep;
+                for (const LspTextEdit& ed : sim) {
+                    const QString f = ed.file.isEmpty() ? path : ed.file;
+                    if (!excl.contains(f)) keep[f] << ed;
+                }
                 int n = 0;
-                for (auto it = byFile.begin(); it != byFile.end(); ++it) {
+                for (auto it = keep.begin(); it != keep.end(); ++it) {
                     if (it.key() == path) {
                         if (auto* ce = currentEditor()) {
                             ce->setPlainText(TextEdits::apply(oldText, it.value()));
@@ -2809,10 +4107,991 @@ void MainWindow::showSignatureHelp(bool autoTrigger) {
             SignatureHelpData d = SignatureHelp::parse(res);
             if (d.empty()) return;
             if (e != currentEditor()) return;
-            QRect r = e->cursorRect(e->textCursor());
-            QToolTip::showText(e->mapToGlobal(r.bottomRight()),
-                               SignatureHelp::render(d).left(800), e);
+            // Stage 27: overload döngüsü için sakla
+            m_lastSig = d;
+            m_lastSigEditor = e;
+            showSigTooltip();
         });
+}
+
+// ============ Stage 27: LSP derinliği ============
+
+// Akıllı seçim: önce sunucu aralığı, yoksa yerel büyütme
+void MainWindow::expandSelectionSmart() {
+    CodeEditor* e = currentEditor();
+    if (!e) return;
+    QString lang;
+    LspClient* c = !e->filePath().isEmpty()
+        ? lspClientFor(QFileInfo(e->filePath()).suffix(), lang)
+        : nullptr;
+    QTextCursor cur = e->textCursor();
+    if (!c || !c->isReady() || !c->hasCap("selectionRangeProvider")) {
+        e->expandSelection();
+        return;
+    }
+    const QList<QPair<int, int>> pos = {
+        qMakePair(cur.blockNumber(), cur.columnNumber())};
+    c->requestSelectionRange(e->filePath(), pos, [this, e](QJsonObject res) {
+        if (e != currentEditor()) return;
+        QJsonArray arr = res["result"].toArray();
+        if (arr.isEmpty()) { e->expandSelection(); return; }
+        // İlk aralığın ebeveynine genişlet (mevcut seçimi kapsayan üst aralık)
+        QTextCursor cur = e->textCursor();
+        const int s0 = cur.selectionStart(), e0 = cur.selectionEnd();
+        QJsonObject node = arr[0].toObject();
+        QJsonObject best = node["range"].toObject();
+        while (node.contains("parent")) {
+            node = node["parent"].toObject();
+            QJsonObject r = node["range"].toObject();
+            const int rs = e->document()->findBlockByNumber(r["start"].toObject()["line"].toInt()).position()
+                + r["start"].toObject()["character"].toInt();
+            const int re = e->document()->findBlockByNumber(r["end"].toObject()["line"].toInt()).position()
+                + r["end"].toObject()["character"].toInt();
+            if (rs <= s0 && re >= e0 && (rs < s0 || re > e0)) { best = r; break; }
+        }
+        const int bs = e->document()->findBlockByNumber(best["start"].toObject()["line"].toInt()).position()
+            + best["start"].toObject()["character"].toInt();
+        const int be = e->document()->findBlockByNumber(best["end"].toObject()["line"].toInt()).position()
+            + best["end"].toObject()["character"].toInt();
+        if (bs == s0 && be == e0) { e->expandSelection(); return; }
+        QTextCursor nc(e->document());
+        nc.setPosition(bs);
+        nc.setPosition(be, QTextCursor::KeepAnchor);
+        e->setTextCursor(nc);
+    });
+}
+
+// Belge bağlantısı: imleç satırındaki include/import hedefini aç
+void MainWindow::openDocLink() {
+    CodeEditor* e = currentEditor();
+    if (!e || e->filePath().isEmpty()) return;
+    QString lang;
+    LspClient* c = lspClientFor(QFileInfo(e->filePath()).suffix(), lang);
+    if (!c || !c->isReady() || !c->hasCap("documentLinkProvider")) {
+        m_status->setText("Sunucu belge bağlantısı vermiyor.");
+        return;
+    }
+    pushDocToLsp(e);
+    const int line = e->textCursor().blockNumber();
+    c->requestDocumentLink(e->filePath(), [this, e, line](QJsonObject res) {
+        QJsonArray arr = res["result"].toArray();
+        QString best;
+        int bestDist = INT_MAX;
+        for (const QJsonValue& v : arr) {
+            const QJsonObject o = v.toObject();
+            const int l0 = o["range"].toObject()["start"].toObject()["line"].toInt();
+            const int l1 = o["range"].toObject()["end"].toObject()["line"].toInt();
+            if (line < l0 || line > l1) continue;
+            const int d = qAbs(line - l0);
+            if (d < bestDist) {
+                bestDist = d;
+                best = o["target"].toString();
+            }
+        }
+        if (best.isEmpty()) { m_status->setText("Bu satırda bağlantı yok."); return; }
+        const QString p = best.startsWith("file:") ? LspClient::uriToPath(best) : best;
+        if (QFileInfo(p).isFile()) openFile(p);
+        else m_status->setText("Hedef dosya değil: " + best.left(80));
+    });
+}
+
+// Renk kutularını tazele (açık dosya için)
+void MainWindow::refreshDocColors(CodeEditor* e) {
+    if (!e || e->filePath().isEmpty()) return;
+    QString lang;
+    LspClient* c = lspClientFor(QFileInfo(e->filePath()).suffix(), lang);
+    if (!c || !c->isReady() || !c->hasCap("colorProvider")) {
+        e->setColorBoxes({});
+        return;
+    }
+    pushDocToLsp(e);
+    c->requestDocumentColor(e->filePath(), [e](QJsonObject res) {
+        QList<CodeEditor::ColorBox> boxes;
+        for (const QJsonValue& v : res["result"].toArray()) {
+            const QJsonObject o = v.toObject();
+            const QJsonObject r = o["range"].toObject();
+            const int l0 = r["start"].toObject()["line"].toInt();
+            if (l0 != r["end"].toObject()["line"].toInt()) continue; // tek satırlık
+            QTextBlock b = e->document()->findBlockByNumber(l0);
+            if (!b.isValid()) continue;
+            const int s = b.position() + r["start"].toObject()["character"].toInt();
+            const int en = b.position() + r["end"].toObject()["character"].toInt();
+            const QJsonObject col = o["color"].toObject();
+            QColor c(col["red"].toDouble() * 255, col["green"].toDouble() * 255,
+                     col["blue"].toDouble() * 255,
+                     col["alpha"].toDouble() * 255);
+            CodeEditor::ColorBox cb;
+            cb.line0 = l0;
+            cb.start = s;
+            cb.end = en;
+            cb.color = c;
+            boxes << cb;
+            if (boxes.size() >= 200) break;
+        }
+        e->setColorBoxes(boxes);
+    });
+}
+
+// Renk kutusu tıklaması → renk seç + metni değiştir
+void MainWindow::editColorBox(CodeEditor* e, int line0) {
+    if (!e) return;
+    // Kutuyu bul (satırda ilk)
+    // (kutular editörde; aralık için güncel listeyi iste)
+    QString lang;
+    LspClient* c = lspClientFor(QFileInfo(e->filePath()).suffix(), lang);
+    Q_UNUSED(c);
+    // Basit yol: kutunun metnini oku, diyaloğu aç, geri yaz
+    // (aralık bilgisi için belgeyi yeniden tara)
+    const QTextBlock b = e->document()->findBlockByNumber(line0);
+    if (!b.isValid()) return;
+    static QRegularExpression hexRe("#([0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b");
+    auto m = hexRe.match(b.text());
+    if (!m.hasMatch()) {
+        m_status->setText("Bu satırda düzenlenebilir renk yok.");
+        return;
+    }
+    const QColor cur(m.captured(0));
+    const QColor picked = QColorDialog::getColor(cur, this, "Renk Seç");
+    if (!picked.isValid()) return;
+    QString rep = picked.name(QColor::HexRgb);
+    if (m.captured(0).size() == 4) { // #rgb kısaltması
+        const QString n = picked.name(QColor::HexRgb);
+        rep = QString("#%1%2%3").arg(n[1]).arg(n[3]).arg(n[5]);
+    }
+    QTextCursor cur2(e->document());
+    const int pos = b.position() + m.capturedStart();
+    cur2.setPosition(pos);
+    cur2.setPosition(pos + m.capturedLength(), QTextCursor::KeepAnchor);
+    cur2.beginEditBlock();
+    cur2.removeSelectedText();
+    cur2.insertText(rep);
+    cur2.endEditBlock();
+    e->setTextCursor(cur2);
+    pushDocToLsp(e);
+    refreshDocColors(e);
+}
+
+// Code lens: gönderme sayılarını satır içi etiket yap
+void MainWindow::refreshCodeLens(CodeEditor* e) {
+    if (!e || e->filePath().isEmpty()) {
+        if (e) e->setCodeLens({});
+        return;
+    }
+    QString lang;
+    LspClient* c = lspClientFor(QFileInfo(e->filePath()).suffix(), lang);
+    if (!c || !c->isReady() || !c->hasCap("codeLensProvider")) {
+        e->setCodeLens({});
+        return;
+    }
+    pushDocToLsp(e);
+    c->requestCodeLens(e->filePath(), [e](QJsonObject res) {
+        QList<InlayHint> lens;
+        // command.title "N references" kalıbı
+        static QRegularExpression refRe(R"((\d+)\s+references?)");
+        for (const QJsonValue& v : res["result"].toArray()) {
+            const QJsonObject o = v.toObject();
+            const QString title = o["command"].toObject()["title"].toString();
+            auto m = refRe.match(title);
+            if (!m.hasMatch()) continue;
+            InlayHint h;
+            h.line = o["range"].toObject()["start"].toObject()["line"].toInt();
+            h.label = m.captured(1) + " gönderme";
+            lens << h;
+            if (lens.size() >= 100) break;
+        }
+        e->setCodeLens(lens);
+    });
+}
+
+// Tip hiyerarşisi (çağrı diyaloğu yeniden kullanılır: üst/alt türler)
+void MainWindow::showTypeHierarchy() {
+    CodeEditor* e = currentEditor();
+    if (!e || e->filePath().isEmpty()) return;
+    QString lang;
+    LspClient* c = lspClientFor(QFileInfo(e->filePath()).suffix(), lang);
+    if (!c || !c->isReady() || !c->hasCap("typeHierarchyProvider")) {
+        m_status->setText("Sunucu tip hiyerarşisi vermiyor.");
+        return;
+    }
+    QTextCursor cur = e->textCursor();
+    const QString sym = cur.selectedText().isEmpty() ? lspWordUnderCursor(e)
+                                                     : cur.selectedText();
+    c->requestTypePrepare(e->filePath(), cur.blockNumber(), cur.columnNumber(),
+                          [this, sym, c](QJsonObject res) {
+                              QJsonArray arr = res["result"].toArray();
+                              if (arr.isEmpty()) {
+                                  m_status->setText("Tip bulunamadı.");
+                                  return;
+                              }
+                              const QJsonObject item = arr[0].toObject();
+                              auto* d = new CallHierarchyDialog(sym, this);
+                              d->setAttribute(Qt::WA_DeleteOnClose);
+                              c->requestTypeSupertypes(item, [d](QJsonObject r) {
+                                  QList<CallNode> ns;
+                                  for (const QJsonValue& v : r["result"].toArray()) {
+                                      const QJsonObject o = v.toObject();
+                                      CallNode n;
+                                      n.name = o["name"].toString();
+                                      n.uri = o["uri"].toString();
+                                      const QJsonObject rng =
+                                          o["range"].toObject()["start"].toObject();
+                                      n.line = rng["line"].toInt();
+                                      ns << n;
+                                  }
+                                  d->setIncoming(ns);
+                              });
+                              c->requestTypeSubtypes(item, [d](QJsonObject r) {
+                                  QList<CallNode> ns;
+                                  for (const QJsonValue& v : r["result"].toArray()) {
+                                      const QJsonObject o = v.toObject();
+                                      CallNode n;
+                                      n.name = o["name"].toString();
+                                      n.uri = o["uri"].toString();
+                                      const QJsonObject rng =
+                                          o["range"].toObject()["start"].toObject();
+                                      n.line = rng["line"].toInt();
+                                      ns << n;
+                                  }
+                                  d->setOutgoing(ns);
+                              });
+                              if (d) d->show();
+                          });
+}
+
+// Çekme tanılama (isteğe bağlı yenileme)
+void MainWindow::pullDiagnostics() {
+    CodeEditor* e = currentEditor();
+    if (!e || e->filePath().isEmpty()) return;
+    QString lang;
+    LspClient* c = lspClientFor(QFileInfo(e->filePath()).suffix(), lang);
+    if (!c || !c->isReady() || !c->hasCap("diagnosticProvider")) {
+        m_status->setText("Sunucu çekme tanılama vermiyor.");
+        return;
+    }
+    pushDocToLsp(e);
+    c->requestPullDiagnostics(e->filePath(), [this, e](QJsonObject res) {
+        QJsonObject r = res["result"].toObject();
+        const QString path = e->filePath();
+        QList<LspDiag> diags;
+        for (const QJsonValue& v : r["items"].toArray()) {
+            const QJsonObject d = v.toObject();
+            const QJsonObject rng = d["range"].toObject();
+            LspDiag dg;
+            dg.path = path;
+            dg.line = rng["start"].toObject()["line"].toInt();
+            dg.col = rng["start"].toObject()["character"].toInt();
+            dg.endLine = rng["end"].toObject()["line"].toInt();
+            dg.endCol = rng["end"].toObject()["character"].toInt();
+            dg.severity = d["severity"].toInt(1);
+            dg.message = d["message"].toString();
+            // Stage 27: ilişkili bilgi satıra eklenir
+            QStringList rel;
+            for (const QJsonValue& rv : d["relatedInformation"].toArray()) {
+                const QJsonObject ro = rv.toObject();
+                const QJsonObject rl = ro["location"].toObject();
+                rel << QString("%1:%2").arg(
+                    QFileInfo(LspClient::uriToPath(rl["uri"].toString())).fileName(),
+                    QString::number(
+                        rl["range"].toObject()["start"].toObject()["line"].toInt() + 1));
+            }
+            if (!rel.isEmpty()) dg.message += "  →  " + rel.join(", ");
+            diags << dg;
+        }
+        onDiagnostics(path, diags);
+        m_status->setText(QString("%1 tanı çekildi").arg(diags.size()));
+    });
+}
+
+// Seçim biçimlendirme
+void MainWindow::formatSelection() {
+    CodeEditor* e = currentEditor();
+    if (!e || e->filePath().isEmpty()) return;
+    QTextCursor cur = e->textCursor();
+    if (!cur.hasSelection()) { formatDocument(); return; }
+    QString lang;
+    LspClient* c = lspClientFor(QFileInfo(e->filePath()).suffix(), lang);
+    if (!c || !c->isReady() || !c->hasCap("documentRangeFormattingProvider")) {
+        m_status->setText("Sunucu aralık biçimlendirme vermiyor.");
+        return;
+    }
+    if (!c->isReady()) return;
+    pushDocToLsp(e);
+    QTextCursor s(e->document()), en(e->document());
+    s.setPosition(cur.selectionStart());
+    en.setPosition(cur.selectionEnd());
+    c->requestRangeFormat(e->filePath(), s.blockNumber(), s.columnNumber(),
+                          en.blockNumber(), en.columnNumber(),
+                          [this, e](QJsonObject res) {
+                              QList<LspTextEdit> edits = TextEdits::parse(res);
+                              if (edits.isEmpty()) {
+                                  m_status->setText("Değişiklik yok.");
+                                  return;
+                              }
+                              e->setPlainText(TextEdits::apply(e->toPlainText(), edits));
+                              pushDocToLsp(e);
+                              toast(1, "Seçim biçimlendirildi.");
+                          });
+}
+
+// Sunucu günlüğü görüntüleyici
+void MainWindow::showLspLog() {
+    QString out = "== C++ (clangd) ==\n";
+    if (m_lspCpp) out += m_lspCpp->messageLog().join("\n");
+    out += "\n\n== Python (pylsp) ==\n";
+    if (m_lspPy) out += m_lspPy->messageLog().join("\n");
+    out += "\n\n== Rust ==\n";
+    if (m_lspRs) out += m_lspRs->messageLog().join("\n");
+    out += "\n\n== Go ==\n";
+    if (m_lspGo) out += m_lspGo->messageLog().join("\n");
+    out += "\n\n== JS/TS ==\n";
+    if (m_lspJs) out += m_lspJs->messageLog().join("\n");
+    if (out.trimmed().endsWith("==")) out += "(ileti yok — sunucu çalışmadı)";
+    auto* d = new QDialog(this);
+    d->setWindowTitle("LSP Trafiği");
+    d->resize(640, 440);
+    auto* lay = new QVBoxLayout(d);
+    auto* t = new QTextEdit(d);
+    t->setReadOnly(true);
+    t->setFontFamily("monospace");
+    t->setPlainText(out);
+    lay->addWidget(t, 1);
+    auto* row = new QHBoxLayout();
+    auto* bClear = new QPushButton("Temizle", d);
+    connect(bClear, &QPushButton::clicked, this, [this]() {
+        for (LspClient* c : {m_lspCpp, m_lspPy, m_lspRs, m_lspGo, m_lspJs})
+            if (c) c->clearLog();
+    });
+    row->addStretch(1);
+    row->addWidget(bClear);
+    lay->addLayout(row);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    d->show();
+}
+
+// Sunucu yöneticisi: kurulu sürümler + kurulum yönergeleri
+void MainWindow::showLspServers() {
+    QStringList rows;
+    for (const LspServerDef& d : LspServers::table()) {
+        QString prog = (d.lang == "python") ? LspServers::pythonExe(m_root)
+                                            : LspServers::findProgram(d.program);
+        QString ver;
+        if (!prog.isEmpty()) {
+            QProcess p;
+            p.start(prog, {"--version"});
+            if (p.waitForFinished(5000))
+                ver = QString::fromUtf8(p.readAllStandardOutput() +
+                                        p.readAllStandardError())
+                          .split('\n')
+                          .first()
+                          .trimmed()
+                          .left(80);
+        }
+        rows << QString("%1: %2%3").arg(
+            d.lang, prog.isEmpty() ? ("YOK — " + d.installHint) : prog,
+            ver.isEmpty() ? "" : ("  (" + ver + ")"));
+    }
+    QMessageBox::information(this, "Dil Sunucuları", rows.join("\n\n"));
+}
+
+// ============ Stage 28 ============
+
+// Çalışma alanı güveni: bilinmeyen kökte sor, kısıtlı modda tehlikelileri kapat
+void MainWindow::checkWorkspaceTrust() {
+    m_trusted = true;
+    if (m_root.isEmpty()) return;
+    QSettings q("Verso", "VersoCoder");
+    QStringList trusted = q.value("trust/roots").toStringList();
+    QStringList denied = q.value("trust/denied").toStringList();
+    if (trusted.contains(m_root)) return;
+    if (denied.contains(m_root)) {
+        m_trusted = false;
+        toast(2, "Güvenilmez çalışma alanı — görev/eklenti/ajan kapalı");
+        return;
+    }
+    auto r = QMessageBox::question(
+        this, "Çalışma Alanı Güveni",
+        "Bu klasöre güveniyor musunuz?\n" + m_root +
+            "\n\nGüvenilmeyen alanda görev, eklenti ve AI ajanı çalışmaz.",
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+    if (r == QMessageBox::Yes) {
+        trusted << m_root;
+        q.setValue("trust/roots", trusted);
+        return;
+    }
+    auto r2 = QMessageBox::question(
+        this, "Çalışma Alanı Güveni", "Tek seferlik mi açılsın, hep mi kısıtlansın?",
+        QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
+    // Yes = tek seferlik güven, No = hep kısıtla, Cancel = şimdi kısıtla
+    if (r2 == QMessageBox::Yes) return;
+    if (r2 == QMessageBox::No) {
+        denied << m_root;
+        q.setValue("trust/denied", denied);
+    }
+    m_trusted = false;
+    toast(2, "Güvenilmez çalışma alanı — görev/eklenti/ajan kapalı");
+}
+
+bool MainWindow::requireTrusted(const QString& what) {
+    if (m_trusted) return true;
+    toast(2, what + " güvenilmez alanda kapalı (paletten güven verin)");
+    return false;
+}
+
+// Yer imleri
+void MainWindow::applyBmMarks(CodeEditor* e) {
+    if (e) e->setBookmarks(m_marks.lines(e->filePath()));
+}
+
+void MainWindow::toggleBookmark() {
+    CodeEditor* e = currentEditor();
+    if (!e || e->filePath().isEmpty()) return;
+    m_marks.toggle(e->filePath(), e->textCursor().blockNumber() + 1);
+    m_marks.save();
+    applyBmMarks(e);
+}
+
+void MainWindow::jumpBookmark(int dir) {
+    CodeEditor* e = currentEditor();
+    if (!e || e->filePath().isEmpty()) return;
+    const int cur = e->textCursor().blockNumber() + 1;
+    const int ln = dir > 0 ? m_marks.next(e->filePath(), cur)
+                           : m_marks.prev(e->filePath(), cur);
+    if (ln < 0) {
+        toast(0, "Başka yer imi yok");
+        return;
+    }
+    e->gotoLine(ln);
+    e->setFocus();
+}
+
+void MainWindow::showBookmarks() {
+    auto* d = new BookmarkDialog(&m_marks, this);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    connect(d, &BookmarkDialog::jumpRequested, this,
+            [this, d](const QString& path, int line) {
+                d->close();
+                openFileAt(path, line);
+            });
+    d->show();
+}
+
+// Satır yorumu (dile göre önek, seçim destekli)
+void MainWindow::toggleComment() {
+    CodeEditor* e = currentEditor();
+    if (!e) return;
+    QString prefix = LanguageSupport::commentPrefix(
+        e->filePath().isEmpty() ? e->lang() : e->filePath());
+    if (prefix.isEmpty()) {
+        toast(0, "Bu dilde satır yorumu yok");
+        return;
+    }
+    QTextCursor c = e->textCursor();
+    QTextDocument* doc = e->document();
+    // Stage 28: blok yorum dillerinde kapatma eki (örn. <!-- ... -->)
+    const QString suffix = (prefix == "<!--") ? " -->" : QString();
+    auto leadWs = [](const QString& t) {
+        int n = 0;
+        while (n < t.size() && t[n].isSpace()) ++n;
+        return n;
+    };
+    auto trailWs = [](const QString& t) {
+        int n = 0;
+        while (n < t.size() && t[t.size() - 1 - n].isSpace()) ++n;
+        return n;
+    };
+    int a = doc->findBlock(c.selectionStart()).blockNumber();
+    int b = doc->findBlock(c.selectionEnd()).blockNumber();
+    // İmleç satır sonundaysa son satırı hariç tut
+    if (c.hasSelection() && c.columnNumber() == 0 && b > a) --b;
+    bool allOn = true;
+    for (int ln = a; ln <= b; ++ln) {
+        const QString t = doc->findBlockByNumber(ln).text();
+        const QString s = t.mid(leadWs(t));
+        if (s.isEmpty()) continue;
+        if (!s.startsWith(prefix)) { allOn = false; break; }
+    }
+    c.beginEditBlock();
+    for (int ln = a; ln <= b; ++ln) {
+        QTextBlock blk = doc->findBlockByNumber(ln);
+        if (!blk.isValid() || blk.text().trimmed().isEmpty()) continue;
+        QTextCursor lc(doc);
+        lc.setPosition(blk.position() + leadWs(blk.text()));
+        if (allOn) {
+            lc.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, prefix.size());
+            if (lc.selectedText() == prefix) {
+                lc.removeSelectedText();
+                // Öneki izleyen tek boşluğu da al
+                QTextCursor sp(doc);
+                sp.setPosition(lc.position());
+                sp.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 1);
+                if (sp.selectedText() == " ") sp.removeSelectedText();
+            }
+            if (!suffix.isEmpty()) {
+                // Satır sonundaki kapatma ekini temizle
+                const QString line = blk.text();
+                const QString tr = line.left(line.size() - trailWs(line));
+                const QString st = suffix.trimmed();
+                if (tr.endsWith(st)) {
+                    QTextCursor ec(doc);
+                    ec.setPosition(blk.position() + tr.size() - st.size());
+                    ec.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, st.size());
+                    ec.removeSelectedText();
+                }
+            }
+        } else {
+            lc.insertText(prefix + " ");
+            if (!suffix.isEmpty()) {
+                QTextCursor ec(doc);
+                ec.setPosition(blk.position() + blk.length() - 1);
+                ec.movePosition(QTextCursor::EndOfBlock);
+                ec.insertText(suffix);
+            }
+        }
+    }
+    c.endEditBlock();
+}
+
+// Görüntü/md yönlendirme (dosya açılışında)
+bool MainWindow::openSpecial(const QString& path) {
+    const QString suf = QFileInfo(path).suffix().toLower();
+    static const QStringList imgs = {"png", "jpg", "jpeg", "gif", "bmp", "svg", "webp"};
+    if (imgs.contains(suf)) {
+        auto* d = new ImageViewerDialog(path, this);
+        d->setAttribute(Qt::WA_DeleteOnClose);
+        d->show();
+        return true;
+    }
+    return false;
+}
+
+void MainWindow::showMarkdownPreview() {
+    CodeEditor* e = currentEditor();
+    if (!e) return;
+    auto* d = new MarkdownPreviewDialog(e, this);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    d->show();
+}
+
+void MainWindow::showHexView() {
+    CodeEditor* e = currentEditor();
+    if (!e || e->filePath().isEmpty()) return;
+    auto* d = new HexViewDialog(e->filePath(), this);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    d->show();
+}
+
+// Yol kopyalama çeşitleri
+void MainWindow::copyPath(int mode) {
+    CodeEditor* e = currentEditor();
+    if (!e || e->filePath().isEmpty()) return;
+    const QFileInfo fi(e->filePath());
+    QString out = e->filePath();
+    if (mode == 1) out = QDir(m_root).relativeFilePath(e->filePath());
+    else if (mode == 2) out = fi.fileName();
+    QApplication::clipboard()->setText(out);
+    toast(1, "Kopyalandı: " + out.left(80));
+}
+
+// Stage 28: importları düzenle (source.organizeImports, doğrudan uygula)
+void MainWindow::organizeImports() {
+    CodeEditor* e = currentEditor();
+    if (!e || e->filePath().isEmpty()) return;
+    QString lang;
+    LspClient* c = lspClientFor(QFileInfo(e->filePath()).suffix(), lang);
+    if (!c || !c->isReady()) {
+        m_status->setText("Sunucu hazır değil.");
+        return;
+    }
+    QTextCursor cur = e->textCursor();
+    c->requestCodeAction(e->filePath(), 0, 0,
+                         e->document()->blockCount(), 0,
+                         {"source.organizeImports"},
+                         [this, e, c](QJsonObject res) {
+                             const QList<CodeActionItem> items = CodeActionList::parse(res);
+                             const CodeActionItem* pick = nullptr;
+                             for (const CodeActionItem& it : items)
+                                 if (it.hasEdit || it.kind == "source.organizeImports") {
+                                     pick = &it;
+                                     break;
+                                 }
+                             if (!pick) {
+                                 m_status->setText("Düzenlenecek import yok.");
+                                 return;
+                             }
+                             // Ham yanıttan WorkspaceEdit uygula
+                             QJsonObject raw = pick->raw;
+                             QJsonObject edit = raw["edit"].toObject();
+                             bool applied = false;
+                             // changes: {uri: [TextEdit]}
+                             const QJsonObject changes = edit["changes"].toObject();
+                             for (auto it = changes.constBegin();
+                                  it != changes.constEnd() && !applied; ++it) {
+                                 const QString fp = LspClient::uriToPath(it.key());
+                                 QList<LspTextEdit> edits =
+                                     TextEdits::parseArray(it.value().toArray(), fp);
+                                 if (edits.isEmpty()) continue;
+                                 if (fp == e->filePath()) {
+                                     e->setPlainText(TextEdits::apply(e->toPlainText(), edits));
+                                     pushDocToLsp(e);
+                                 } else {
+                                     QFile f(fp);
+                                     if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                                         const QString t = QString::fromUtf8(f.readAll());
+                                         f.close();
+                                         if (f.open(QIODevice::WriteOnly | QIODevice::Text |
+                                                    QIODevice::Truncate))
+                                             f.write(TextEdits::apply(t, edits).toUtf8());
+                                     }
+                                 }
+                                 applied = true;
+                             }
+                             // command-only eylemse sunucuya ilet
+                             if (!applied) {
+                                 const QJsonObject cmd = raw["command"].toObject();
+                                 if (!cmd.isEmpty() && c) {
+                                     c->request("workspace/executeCommand", cmd, nullptr);
+                                     applied = true;
+                                 }
+                             }
+                             toast(applied ? 1 : 0, applied ? "Importlar düzenlendi."
+                                                             : "Uygulanabilir düzenleme yok.");
+                         });
+}
+
+// Stage 28: git dosya geçmişi + etiketler
+void MainWindow::showGitHistory() {
+    CodeEditor* e = currentEditor();
+    const QString path = e ? e->filePath() : QString();
+    if (path.isEmpty()) { toast(0, "Önce dosya açın"); return; }
+    auto* d = new GitHistoryDialog(m_root, path, this);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    d->show();
+}
+
+// Stage 30: kopan uzak bağlantıya tek tıkla dönüş
+void MainWindow::remoteReconnect() {
+    if (remoteConnected()) {
+        toast(0, "Zaten bağlı");
+        return;
+    }
+    if (!m_remoteProfile.isValid()) {
+        toast(0, "Kayıtlı profil yok — önce bağlanın");
+        return;
+    }
+    remoteConnect(m_remoteProfile);
+}
+
+// Stage 30: clang-format yedeği (LSP biçimlendirme yoksa)
+void MainWindow::formatWithClangFormat(CodeEditor* e) {
+    if (!e || e->filePath().isEmpty()) return;
+    const QString bin = QStandardPaths::findExecutable("clang-format");
+    if (bin.isEmpty()) {
+        m_status->setText("Biçimlendirme yok: ne LSP ne clang-format bulundu.");
+        return;
+    }
+    QProcess p;
+    p.setWorkingDirectory(QFileInfo(e->filePath()).absolutePath());
+    p.start(bin, {"--style=file", "--assume-filename=" + e->filePath()});
+    if (!p.waitForStarted(3000)) return;
+    p.write(e->toPlainText().toUtf8());
+    p.closeWriteChannel();
+    if (!p.waitForFinished(10000) || p.exitCode() != 0) {
+        toast(2, "clang-format başarısız");
+        return;
+    }
+    const QString out = QString::fromUtf8(p.readAllStandardOutput());
+    if (!out.isEmpty() && out != e->toPlainText()) {
+        e->setPlainText(out);
+        pushDocToLsp(e);
+        toast(1, "clang-format ile biçimlendirildi.");
+    } else {
+        m_status->setText("Biçimlendirme değişikliği yok.");
+    }
+}
+
+// Stage 30: çakışmalı dosyayı birleştirme düzenleyicisinde aç
+void MainWindow::openMergeEditor() {
+    CodeEditor* e = currentEditor();
+    if (!e || e->filePath().isEmpty()) return;
+    if (MergeParse::find(e->toPlainText()).isEmpty()) {
+        toast(0, "Çakışma işareti yok");
+        return;
+    }
+    auto* d = new MergeEditorDialog(e->filePath(), e->toPlainText(), this);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    connect(d, &QDialog::accepted, this, [this, e, d]() {
+        e->setPlainText(d->resolvedText());
+        e->document()->setModified(true);
+        pushDocToLsp(e);
+        toast(1, "Birleştirme uygulandı");
+    });
+    d->show();
+}
+
+void MainWindow::showGitTags() {
+    if (m_root.isEmpty()) return;
+    auto* d = new GitTagsDialog(m_root, this);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    d->show();
+}
+
+// Stage 28: terminalde bul
+void MainWindow::terminalFind(bool forward) {
+    if (!m_terminal) return;
+    m_bottomTabs->setCurrentWidget(m_terminal);
+    if (forward && m_terminal->findNext(true)) return;
+    if (!forward && m_terminal->findNext(false)) return;
+    bool ok = false;
+    const QString q = QInputDialog::getText(this, "Terminalde Bul", "Metin:",
+                                            QLineEdit::Normal, QString(), &ok);
+    if (ok && !q.isEmpty() && !m_terminal->findFirst(q))
+        toast(0, "Bulunamadı: " + q.left(40));
+}
+
+// Stage 28: bildirim geçmişi
+void MainWindow::showNotifications() {
+    auto* d = new QDialog(this);
+    d->setWindowTitle("Bildirimler");
+    d->resize(520, 380);
+    auto* lay = new QVBoxLayout(d);
+    auto* list = new QListWidget(d);
+    list->addItems(ToastManager::instance().history());
+    if (list->count() == 0) list->addItem("(bildirim yok)");
+    lay->addWidget(list, 1);
+    auto* box = new QDialogButtonBox(QDialogButtonBox::Close, d);
+    connect(box, &QDialogButtonBox::rejected, d, &QDialog::reject);
+    lay->addWidget(box);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    d->show();
+}
+
+// Stage 28: son projeler (kalıcı, en çok 8)
+void MainWindow::pushRecentProject(const QString& root) {
+    if (root.isEmpty()) return;
+    QSettings q("Verso", "VersoCoder");
+    QStringList r = q.value("session/recentRoots").toStringList();
+    r.removeAll(root);
+    r.prepend(root);
+    while (r.size() > 8) r.removeLast();
+    q.setValue("session/recentRoots", r);
+}
+
+void MainWindow::openRoot(const QString& root) {
+    if (root.isEmpty() || !QDir(root).exists()) return;
+    m_root = root;
+    refreshProjectViews();
+    pushRecentProject(root);
+    AppSettings cur = SettingsManager::instance().load();
+    cur.lastRoot = root;
+    SettingsManager::instance().save(cur);
+}
+
+// Stage 28: çalıştırılabilir dosyayı hata ayıklayıcıda çalıştır
+void MainWindow::debugRunFile() {
+    CodeEditor* e = currentEditor();
+    if (!e || e->filePath().isEmpty()) return;
+    const QString prog = e->filePath();
+    QFileInfo fi(prog);
+    if (!fi.isExecutable() && !fi.suffix().isEmpty()) {
+        toast(0, "Çalıştırılabilir değil — önce derleyin (F5), sonra tekrar deneyin");
+        return;
+    }
+    m_debugOverride = true;
+    m_overrideLc = LaunchConfig();
+    m_overrideLc.program = prog;
+    m_overrideLc.cwd = fi.absolutePath();
+    debugStart();
+}
+
+// Stage 28: son AI/ajan düzenlemesini geri al
+void MainWindow::undoAiEdit() {
+    if (m_aiUndo.isEmpty()) {
+        toast(0, "Geri alınacak AI düzenlemesi yok");
+        return;
+    }
+    const AiUndo u = m_aiUndo.takeLast();
+    if (!u.editor.isNull()) {
+        QSignalBlocker b(u.editor);
+        if (u.wholeFile || u.path.isEmpty()) {
+            u.editor->setPlainText(u.oldText);
+        } else {
+            QTextCursor c(u.editor->document());
+            const int maxPos = u.editor->document()->characterCount() - 1;
+            c.setPosition(qBound(0, u.selStart, maxPos));
+            c.setPosition(qBound(0, u.selStart + u.selLen, maxPos), QTextCursor::KeepAnchor);
+            c.insertText(u.oldText);
+        }
+        u.editor->document()->setModified(true);
+        pushDocToLsp(u.editor);
+        toast(1, "AI düzenlemesi geri alındı (sekme)");
+        return;
+    }
+    if (!u.path.isEmpty()) {
+        QFile f(u.path);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            f.write(u.oldText.toUtf8());
+            f.close();
+            for (CodeEditor* ed : allEditors())
+                if (QFileInfo(ed->filePath()) == QFileInfo(u.path)) {
+                    QSignalBlocker b2(ed);
+                    ed->setPlainText(u.oldText);
+                    ed->document()->setModified(false);
+                }
+            toast(1, "AI düzenlemesi geri alındı: " + QFileInfo(u.path).fileName());
+            return;
+        }
+    }
+    toast(2, "Geri alınamadı");
+}
+
+void MainWindow::pushAiUndo(const QString& path, const QString& oldText,
+                            CodeEditor* editor, bool whole, int selStart, int selLen) {
+    AiUndo u;
+    u.path = path;
+    u.oldText = oldText;
+    u.editor = editor;
+    u.wholeFile = whole;
+    u.selStart = selStart;
+    u.selLen = selLen;
+    m_aiUndo << u;
+    while (m_aiUndo.size() > 20) m_aiUndo.removeFirst();
+}
+
+// Stage 30: dependsOn zincirini sırayla koştur
+void MainWindow::runTaskChain() {
+    if (m_root.isEmpty()) return;
+    TaskRunner runner;
+    if (!runner.loadForRoot(m_root)) {
+        toast(0, "tasks.json yok");
+        return;
+    }
+    QString err;
+    const QList<QString> order =
+        TaskChain::order(TaskChain::depsFrom(runner.tasksJsonArray()), err);
+    if (!err.isEmpty()) {
+        toast(2, err);
+        return;
+    }
+    if (order.isEmpty()) {
+        toast(0, "Çalıştırılacak görev yok");
+        return;
+    }
+    m_termDock->setVisible(true);
+    m_bottomTabs->setCurrentWidget(m_taskPanel);
+    m_chainQueue = order;
+    m_chainActive = true;
+    connect(m_taskPanel, &TaskPanel::taskDone, this, &MainWindow::runNextChainTask,
+            Qt::UniqueConnection);
+    runNextChainTask();
+}
+
+void MainWindow::runNextChainTask() {
+    if (!m_chainActive) return; // elle koşturmalarda zincir ilerlemez
+    if (m_chainQueue.isEmpty() || !m_taskPanel) {
+        if (m_chainQueue.isEmpty()) {
+            m_chainActive = false;
+            toast(1, "Zincir tamamlandı ✓");
+        }
+        return;
+    }
+    const QString label = m_chainQueue.takeFirst();
+    m_taskPanel->runTask(label);
+    // Devamı taskDone sinyalinden gelir (her iki çalıştırma yolunda da yayılır)
+}
+
+// Stage 30: ~/.ssh/config içe aktarma
+void MainWindow::importSshConfig() {
+    const QString path = QDir::homePath() + "/.ssh/config";
+    const QList<SshConfig::Entry> es = SshConfig::parseFile(path);
+    if (es.isEmpty()) {
+        toast(0, "~/.ssh/config bulunamadı ya da kayıt yok");
+        return;
+    }
+    int n = 0;
+    for (const SshConfig::Entry& e : es) {
+        ConnectionProfile p = SshConfig::toProfile(e);
+        if (!ConnectionProfiles::exists(p.name) && ConnectionProfiles::save(p)) ++n;
+    }
+    toast(1, QString("%1 profil içe aktarıldı").arg(n));
+}
+
+// Stage 30: sohbetlerde arama
+void MainWindow::searchAiChats() {
+    bool ok = false;
+    const QString q = QInputDialog::getText(this, "Sohbetlerde Ara", "Metin:",
+                                            QLineEdit::Normal, QString(), &ok);
+    if (!ok || q.trimmed().isEmpty() || !m_ai) return;
+    m_ai->searchChats(q.trimmed());
+}
+
+// Stage 30: zamanlanmış AI denetimi
+void MainWindow::startAiSchedule() {
+    delete m_aiTimer;
+    m_aiTimer = nullptr;
+    const int mins = SettingsManager::instance().load().aiScheduleMin;
+    if (mins <= 0 || !m_ai) return;
+    m_aiTimer = new QTimer(this);
+    m_aiTimer->setInterval(mins * 60000);
+    connect(m_aiTimer, &QTimer::timeout, this, [this]() {
+        if (!m_ai || m_root.isEmpty()) return;
+        m_ai->send("Zamanlanmış denetim: projede bitmemiş TODO "
+                   "veya bariz hata var mı? Kısa maddelerle yaz.");
+    });
+    m_aiTimer->start();
+}
+
+// Stage 30: pano yöneticisi
+void MainWindow::showClipboardManager() {
+    auto* d = new ClipboardDialog(&m_clipRing, this);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    connect(d, &ClipboardDialog::pasteRequested, this, [this, d](const QString& t) {
+        d->close();
+        if (auto* e = currentEditor()) {
+            e->insertPlainText(t);
+            e->setFocus();
+        } else {
+            QApplication::clipboard()->setText(t);
+        }
+    });
+    d->show();
+}
+
+// Stage 30: yeni proje sihirbazı
+void MainWindow::newProjectWizard() {
+    NewProjectDialog d(this);
+    if (d.exec() != QDialog::Accepted || d.createdRoot().isEmpty()) return;
+    openRoot(d.createdRoot());
+}
+
+// Stage 31: bekleyen çökme izleri
+void MainWindow::checkCrashDumps() {
+    const QStringList dumps = CrashHandler::pendingDumps();
+    if (dumps.isEmpty()) return;
+    auto r = QMessageBox::question(
+        this, "Çökme İzi",
+        QString("Önceki çalışmada %1 çökme izi bulundu.\nTeşhis → Tanı Raporu'na ekleyebilirsiniz.\nŞimdi silinsin mi?")
+            .arg(dumps.size()),
+        QMessageBox::Yes | QMessageBox::No);
+    if (r == QMessageBox::Yes) CrashHandler::clearDumps();
+}
+
+// Stage 27: kayıtlı imza yardımını (aktif overload ile) yeniden göster
+void MainWindow::showSigTooltip() {
+    CodeEditor* e = m_lastSigEditor.data();
+    if (!e || m_lastSig.empty()) return;
+    QRect r = e->cursorRect(e->textCursor());
+    QToolTip::showText(e->mapToGlobal(r.bottomRight()),
+                       SignatureHelp::render(m_lastSig).left(800), e);
+}
+
+void MainWindow::cycleSignature(int dir) {
+    if (m_lastSig.sigs.size() < 2) return;
+    CodeEditor* e = m_lastSigEditor.data();
+    if (!e || e != currentEditor()) return;
+    const int n = m_lastSig.sigs.size();
+    m_lastSig.activeSig = (m_lastSig.activeSig + dir + n) % n;
+    m_lastSig.activeParam = 0;
+    showSigTooltip();
 }
 
 void MainWindow::showDocSymbols() {
@@ -2870,9 +5149,8 @@ void MainWindow::formatDocument() {
     if (!e || e->filePath().isEmpty()) return;
     QString lang;
     LspClient* c = lspClientFor(QFileInfo(e->filePath()).suffix(), lang);
-    if (!c) { m_status->setText("Bu dil için LSP yok."); return; }
-    if (!c->hasCap("documentFormattingProvider")) {
-        m_status->setText("Sunucu biçimlendirme desteklemiyor.");
+    if (!c || !c->hasCap("documentFormattingProvider")) {
+        formatWithClangFormat(e); // Stage 30: harici yedek
         return;
     }
     if (!c->isReady()) { withLspReady(c, [this]() { formatDocument(); }); return; }
@@ -3031,32 +5309,42 @@ void MainWindow::showCallHierarchy() {
                 [c](const CallNode& n, QTreeWidgetItem* item) {
                     c->requestCallIncoming(CallHierarchyTree::itemParams(n),
                         [item](QJsonObject r) {
+                            const int depth = item->data(0, Qt::UserRole + 4).toInt() + 1;
                             for (const CallNode& ch : CallHierarchyTree::parseCalls(r, true)) {
                                 auto* it = new QTreeWidgetItem(item);
                                 it->setText(0, ch.name);
                                 it->setData(0, Qt::UserRole, ch.name);
                                 it->setData(0, Qt::UserRole + 1, ch.uri);
                                 it->setData(0, Qt::UserRole + 2, ch.line);
+                                it->setData(0, Qt::UserRole + 4, depth); // Stage 24
+                                it->addChild(new QTreeWidgetItem(it, QStringList("…")));
                             }
                             if (item->childCount() > 0
                                 && item->child(0)->text(0) == "…")
                                 delete item->takeChild(0);
+                            if (item->childCount() == 0) // Stage 24: boş sonuç işareti
+                                item->addChild(new QTreeWidgetItem(item, QStringList("(yok)")));
                         });
                 });
         connect(d, &CallHierarchyDialog::expandOutgoing, this,
                 [c](const CallNode& n, QTreeWidgetItem* item) {
                     c->requestCallOutgoing(CallHierarchyTree::itemParams(n),
                         [item](QJsonObject r) {
+                            const int depth = item->data(0, Qt::UserRole + 4).toInt() + 1;
                             for (const CallNode& ch : CallHierarchyTree::parseCalls(r, false)) {
                                 auto* it = new QTreeWidgetItem(item);
                                 it->setText(0, ch.name);
                                 it->setData(0, Qt::UserRole, ch.name);
                                 it->setData(0, Qt::UserRole + 1, ch.uri);
                                 it->setData(0, Qt::UserRole + 2, ch.line);
+                                it->setData(0, Qt::UserRole + 4, depth); // Stage 24
+                                it->addChild(new QTreeWidgetItem(it, QStringList("…")));
                             }
                             if (item->childCount() > 0
                                 && item->child(0)->text(0) == "…")
                                 delete item->takeChild(0);
+                            if (item->childCount() == 0) // Stage 24: boş sonuç işareti
+                                item->addChild(new QTreeWidgetItem(item, QStringList("(yok)")));
                         });
                 });
         d->show();
@@ -3068,8 +5356,14 @@ void MainWindow::showCallHierarchy() {
 void MainWindow::debugStart() {
     AppSettings s = SettingsManager::instance().load();
     LaunchConfig lc = LaunchConfig::load(m_root);
-    if (lc.program.trimmed().isEmpty()
-        || !QFile::exists(lc.resolvedProgram(m_root))) {
+    // Stage 28: tek seferlik geçersiz kılma (çalıştırılabilir dosyayı çalıştır)
+    const bool ovr = m_debugOverride;
+    if (ovr) {
+        lc = m_overrideLc;
+        m_debugOverride = false;
+    }
+    if (!ovr && (lc.program.trimmed().isEmpty()
+                 || !QFile::exists(lc.resolvedProgram(m_root)))) {
         // launch.json yoksa/bozuksa oluşturup aç
         LaunchConfig d = LaunchConfig::defaults(m_root);
         if (lc.program.trimmed().isEmpty()) lc = d;
@@ -3078,12 +5372,29 @@ void MainWindow::debugStart() {
         toast(2, "launch.json düzenleyin (program yolu), sonra tekrar başlatın.");
         return;
     }
-    if (!lc.preBuild.trimmed().isEmpty()) {
+    if (!lc.preBuild.trimmed().isEmpty() && !m_preBuildDone) {
+        // Stage 26: ön derleme bitmeden başlama; hatalıysa dur
         m_termDock->setVisible(true);
         m_bottomTabs->setCurrentWidget(m_taskPanel);
-        m_taskPanel->runTask(lc.preBuild);
-        toast(0, "Ön derleme çalıştı, 6 sn sonra hata ayıklama başlayacak...");
-        QTimer::singleShot(6000, this, [this]() { debugStart(); });
+        auto* runner = new TaskRunner(this);
+        if (!runner->loadForRoot(m_root)) {
+            toast(2, "Ön derleme görevi bulunamadı: " + lc.preBuild);
+            runner->deleteLater();
+            return;
+        }
+        connect(runner, &TaskRunner::finished, this,
+                [this, runner, pre = lc.preBuild](const QString&, int code) {
+                    runner->deleteLater();
+                    if (code != 0) {
+                        toast(2, QString("Ön derleme başarısız (%1) — başlatılmadı").arg(code));
+                        return;
+                    }
+                    m_preBuildDone = true;
+                    debugStart();
+                    m_preBuildDone = false;
+                });
+        toast(0, "Ön derleme çalışıyor: " + lc.preBuild);
+        runner->runLabel(lc.preBuild, m_root);
         return;
     }
     m_termDock->setVisible(true);
@@ -3097,13 +5408,23 @@ void MainWindow::debugStart() {
         return;
     }
     m_gdbBpNums.clear();
-    m_gdb->launch(lc.resolvedProgram(m_root), lc.args, lc.resolvedCwd(m_root),
-                  lc.stopAtEntry, [this](bool ok) {
+    // Stage 26: şema dışı anahtar uyarısı
+    const QStringList unk = LaunchConfig::unknownKeys(m_root);
+    if (!unk.isEmpty())
+        toast(2, "launch.json: bilinmeyen anahtar (" + unk.join(", ") + ") yoksayıldı");
+    const QString curFile = currentEditor() ? currentEditor()->filePath() : QString();
+    m_gdb->launch(lc.resolvedProgram(m_root), lc.resolvedArgs(m_root, curFile),
+                  lc.resolvedCwd(m_root), lc.stopAtEntry, [this](bool ok) {
                       if (!ok) {
                           m_debug->setRunning(false, false);
                           return;
                       }
                       syncBreakpointsToGdb();
+                      // Stage 26: kayıtlı fonksiyon kesmeleri
+                      for (const QString& fn :
+                           QSettings("Verso", "VersoCoder").value("debug/funcBps").toStringList())
+                          m_gdb->breakFunction(fn, nullptr);
+                      m_debugT0.start(); // Stage 26: çıkış özeti
                       m_status->setText("Program çalışıyor (gdb).");
                   });
 }
@@ -3115,8 +5436,11 @@ void MainWindow::syncBreakpointsToGdb() {
         if (!b.enabled || b.isLogPoint()) continue;
         const QString key = QString("%1:%2").arg(b.file).arg(b.line);
         if (m_gdbBpNums.contains(key)) continue;
-        m_gdb->breakInsert(b.file, b.line, b.condition, [this, key](QString num) {
-            if (!num.isEmpty()) m_gdbBpNums[key] = num;
+        const int hits = b.hitCount;
+        m_gdb->breakInsert(b.file, b.line, b.condition, [this, key, hits](QString num) {
+            if (num.isEmpty()) return;
+            m_gdbBpNums[key] = num;
+            if (hits > 0 && m_gdb) m_gdb->breakAfter(num, hits); // Stage 26
         });
     }
     if (auto* e = currentEditor())
@@ -3237,12 +5561,40 @@ void MainWindow::onDebugStopped(const QString& reason, const DebugFrame& frame) 
     } else {
         m_status->setText("Durdu (" + reason + ")");
     }
-    // Yığın + değişkenleri tazele
+    onDebugSmartCheck(); // Stage 26: std:: içindeyse otomatik üstten
+    // Yığın + değişkenleri tazele (Stage 26: lib filtreli + tüm sekmeler)
     if (m_gdb) {
         m_gdb->stackFrames([this](QList<DebugFrame> frames) {
+            if (m_debugSkipLib) {
+                frames.erase(std::remove_if(frames.begin(), frames.end(),
+                                            [](const DebugFrame& f) {
+                                                return f.func.startsWith("std::") ||
+                                                       f.file.contains("/usr/include/");
+                                            }),
+                             frames.end());
+            }
             m_debug->setFrames(frames);
         });
         refreshDebugVars(0);
+        refreshWatches();
+        m_gdb->registers([this](QList<QPair<QString, QString>> regs) {
+            m_debug->setRegisters(regs);
+        });
+        m_gdb->threadList([this](QList<GdbDriver::ThreadInfo> ts) {
+            QList<QPair<QString, QString>> items;
+            QString cur;
+            for (const auto& t : ts) {
+                items << qMakePair(t.id, QString("%1: %2 %3").arg(t.id, t.target, t.name));
+                Q_UNUSED(cur);
+            }
+            m_debug->setThreads(items, m_curThread);
+        });
+        // Disas: geçerli kare dosya+satırındaysa
+        if (m_hasFrame && !m_curFrame.file.isEmpty())
+            m_gdb->disassemble(m_curFrame.file, m_curFrame.line + 1, 30,
+                               [this](QList<QMap<QString, QString>> rows) {
+                                   m_debug->setDisas(rows);
+                               });
     }
 }
 
@@ -3261,9 +5613,269 @@ void MainWindow::onDebugExited(int code) {
     clearFrameMarks();
     m_debug->setRunning(false, false);
     m_gdbBpNums.clear();
-    m_status->setText(code == 0 ? "Program normal çıktı (0)."
-                                : QString("Program çıktı (%1).").arg(code));
+    m_watchNames.clear();
+    // Stage 26: çıkış özeti (kod + süre)
+    const qint64 ms = m_debugT0.isValid() ? m_debugT0.elapsed() : -1;
+    const QString dur = ms < 0 ? "" : QString(" • %1 sn").arg(ms / 1000.0, 0, 'f', 1);
+    m_status->setText(code == 0 ? "Program normal çıktı (0)." + dur
+                                : QString("Program çıktı (%1).").arg(code) + dur);
     toast(code == 0 ? 1 : 2, m_status->text());
+}
+
+// Stage 26: akıllı adım — std:: içine girerse otomatik üstten devam (max 30)
+void MainWindow::debugSmartStep() {
+    if (!m_gdb || !m_gdb->isDebugging()) return;
+    m_smartDepth = 0;
+    m_gdb->execStep();
+}
+
+void MainWindow::onDebugSmartCheck() {
+    if (m_smartDepth < 0 || !m_gdb) return;
+    const bool inLib = m_curFrame.func.startsWith("std::") ||
+                       m_curFrame.file.contains("/usr/include/") ||
+                       m_curFrame.func.startsWith("__");
+    if (inLib && m_smartDepth < 30) {
+        ++m_smartDepth;
+        m_gdb->execNext();
+    } else {
+        m_smartDepth = -1;
+    }
+}
+
+// Stage 26: izleme panelini tazele (varobj güncelle + değerleri oku)
+void MainWindow::refreshWatches() {
+    if (!m_gdb || !m_gdb->isDebugging()) return;
+    if (m_watchNames.isEmpty()) {
+        m_debug->setWatches({});
+        return;
+    }
+    m_gdb->watchUpdateAll([this](QVariantList) {
+        const QStringList exprs = m_watchNames.keys();
+        auto* pending = new int(exprs.size());
+        auto* vals = new QMap<QString, QString>();
+        if (exprs.isEmpty()) {
+            delete pending;
+            delete vals;
+            m_debug->setWatches({});
+            return;
+        }
+        for (const QString& ex : exprs) {
+            m_gdb->watchEvaluate(m_watchNames[ex], [this, ex, pending, vals](QString v) {
+                (*vals)[ex] = v;
+                if (--(*pending) == 0) {
+                    QList<QPair<QString, QString>> items;
+                    for (auto it = vals->constBegin(); it != vals->constEnd(); ++it)
+                        items << qMakePair(it.key(), it.value());
+                    m_debug->setWatches(items);
+                    delete pending;
+                    delete vals;
+                }
+            });
+        }
+    });
+}
+
+void MainWindow::debugAddWatch(const QString& expr) {
+    if (!m_gdb || !m_gdb->isDebugging()) {
+        toast(0, "Önce hata ayıklamayı başlatın");
+        return;
+    }
+    m_gdb->watchCreate(expr, [this, expr](QString name) {
+        if (name.isEmpty()) {
+            toast(2, "İzleme eklenemedi: " + expr.left(60));
+            return;
+        }
+        m_watchNames[expr] = name;
+        refreshWatches();
+    });
+}
+
+void MainWindow::debugRemoveWatch(const QString& expr) {
+    if (m_watchNames.contains(expr) && m_gdb) m_gdb->watchDelete(m_watchNames[expr]);
+    m_watchNames.remove(expr);
+    refreshWatches();
+}
+
+void MainWindow::debugReadMemory(const QString& addr) {
+    if (!m_gdb || !m_gdb->isDebugging()) return;
+    m_gdb->memoryRead(addr, 64, [this, addr](QString dump) {
+        m_debug->setMemory(addr, dump.isEmpty() ? "(okunamadı)" : dump);
+    });
+}
+
+void MainWindow::debugSelectThread(const QString& id) {
+    if (!m_gdb || !m_gdb->isDebugging() || id.isEmpty()) return;
+    m_curThread = id;
+    m_gdb->threadSelect(id);
+    refreshDebugVars(0);
+}
+
+void MainWindow::debugSetVariable(const QString& expr) {
+    if (!m_gdb || !m_gdb->isDebugging()) return;
+    bool ok = false;
+    const QString v = QInputDialog::getText(this, "Değeri Değiştir",
+                                            expr + " =", QLineEdit::Normal, QString(), &ok);
+    if (!ok) return;
+    m_gdb->setVariable(expr, v, [this, expr](bool good) {
+        toast(good ? 1 : 2, good ? "Atandı: " + expr : "Atama başarısız");
+        refreshDebugVars(0);
+        refreshWatches();
+    });
+}
+
+// Stage 26: koşullu kesme düzenleyici (koşul + hit-count)
+void MainWindow::editBreakpoint(const QString& file, int line) {
+    BreakpointStore store;
+    const QString path = file.isEmpty() && currentEditor() ? currentEditor()->filePath() : file;
+    if (path.isEmpty() || line <= 0) return;
+    if (!store.has(path, line)) {
+        toggleBreakpoint(path, line);
+        if (!store.has(path, line)) return;
+    }
+    bool ok = false;
+    QString cond;
+    for (const Breakpoint& b : store.forFile(path))
+        if (b.line == line) cond = b.condition;
+    cond = QInputDialog::getText(this, "Koşullu Kesme", "Koşul (boşsa her zaman):",
+                                 QLineEdit::Normal, cond, &ok);
+    if (!ok) return;
+    const QString key = QString("%1:%2").arg(path).arg(line);
+    store.setCondition(path, line, cond.trimmed());
+    // gdb tarafını güncelle (numara biliniyorsa koşulu işlet)
+    if (m_gdb && m_gdb->isDebugging() && m_gdbBpNums.contains(key))
+        m_gdb->breakCondition(m_gdbBpNums[key], cond.trimmed());
+    int hits = 0;
+    for (const Breakpoint& b : store.forFile(path))
+        if (b.line == line) hits = b.hitCount;
+    hits = QInputDialog::getInt(this, "Koşullu Kesme", "Kaç vuruşta bir dur (0=her sefer):",
+                                hits, 0, 1000000, 1, &ok);
+    if (!ok) return;
+    store.setHitCount(path, line, hits);
+    if (m_gdb && m_gdb->isDebugging() && m_gdbBpNums.contains(key) && hits > 0)
+        m_gdb->breakAfter(m_gdbBpNums[key], hits);
+    applyBpMarksAll();
+    if (auto* e = currentEditor()) m_debug->setBreakpoints(store.forFile(e->filePath()), e->filePath());
+    toast(1, "Kesme noktası güncellendi");
+}
+
+// Stage 26: fonksiyon kesme noktası (kalıcı liste)
+void MainWindow::debugFunctionBp() {
+    bool ok = false;
+    const QString fn = QInputDialog::getText(this, "Fonksiyon Kesmesi", "Fonksiyon adı:",
+                                             QLineEdit::Normal, QString(), &ok);
+    if (!ok || fn.trimmed().isEmpty()) return;
+    QSettings q("Verso", "VersoCoder");
+    QStringList fns = q.value("debug/funcBps").toStringList();
+    if (!fns.contains(fn.trimmed())) {
+        fns << fn.trimmed();
+        q.setValue("debug/funcBps", fns);
+    }
+    if (m_gdb && m_gdb->isDebugging())
+        m_gdb->breakFunction(fn.trimmed(), [this, fn](QString num) {
+            toast(num.isEmpty() ? 2 : 1, num.isEmpty() ? "Kesme konulamadı"
+                                                       : "Fonksiyon kesmesi #" + num + ": " + fn);
+        });
+    else toast(0, "Kaydedildi — sonraki oturumda kurulacak: " + fn.trimmed());
+}
+
+// Stage 26: izleme noktası (watchpoint)
+void MainWindow::debugWatchpoint() {
+    bool ok = false;
+    const QString ex = QInputDialog::getText(this, "İzleme Noktası", "İfade:",
+                                             QLineEdit::Normal, QString(), &ok);
+    if (!ok || ex.trimmed().isEmpty()) return;
+    const QString acc = QInputDialog::getItem(this, "İzleme Noktası", "Erişim:",
+                                              {"yazma", "okuma", "okuma+yazma"}, 0,
+                                              false, &ok);
+    if (!ok) return;
+    const QString mode = acc.startsWith("okuma+y") ? "rw" : (acc.startsWith("okuma") ? "r" : "");
+    if (!m_gdb || !m_gdb->isDebugging()) {
+        toast(0, "Önce hata ayıklamayı başlatın");
+        return;
+    }
+    m_gdb->breakWatch(ex.trimmed(), mode, [this, ex](QString num) {
+        toast(num.isEmpty() ? 2 : 1, num.isEmpty() ? "İzleme konulamadı"
+                                                   : "İzleme #" + num + ": " + ex);
+    });
+}
+
+// Stage 26: çalışan sürece bağlan (pid listesi)
+void MainWindow::debugAttach() {
+    QProcess ps;
+    ps.start("ps", {"-eo", "pid,comm", "--sort=pid"});
+    if (!ps.waitForFinished(5000)) { toast(3, "ps çalışmadı"); return; }
+    QStringList items;
+    for (const QString& ln : QString::fromUtf8(ps.readAllStandardOutput()).split('\n')) {
+        const QString t = ln.trimmed();
+        if (!t.isEmpty() && t[0].isDigit()) items << t;
+    }
+    if (items.isEmpty()) { toast(0, "Süreç listelenemedi"); return; }
+    bool ok = false;
+    const QString sel = QInputDialog::getItem(this, "Sürece Bağlan", "PID:", items, 0,
+                                              true, &ok);
+    if (!ok) return;
+    const int pid = sel.section(' ', 0, 0).toInt();
+    if (pid <= 0) return;
+    AppSettings s = SettingsManager::instance().load();
+    if (!m_gdb->isRunning() && !m_gdb->start(s.gdbPath)) return;
+    m_termDock->setVisible(true);
+    m_bottomTabs->setCurrentWidget(m_debug);
+    m_debug->setRunning(true, false);
+    m_gdb->attach(pid, [this, pid](bool good) {
+        if (!good) {
+            toast(3, "Bağlanılamadı (yetki? ptrace_scope?)");
+            m_debug->setRunning(false, false);
+            return;
+        }
+        m_debugT0.start();
+        m_status->setText(QString("Bağlanıldı: pid %1").arg(pid));
+    });
+}
+
+// Stage 26: core dump ile aç
+void MainWindow::debugOpenCore() {
+    const QString prog = QFileDialog::getOpenFileName(this, "Çalıştırılabilir dosya", m_root);
+    if (prog.isEmpty()) return;
+    const QString core = QFileDialog::getOpenFileName(this, "Core dosyası",
+                                                      QFileInfo(prog).absolutePath(),
+                                                      "Core (*)");
+    if (core.isEmpty()) return;
+    AppSettings s = SettingsManager::instance().load();
+    if (!m_gdb->isRunning() && !m_gdb->start(s.gdbPath)) return;
+    m_termDock->setVisible(true);
+    m_bottomTabs->setCurrentWidget(m_debug);
+    m_debug->setRunning(true, false);
+    m_gdb->openCore(prog, core, [this](bool good) {
+        if (!good) {
+            toast(3, "Core açılamadı");
+            m_debug->setRunning(false, false);
+            return;
+        }
+        m_debugT0.start();
+        m_gdb->stackFrames([this](QList<DebugFrame> frames) {
+            m_debug->setFrames(frames);
+            if (!frames.isEmpty() && !frames.first().file.isEmpty()) {
+                openFileAt(frames.first().file, frames.first().line + 1);
+                m_status->setText("Core: " + frames.first().func);
+            }
+        });
+        refreshDebugVars(0);
+    });
+}
+
+// Stage 26: kaynak eşleme (substitute-path)
+void MainWindow::debugSubstitutePath() {
+    bool ok = false;
+    const QString from = QInputDialog::getText(this, "Kaynak Eşleme", "Derlemedeki yol:",
+                                               QLineEdit::Normal, QString(), &ok);
+    if (!ok || from.trimmed().isEmpty()) return;
+    const QString to = QInputDialog::getText(this, "Kaynak Eşleme", "Gerçek yol:",
+                                             QLineEdit::Normal, m_root, &ok);
+    if (!ok) return;
+    if (m_gdb && m_gdb->isRunning()) {
+        m_gdb->substitutePath(from, to);
+        toast(1, "Eşlendi: " + from + " → " + to);
+    } else toast(0, "Önce gdb başlatın (oturumda uygulanır)");
 }
 
 void MainWindow::debugEvaluate(const QString& expr) {
@@ -3580,6 +6192,8 @@ void MainWindow::askAi(const QString& system, const QString& prompt,
         done(QString(), e);
     }, Qt::SingleShotConnection);
     // Bağlam bütçesi: model penceresinin yarısı
+    if (ContextBudget::exceeds(prompt, ContextBudget::maxFor(s.contextWindow)))
+        toast(2, ContextBudget::warnText(prompt, ContextBudget::maxFor(s.contextWindow)));
     const QString safe = ContextBudget::trim(prompt, ContextBudget::maxFor(s.contextWindow));
     m_flowAi->chat(s.ollamaModel, system, safe, o);
 }
@@ -3629,6 +6243,8 @@ void MainWindow::requestGhost() {
                 guard->setGhostText(g, m_ghostPrefix);
             },
             Qt::SingleShotConnection);
+    if (ContextBudget::exceeds(prompt, 2048))
+        m_status->setText(ContextBudget::warnText(prompt, 2048));
     m_ghostAi->chat(s.ollamaModel,
                     "Kısa kod tamamlama motoru. Sadece devam kodunu yaz.",
                     ContextBudget::trim(prompt, 2048), opts);
@@ -3750,6 +6366,9 @@ void MainWindow::genTestForCurrent() {
         if (r != QMessageBox::Yes) return;
     }
     AppSettings s = SettingsManager::instance().load();
+    if (ContextBudget::exceeds(e->toPlainText(), ContextBudget::maxFor(s.contextWindow) / 2))
+        toast(2, ContextBudget::warnText(e->toPlainText(),
+                                         ContextBudget::maxFor(s.contextWindow) / 2));
     const QString code = ContextBudget::trim(e->toPlainText(),
                                             ContextBudget::maxFor(s.contextWindow) / 2);
     askAi("Test yazarı.",
@@ -3845,8 +6464,14 @@ void MainWindow::promptLibrary() {
             [this, d](const QString& name, const QString& prompt) {
                 d->close();
                 showSidePanel(3);
+                // Stage 25: {{selection}} {{file}} {{date}} genişletme
+                QString sel, fp;
+                if (auto* e = currentEditor()) {
+                    fp = e->filePath();
+                    sel = e->textCursor().selectedText().left(4000).replace(QChar(0x2029), "\n");
+                }
                 // Seçim/dosya bağlamını AiPanel kendisi ekler (buildContext)
-                m_ai->send(prompt + "\n[" + name + "]");
+                m_ai->send(PromptVars::expand(prompt, sel, fp) + "\n[" + name + "]");
                 m_status->setText("İstem çalıştı: " + name);
             });
     d->show();
@@ -3862,6 +6487,18 @@ void MainWindow::pullModel() {
     const QString model = QInputDialog::getText(this, "Ollama Modeli İndir", "Model:",
                                                 QLineEdit::Normal, s.ollamaModel, &ok);
     if (!ok || model.trimmed().isEmpty()) return;
+    // Stage 25: indirme kuyruğu — biri inerken sonrakiler sıraya girer
+    if (m_pullActive) {
+        if (!m_pullQueue.contains(model.trimmed())) m_pullQueue << model.trimmed();
+        toast(0, QString("Kuyruğa eklendi (%1. sıra)").arg(m_pullQueue.size()));
+        return;
+    }
+    m_pullActive = true;
+    startPull(model.trimmed());
+}
+
+void MainWindow::startPull(const QString& model) {
+    AppSettings s = SettingsManager::instance().load();
     auto* client = new OllamaClient(this);
     client->setHost(s.ollamaHost);
     m_status->setText("İndiriliyor: " + model.trimmed());
@@ -3877,10 +6514,15 @@ void MainWindow::pullModel() {
                 client->deleteLater();
                 toast(1, "Model indirildi: " + m + " (AI panelinden seçin)");
                 m_status->setText("Model hazır: " + m);
+                // Stage 25: kuyruktan devam
+                if (!m_pullQueue.isEmpty()) startPull(m_pullQueue.takeFirst());
+                else m_pullActive = false;
             });
     connect(client, &OllamaClient::error, this, [this, client](const QString& e) {
         client->deleteLater();
         toast(3, "İndirme hatası: " + e.left(150));
+        if (!m_pullQueue.isEmpty()) startPull(m_pullQueue.takeFirst());
+        else m_pullActive = false;
     });
     client->pull(model.trimmed());
 }
@@ -3901,6 +6543,8 @@ void MainWindow::remoteConnectDialog() {
     auto* d = new RemoteConnectDialog(this);
     d->setAttribute(Qt::WA_DeleteOnClose);
     connect(d, &RemoteConnectDialog::connectRequested, this, &MainWindow::remoteConnect);
+    connect(d, &RemoteConnectDialog::importSshRequested, this,
+            &MainWindow::importSshConfig); // Stage 30
     d->show();
 }
 

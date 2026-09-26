@@ -9,6 +9,7 @@ struct Breakpoint {
     bool enabled = true;
     QString condition;
     QString log; // log noktası mesajı (boşsa normal bp)
+    int hitCount = 0; // Stage 26: N vuruşta bir dur (0 = her sefer)
     bool isLogPoint() const { return !log.isEmpty(); }
 };
 
@@ -21,6 +22,7 @@ public:
     bool toggle(const QString& file, int line);
     void setEnabled(const QString& file, int line, bool on);
     void setCondition(const QString& file, int line, const QString& cond);
+    void setHitCount(const QString& file, int line, int n); // Stage 26
     void remove(const QString& file, int line);
     void clearFile(const QString& file);
     void clearAll();

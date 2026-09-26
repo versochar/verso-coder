@@ -166,10 +166,11 @@ int Minimap::lineAtY(int y) const {
 }
 
 void Minimap::mousePressEvent(QMouseEvent* e) {
-    scrollTo(e->position().y() / qMax(1, height()));
+    scrollToLine(lineAtY((int)e->position().y()));
 }
+
 void Minimap::mouseMoveEvent(QMouseEvent* e) {
-    if (e->buttons() & Qt::LeftButton) scrollTo(e->position().y() / qMax(1, height()));
+    if (e->buttons() & Qt::LeftButton) scrollToLine(lineAtY((int)e->position().y()));
     else {
         const int ln = lineAtY((int)e->position().y());
         if (ln != m_lensLine) { m_lensLine = ln; update(); }
@@ -183,4 +184,19 @@ void Minimap::scrollTo(double frac) {
     if (!m_editor) return;
     auto* sb = m_editor->verticalScrollBar();
     sb->setValue(int(frac * (sb->maximum() + sb->pageStep()) - sb->pageStep() / 2));
+}
+
+// Stage 21: satır-merkezli atlama — tıklanan satır görünümün ortasına gelir
+void Minimap::scrollToLine(int line0) {
+    if (!m_editor || line0 < 0) return;
+    QTextBlock b = m_editor->document()->findBlockByNumber(line0);
+    if (!b.isValid()) return;
+    const int y = m_editor->cursorRect(QTextCursor(b)).top();
+    auto* sb = m_editor->verticalScrollBar();
+    sb->setValue(y - sb->pageStep() / 2);
+}
+
+void Minimap::resizeEvent(QResizeEvent* e) {
+    QWidget::resizeEvent(e);
+    scheduleUpdate(); // Stage 21: boyut değişince şeritleri tazele
 }

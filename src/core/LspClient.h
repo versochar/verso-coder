@@ -66,6 +66,23 @@ public:
     void requestDocSymbols(const QString& path, std::function<void(QJsonObject)> h);
     void requestWorkspaceSymbols(const QString& query, std::function<void(QJsonObject)> h);
     void requestFormat(const QString& path, std::function<void(QJsonObject)> h);
+    // Stage 27: derinlik istekleri
+    void requestRangeFormat(const QString& path, int sLine, int sCol, int eLine, int eCol,
+                            std::function<void(QJsonObject)> h);
+    void requestDocumentLink(const QString& path, std::function<void(QJsonObject)> h);
+    void requestDocumentColor(const QString& path, std::function<void(QJsonObject)> h);
+    void requestCodeLens(const QString& path, std::function<void(QJsonObject)> h);
+    void requestSelectionRange(const QString& path, const QList<QPair<int, int>>& positions,
+                               std::function<void(QJsonObject)> h);
+    void requestTypePrepare(const QString& path, int line, int col,
+                            std::function<void(QJsonObject)> h);
+    void requestTypeSupertypes(const QJsonObject& item, std::function<void(QJsonObject)> h);
+    void requestTypeSubtypes(const QJsonObject& item, std::function<void(QJsonObject)> h);
+    void requestPullDiagnostics(const QString& path, std::function<void(QJsonObject)> h);
+    void didChangeConfiguration(const QJsonObject& settings);
+    // Stage 27: ileti günlüğü (teşhis için, en çok 200)
+    QStringList messageLog() const { return m_log; }
+    void clearLog() { m_log.clear(); }
     void requestInlay(const QString& path, int startLine, int endLine,
                       std::function<void(QJsonObject)> h);
     void requestSemantic(const QString& path, std::function<void(QJsonObject)> h);
@@ -81,6 +98,8 @@ signals:
     void started();
     void diagnosticsReady(const QString& path, const QList<LspDiag>& diags);
     void serverError(const QString& msg);
+    // Stage 27: $/progress (begin/report/end)
+    void progressUpdate(const QString& kind, const QString& title, int percent);
 
 private slots:
     void onReadyRead();
@@ -99,6 +118,8 @@ private:
     int m_initId = -1;
     bool m_ready = false;
     QString m_rootUri;
+    QStringList m_log; // Stage 27: son iletiler (yön + özet)
+    void logMsg(const QString& dir, const QString& text);
     QJsonObject m_caps; // Stage 13: sunucu yetenekleri (initialize result.capabilities)
     QMap<int, std::function<void(QJsonObject)>> m_handlers;
     QMap<QString, int> m_versions; // path -> version
