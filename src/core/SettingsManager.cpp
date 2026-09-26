@@ -67,6 +67,12 @@ AppSettings SettingsManager::load() const {
     s.aiScheduleMin     = qMax(0, q.value("ai/scheduleMin", 0).toInt());
     s.autoReload        = q.value("editor/autoReload", false).toBool();
     s.crashReport       = q.value("app/crashReport", false).toBool();
+    // Stage 33
+    s.aiVisionEnabled   = q.value("ai/vision", true).toBool();
+    s.aiEmbedModel      = q.value("ai/embedModel", "").toString();
+    s.aiKeepAlive       = q.value("ai/keepAlive", 5).toInt();
+    s.aiParallel        = qBound(1, q.value("ai/parallel", 1).toInt(), 8);
+    s.aiSummaryTokens   = qMax(0, q.value("ai/summaryTokens", 2200).toInt());
     // Stage 9: görünüm
     s.accentColor    = q.value("ui/accent", "").toString();
     s.uiFontFamily   = q.value("ui/fontFamily", "").toString();
@@ -209,6 +215,12 @@ void SettingsManager::save(const AppSettings& s) const {
     q.setValue("ai/tokenBudget", s.aiTokenBudget);
     q.setValue("test/onSave", s.testOnSave);
     q.setValue("ai/scheduleMin", s.aiScheduleMin);
+    // Stage 33
+    q.setValue("ai/vision", s.aiVisionEnabled);
+    q.setValue("ai/embedModel", s.aiEmbedModel);
+    q.setValue("ai/keepAlive", s.aiKeepAlive);
+    q.setValue("ai/parallel", s.aiParallel);
+    q.setValue("ai/summaryTokens", s.aiSummaryTokens);
     q.setValue("editor/autoReload", s.autoReload);
     q.setValue("app/crashReport", s.crashReport);
     m_cache = s;          // Stage 32: kaydedileni önbellekle (yeniden okuma yok)

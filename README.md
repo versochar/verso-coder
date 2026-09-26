@@ -42,7 +42,7 @@ cmake --build build -j
 ./build/verso-coder
 ```
 
-## Yol haritası (20 + 347 özellik, 32 stage — tamamlandı)
+## Yol haritası (20 + 362 özellik, 33 stage — tamamlandı)
 
 - **Stage 1 — Editör temeli ✅ (yapıldı):** oturum geri yükleme (açık dosyalar + aktif sekme + imleç), otomatik kaydetme (2 sn) + crash yedekleme, harici değişiklik uyarısı, hızlı açma (Ctrl+P fuzzy), font boyutu + sekme genişliği ayarı, status bar'da Ln/Col + LF/CRLF + UTF-8, otomatik parantez kapatma.
 - **Stage 5 — Editör gücü ✅ (yapıldı):** çoklu imleç (Alt+tık, Ctrl+D, Esc), kod katlama (gutter ▸/▾, Ctrl+Shift+[/], oturumda kalıcı), akıllı girinti + `}` geri-girinti + blok Tab, bracket eşleşme (derinlik renkli) + girinti kılavuzları, aramada ±3 satır önizleme, split editör (2 grup + taşı/böl + grup oturumu), satır işlemleri (taşı/çoğalt/sırala/trim), .editorconfig, büyük-dosya önizleme modu, hunspell yazım denetimi (TR+EN, F7, sağ-tık öneri).
@@ -218,7 +218,13 @@ src/widgets/MergeEditorDialog.* + SearchEditorDialog.* + NewProjectDialog.* + Cl
 tests/test_stage31.cpp                → Stage 31 bütünlük/geri çekilme/rotasyon/kota/fuzz testleri
 src/core/Stability.* + CrashHandler.* → bütünlük mührü, geri çekilme, log rotasyonu, çökme izi
 tests/test_stage32.cpp                → Stage 32 hız yardımcıları/artımlı RAG/ters indeks testleri
+tests/test_stage33.cpp                → Stage 33 yetenek/görü/gömme/hibrit/puan/özet/dallanma testleri
+src/core/ModelCapabilities.* + ImageUtil.* → model yeteneği + görsel hazırlama
+src/core/Embedding.* + EmbeddingClient.* + HybridRanker.* → vektör matematiği + gömme istemcisi + RRF
+src/core/ResponseScorer.* + ConversationSummarizer.* → yanıt kalite puanı + sohbet özeti
+src/widgets/ModelArenaDialog.*        → çok-modelli arena
 src/core/PerfTools.*                  → ikili sez, boyut süzgeci, LRU önbellek, ters indeks
+- **Stage 33 — AI Derinliği ✅ (yapıldı):** model yetenek algılama (`ModelCapabilities`: `/api/show` `capabilities` + ad sezgisi; görü/araç/gömme rozetleri), görü (vision) girdisi (`ImageUtil` ölçekle+sıkıştır, `OllamaClient::chatWithImages/chatStreamWithImages` + `showModel/showSync`), AI panelinde görsel ek rozetleri (🖼, boyut tavanı, temizle), gömme istemcisi (`EmbeddingClient` `/api/embed`, eski biçim uyumu), vektör matematiği (`Embedding`: seri/çöz, kosinüs, normalizasyon, ortalama), hibrit sıralayıcı (`HybridRanker` RRF + ağırlıklı birleşim), RAG v2 anlamsal+hibrit (`RagIndexer::setEmbedder/embedAll/queryHybrid`; gömme modeli yoksa anahtar kelimeye düşer), yanıt kalite puanı (`ResponseScorer` sezgisel+kullanıcı oyu), istem galerisi (`PromptLibraryDialog`: arama/önizleme/düzenleme/içe-dışa aktarma JSON + `PromptVars` genişletme), çok-modelli arena (`ModelArenaDialog` eşzamanlı koşu + süre/token/kalite), sohbet dallanma (`ChatStore` `id/parent` ağacı, `pathTo/childrenOf/leafIds`, ⑂ dal seçici), oturum özeti (`ConversationSummarizer` eşik/özet/birleştirme; AI panelinde bağlam sıkıştırma), AI ayarları (`ai/vision`, `ai/embedModel`, `ai/keepAlive`, `ai/parallel`, `ai/summaryTokens`), `test_stage33`.
 - **Stage 32 — Hız ✅ (yapıldı):** arama çok çekirdekli (`blockingMapped` + thread havuzu), ikili sez + 4 MB boyut tavanı, RAG artımlı indeksleme (mtime önbelleği) + ters indeksten aday daraltma, ayar önbelleği (SettingsManager), ikon önbelleği (QCache), minimap çubuk katmanı önbelleği (QPixmap), gezgin `uniformRowHeights` + sembolik bağ/özel ikon optimizasyonu, terminal/görev çıktısında blok tavanı (20k), büyük dosya kipi eşikleri (`largeFileMode`), başlangıç bütçesi bildirimi (4000 ms), `test_stage32`.
 - **Stage 31 — Soğukkanlılık ✅ (yapıldı):** oturum bütünlük mührü + güvenli kip, ayar şema + çökme raporu anahtarı, bellek tavanı (8 MB salt-okunur), izleyici taşma koruması, LSP fırtına koruması (üstel geri çekilme), eklenti yavaş rozeti, ağ zaman aşımları, çökme izi (opt-in, backtrace, `-rdynamic`), yedek kotası (50 MB/90 gün), RAG iptal yolu, sızıntı taraması (temiz), `test_stage31` (400 tohumlu MI fuzz dahil).
 - **Stage 30 — İş Akışı Derinliği ✅ (yapıldı):** 3-yönlü birleştirme düzenleyicisi, arama düzenleyicisi (işaretle + toplu değiştir), proje şablonları (C++/Python/Qt sihirbazı), dosya şablonları (`*.tpl` + değişkenler), terminal çoklu sekme + kabuk profilleri, SSH config içe aktarma, eklenti `fetch` (`net` izni), pano yöneticisi (sabitleme), sık kullanılan komutlar (palet sıklık bonusu), clang-format yedeği, görev zinciri koşturma, uzak yeniden bağlanma, sohbetlerde arama, zamanlanmış AI denetimi, `test_stage30`.

@@ -113,6 +113,12 @@ struct AppSettings {
     bool    crashReport = false;          // Stage 31: çökme izi yaz (opt-in)
     bool    testOnSave = false;           // Stage 25: kaydetmede ilgili testi koştur
     int     aiScheduleMin = 0;            // Stage 30: periyodik AI denetimi (dk, 0=kapalı)
+    // --- Stage 33: görü + gömme + hız ---
+    bool    aiVisionEnabled = true;       // görsel girdi ekleri
+    QString aiEmbedModel = "";            // gömme modeli ("" = anlamsal RAG kapalı)
+    int     aiKeepAlive = 5;              // Ollama keep_alive (dk; -1 süresiz, 0 hemen)
+    int     aiParallel = 1;               // eşzamanlı istek
+    int     aiSummaryTokens = 2200;       // sohbet özeti eşiği (token, 0=kapalı)
 };
 
 class SettingsManager {

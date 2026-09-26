@@ -1,6 +1,8 @@
 #include "AiPanel.h"
+#include "../core/EmbeddingClient.h"
 #include "../core/SettingsManager.h"
 #include "ApplyEditDialog.h"
+#include "ModelArenaDialog.h"
 #include "PatchReviewDialog.h"
 #include <QAction>
 #include <QCheckBox>
@@ -25,6 +27,7 @@
 #include <QTextBrowser>
 #include <QVBoxLayout>
 #include <QtConcurrent>
+#include <memory>
 
 static QString chatDir() {
     QString d = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/chats";
@@ -136,10 +139,26 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     bUndo->setToolTip("Son yanıtı geri al (dallan)");
     bUndo->setFixedWidth(36);
     connect(bUndo, &QPushButton::clicked, this, &AiPanel::undoLastAnswer);
+    // Stage 33: görsel ek / arena / dallar
+    auto* bImg = new QPushButton("🖼", this);
+    bImg->setToolTip("Görsel ekle (vision destekli modeller için)");
+    bImg->setFixedWidth(36);
+    connect(bImg, &QPushButton::clicked, this, &AiPanel::attachImages);
+    auto* bArena = new QPushButton("⚔", this);
+    bArena->setToolTip("Çok-modelli arena: aynı istemi modellere koştur");
+    bArena->setFixedWidth(36);
+    connect(bArena, &QPushButton::clicked, this, &AiPanel::sendArena);
+    auto* bBranch = new QPushButton("⑂", this);
+    bBranch->setToolTip("Sohbet dallanma ağacı");
+    bBranch->setFixedWidth(36);
+    connect(bBranch, &QPushButton::clicked, this, &AiPanel::showBranches);
     for (auto* b : {bExplain, bFix, bTest, bCommit, bApply}) qRow->addWidget(b);
     qRow->addWidget(bExport);
     qRow->addWidget(bCompare);
     qRow->addWidget(bUndo);
+    qRow->addWidget(bImg);
+    qRow->addWidget(bArena);
+    qRow->addWidget(bBranch);
 
     auto* row = new QHBoxLayout();
     m_input = new QLineEdit(this);
@@ -174,6 +193,13 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     lay->addLayout(cRow);
     lay->addLayout(aRow);
     lay->addLayout(infoRow);
+    // Stage 33: görsel ek rozetleri
+    m_chipBar = new QWidget(this);
+    m_chipBar->setVisible(false);
+    auto* chipLay = new QHBoxLayout(m_chipBar);
+    chipLay->setContentsMargins(0, 0, 0, 0);
+    chipLay->addStretch(1);
+    lay->addWidget(m_chipBar);
     lay->addWidget(m_view, 1);
     lay->addLayout(qRow);
     lay->addLayout(row);
@@ -185,6 +211,10 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
         AppSettings s = SettingsManager::instance().load();
         s.ollamaModel = t;
         SettingsManager::instance().save(s);
+        if (!t.isEmpty()) {
+            m_caps[t] = ModelCapabilities::fromName(t); // anlık sezgi
+            m_client.showModel(t);                      // yetenekleri doğrula
+        }
     });
     connect(m_send, &QPushButton::clicked, this, [this]() { send(); });
     connect(m_input, &QLineEdit::returnPressed, this, [this]() { send(); });
@@ -205,8 +235,21 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
         m_ragLabel->setText("indeksleniyor (arka plan)...");
         bIndex->setEnabled(false);
         m_rag.clear();
-        m_ragWatcher.setFuture(QtConcurrent::run([this, root]() {
+        // Stage 33: gömme modeli tanımlıysa anlamsal vektörleri de üret
+        const AppSettings rs = SettingsManager::instance().load();
+        const QString embedModel = rs.aiEmbedModel.trimmed();
+        const QString host = rs.ollamaHost;
+        m_ragWatcher.setFuture(QtConcurrent::run([this, root, embedModel, host]() {
             int n = m_rag.indexProjectIncremental(root); // Stage 32: artımlı
+            if (!embedModel.isEmpty() && m_rag.chunkCount() > 0) {
+                auto ec = std::make_shared<EmbeddingClient>();
+                ec->setHost(host);
+                m_rag.setEmbedder([ec, embedModel](const QStringList& texts) {
+                    QString err;
+                    return ec->embedSync(embedModel, texts, err, 60000);
+                });
+                m_rag.embedAll(16);
+            }
             return qMakePair(m_rag.fileCount(), n);
         }));
     });
@@ -254,8 +297,7 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     m_history->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_history, &QComboBox::customContextMenuRequested, this, &AiPanel::openSessionMenu);
 
-    connect(&m_client, &OllamaClient::modelsReady, this, [this](const QStringList& ms) {
-        emit aiModelsChanged(!ms.isEmpty()); // Stage 25
+    connect(&m_client, &OllamaClient::modelsReady, this, [this](const QStringList& ms) {        emit aiModelsChanged(!ms.isEmpty()); // Stage 25
         m_modelsPending = false;
         QString cur = m_models->currentText();
         m_models->clear();
@@ -272,6 +314,10 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
                 "3) Yukarıdaki ▶ düğmesiyle başlatıp ⟳ ile listeyi yenileyin");
         }
     });
+    connect(&m_client, &OllamaClient::modelShow, this,
+            [this](const QString& model, const QJsonObject& show) {
+                m_caps[model] = ModelCapabilities::detect(model, show); // Stage 33
+            });
     connect(&m_client, &OllamaClient::chatReply, this, [this](const QString& t) {
         m_lastResponse = t;
         m_view->append("<hr><b>AI:</b><br>" + t.toHtmlEscaped().replace("\n", "<br>"));
@@ -432,6 +478,11 @@ void AiPanel::reloadSettings() {
     m_stream->setChecked(s.aiStreaming);
     int ctxIdx = (s.contextMode == "selection") ? 1 : (s.contextMode == "rag") ? 2 : (s.contextMode == "none") ? 3 : 0;
     m_ctxMode->setCurrentIndex(ctxIdx);
+    m_client.setKeepAlive(s.aiKeepAlive); // Stage 33: modeli sıcak tut
+    if (!s.ollamaModel.isEmpty()) {
+        m_caps[s.ollamaModel] = ModelCapabilities::fromName(s.ollamaModel);
+        m_client.showModel(s.ollamaModel);
+    }
     refreshProfileBox();
     refreshModels();
 }
@@ -460,12 +511,28 @@ QString AiPanel::buildContext(const QString& question) {
         emit projectRootRequested(root);
         if (m_rag.isEmpty()) m_rag.indexProject(root);
         QString q = question.isEmpty() ? m_input->text() : question;
-        auto hits = m_rag.query(q.isEmpty() ? "main" : q, 4);
+        if (q.isEmpty()) q = "main";
+        // Stage 33: hibrit (anahtar kelime + anlamsal) RAG
+        const AppSettings rs = SettingsManager::instance().load();
+        QList<RagChunk> hits;
+        bool semantic = false;
+        if (!rs.aiEmbedModel.trimmed().isEmpty() && m_rag.vectorCount() > 0) {
+            EmbeddingClient ec;
+            ec.setHost(rs.ollamaHost);
+            QString err;
+            const auto qv = ec.embedSync(rs.aiEmbedModel.trimmed(), {q}, err, 8000);
+            if (!qv.isEmpty()) {
+                hits = m_rag.queryHybrid(q, qv.first(), 4);
+                semantic = true;
+            }
+        }
+        if (hits.isEmpty() && !semantic) hits = m_rag.query(q, 4);
         if (hits.isEmpty()) {
             base = "\n(Not: RAG indeksinde ilgili parça bulunamadı.)\n";
         } else {
-            m_ragLabel->setText(QString("indeks: %1 dosya, %2 parça (RAG kullanıldı)")
-                                    .arg(m_rag.fileCount()).arg(m_rag.chunkCount()));
+            m_ragLabel->setText(QString("indeks: %1 dosya, %2 parça (%3)")
+                                    .arg(m_rag.fileCount()).arg(m_rag.chunkCount())
+                                    .arg(semantic ? "hibrit" : "RAG kullanıldı"));
             base = "\n[Proje bağlamı (RAG)]\n" + RagIndexer::formatContext(hits) + "\n";
         }
     } else if (mode == 0) {
@@ -476,7 +543,7 @@ QString AiPanel::buildContext(const QString& question) {
     }
 
     // Stage 7: @-bağlam etiketleri
-    if (!ContextResolver::hasMentions(question)) return base;
+    if (!ContextResolver::hasMentions(question)) return base + conversationContext();
     QString root;
     emit projectRootRequested(root);
     QString curPath, curContent;
@@ -490,7 +557,7 @@ QString AiPanel::buildContext(const QString& question) {
     auto rr = m_ctx.resolve(question, root, curPath, sel, problemsText());
     if (!rr.warnings.isEmpty())
         m_view->append("<i style='color:#cca700'>" + rr.warnings.join("<br>") + "</i>");
-    return base + rr.text;
+    return base + rr.text + conversationContext();
 }
 
 QString AiPanel::problemsText() {
@@ -540,16 +607,31 @@ void AiPanel::send(const QString& preset) {
 void AiPanel::beginAnswer(const QString& model, const AppSettings& s, const QString& prompt) {
     setBusy(true);
     m_lastResponse.clear();
+    const QStringList imgs = currentImageBase64(); // Stage 33
+    bool vision = false;
+    if (!imgs.isEmpty()) {
+        vision = s.aiVisionEnabled && capsFor(model).vision;
+        if (!vision)
+            m_view->append("<i style='color:#cca700'>Bu model görsel desteklemiyor; "
+                           "ekler yok sayıldı.</i>");
+    }
     if (m_stream->isChecked()) {
         m_view->append("<hr><b>AI:</b><br>");
         m_streamCursor = QTextCursor(m_view->document());
         m_streamCursor.movePosition(QTextCursor::End);
         m_streamActive = true;
-        m_client.chatStream(model, s.systemPrompt, prompt, currentOptions());
+        if (vision)
+            m_client.chatStreamWithImages(model, s.systemPrompt, prompt, currentOptions(), imgs);
+        else
+            m_client.chatStream(model, s.systemPrompt, prompt, currentOptions());
     } else {
         m_view->append("<i>yazıyor...</i>");
-        m_client.chat(model, s.systemPrompt, prompt, currentOptions());
+        if (vision)
+            m_client.chatWithImages(model, s.systemPrompt, prompt, currentOptions(), imgs);
+        else
+            m_client.chat(model, s.systemPrompt, prompt, currentOptions());
     }
+    if (!imgs.isEmpty()) clearImages();
 }
 
 void AiPanel::stop() {
@@ -655,6 +737,8 @@ void AiPanel::undoLastAnswer() {
     m_chatStore->save(sess);
     m_input->setText(lastUser);
     m_input->setFocus();
+    m_convSummary.clear();     // Stage 33: özeti geçersiz kıl
+    m_activeBranch.clear();    // yeni gönderim doğrusal devam etsin
     m_view->append("<hr><i>↩ Son yanıt geri alındı — soru yukarıda, değiştirip tekrar gönderin.</i>");
 }
 
@@ -747,6 +831,9 @@ void AiPanel::loadSession(const QString& id) {
             m_view->append("<hr><b>AI:</b><br>" + m.text.toHtmlEscaped().replace("\n", "<br>"));
     }
     if (!s.messages.isEmpty()) m_lastResponse = s.messages.last().text;
+    // Stage 33: dal ve özet durumunu sıfırla
+    m_activeBranch = s.messages.isEmpty() ? QString() : s.messages.last().id;
+    m_convSummary.clear();
 }
 
 void AiPanel::openSessionMenu(const QPoint& pos) {
@@ -787,7 +874,11 @@ void AiPanel::persistMessage(const QString& role, const QString& text) {
     m.role = role;
     m.text = text;
     m.whenMs = QDateTime::currentMSecsSinceEpoch();
-    m_chatStore->append(m_activeSessionId, m);
+    // Stage 33: etkin dala bağla (yoksa doğrusal)
+    if (m_activeBranch.isEmpty())
+        m_chatStore->append(m_activeSessionId, m);
+    else
+        m_activeBranch = m_chatStore->appendMsg(m_activeSessionId, m_activeBranch, m);
     refreshHistory();
 }
 
@@ -891,6 +982,167 @@ void AiPanel::runAgent(const QString& task) {
     m_agentRunning = false;
     setBusy(false);
     if (!m_patchQueue.isEmpty()) showPatchReview();
+}
+
+// --- Stage 33: görsel ekler / arena / dallar / özet ---
+
+ModelCapabilities AiPanel::capsFor(const QString& model) const {
+    if (m_caps.contains(model)) return m_caps.value(model);
+    return ModelCapabilities::fromName(model);
+}
+
+QStringList AiPanel::currentImageBase64() const {
+    QStringList out;
+    for (const PreparedImage& p : m_images)
+        if (p.valid()) out << QString::fromLatin1(ImageUtil::base64(p.bytes));
+    return out;
+}
+
+void AiPanel::attachImages() {
+    const QStringList paths = QFileDialog::getOpenFileNames(
+        this, "Görsel ekle", QString(), "Resimler (*.png *.jpg *.jpeg *.bmp *.webp *.gif)");
+    if (paths.isEmpty()) return;
+    const AppSettings s = SettingsManager::instance().load();
+    const QString model = m_models->currentText().trimmed();
+    if (!s.aiVisionEnabled || !capsFor(model).vision)
+        m_view->append("<i style='color:#cca700'>Bu model görsel desteklemiyor ya da görü kapalı; "
+                       "ekler gönderimde yok sayılır.</i>");
+    int added = 0;
+    for (const QString& p : paths) {
+        const QImage img(p);
+        if (img.isNull()) continue;
+        PreparedImage pi = ImageUtil::prepare(img, 1024, 80);
+        if (!pi.valid()) continue;
+        if (!ImageUtil::withinBudget(pi.bytes, 4LL * 1024 * 1024)) {
+            m_view->append("<i style='color:#cca700'>Görsel çok büyük, atlandı.</i>");
+            continue;
+        }
+        m_images << pi;
+        ++added;
+    }
+    if (added) refreshImageChips();
+}
+
+void AiPanel::clearImages() {
+    if (m_images.isEmpty()) return;
+    m_images.clear();
+    refreshImageChips();
+}
+
+void AiPanel::refreshImageChips() {
+    if (!m_chipBar) return;
+    auto* lay = qobject_cast<QHBoxLayout*>(m_chipBar->layout());
+    if (!lay) return;
+    while (QLayoutItem* it = lay->takeAt(0)) {
+        if (QWidget* w = it->widget()) w->deleteLater();
+        delete it;
+    }
+    if (m_images.isEmpty()) {
+        m_chipBar->setVisible(false);
+        return;
+    }
+    auto* title = new QLabel(QString("🖼 %1 görsel eklendi").arg(m_images.size()), m_chipBar);
+    title->setStyleSheet("color:#858585;font-size:11px;");
+    auto* bClear = new QPushButton("temizle", m_chipBar);
+    bClear->setFixedHeight(20);
+    connect(bClear, &QPushButton::clicked, this, &AiPanel::clearImages);
+    lay->addWidget(title);
+    lay->addWidget(bClear);
+    lay->addStretch(1);
+    m_chipBar->setVisible(true);
+}
+
+// Sohbet geçmişini sıkıştır: eski turlar yerel özet, son turlar tam metin.
+QString AiPanel::conversationContext() {
+    const AppSettings s = SettingsManager::instance().load();
+    if (s.aiSummaryTokens <= 0 || m_activeSessionId.isEmpty() || !m_chatStore) return {};
+    ChatSession sess = m_chatStore->load(m_activeSessionId);
+    QList<ConvTurn> turns;
+    for (const ChatMessage& m : sess.messages)
+        if (m.role == "user" || m.role == "ai") turns << ConvTurn{m.role, m.text};
+    if (turns.size() < 4) return {}; // kısa sohbet: geçmiş eklemeye gerek yok
+
+    if (ConversationSummarizer::needed(turns, m_convSummary, s.aiSummaryTokens, 6)) {
+        QString summary;
+        for (const ConvTurn& t : ConversationSummarizer::olderTurns(turns, 6)) {
+            const QString line = (t.role == "ai" ? "AI: " : "Sen: ") +
+                                 t.text.section('\n', 0, 0).left(160);
+            if (summary.size() + line.size() > 2000) break;
+            summary += line + "\n";
+        }
+        m_convSummary = summary.trimmed();
+    }
+    if (m_convSummary.isEmpty()) return {};
+    QList<ConvTurn> recent;
+    for (int i = qMax(0, turns.size() - 6); i < turns.size(); ++i) recent << turns[i];
+    const QString merged = ConversationSummarizer::merge(m_convSummary, recent, 6000);
+    return merged.isEmpty() ? QString() : "\n[Konuşma geçmişi]\n" + merged + "\n";
+}
+
+void AiPanel::showBranches() {
+    if (!m_chatStore || m_activeSessionId.isEmpty()) {
+        m_view->append("<i>Dallanacak etkin sohbet yok.</i>");
+        return;
+    }
+    const ChatSession s = m_chatStore->load(m_activeSessionId);
+    const QStringList leaves = ChatStore::leafIds(s);
+    if (leaves.size() <= 1) {
+        m_view->append("<i>Bu sohbette tek dal var.</i>");
+        return;
+    }
+    QStringList labels;
+    for (const QString& leaf : leaves) {
+        const auto path = ChatStore::pathTo(s, leaf);
+        const QString last = path.isEmpty() ? QString() : path.last().text.section('\n', 0, 0).left(50);
+        labels << QString("%1 mesaj · …%2").arg(path.size()).arg(last);
+    }
+    bool ok = false;
+    const QString pick =
+        QInputDialog::getItem(this, "Sohbet Dalları", "Dal seç:", labels, 0, false, &ok);
+    if (!ok) return;
+    const int idx = labels.indexOf(pick);
+    if (idx >= 0) renderBranch(s, leaves[idx]);
+}
+
+void AiPanel::renderBranch(const ChatSession& s, const QString& leafId) {
+    const auto path = ChatStore::pathTo(s, leafId);
+    m_view->clear();
+    m_convSummary.clear();
+    m_activeBranch = leafId;
+    for (const ChatMessage& m : path) {
+        if (m.role == "user")
+            m_view->append("<b>Sen:</b> " + m.text.toHtmlEscaped().replace("\n", "<br>"));
+        else
+            m_view->append("<b>AI:</b> " + m.text.toHtmlEscaped().replace("\n", "<br>"));
+    }
+    m_view->append(QString("<i>⑂ Dal görüntüleniyor (%1 mesaj). Yeni mesajlar bu dala eklenir.</i>")
+                       .arg(path.size()));
+}
+
+void AiPanel::sendArena() {
+    const AppSettings s = SettingsManager::instance().load();
+    m_client.setHost(s.ollamaHost);
+    QStringList models;
+    for (int i = 0; i < m_models->count(); ++i) {
+        const QString t = m_models->itemText(i).trimmed();
+        if (!t.isEmpty() && !models.contains(t)) models << t;
+    }
+    const QString cur = m_models->currentText().trimmed();
+    if (!cur.isEmpty() && !models.contains(cur)) models.prepend(cur);
+    if (models.isEmpty()) {
+        m_view->append("<i>Arena için önce model yükleyin (⟳).</i>");
+        return;
+    }
+    QString prompt = m_input->text().trimmed();
+    if (prompt.isEmpty()) {
+        m_view->append("<i>Arena için bir istem yazın.</i>");
+        return;
+    }
+    prompt += "\n" + buildContext(prompt);
+    auto* d = new ModelArenaDialog(s.ollamaHost, models, s.systemPrompt, prompt,
+                                   currentOptions(), this);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    d->show();
 }
 
 void AiPanel::fixProblem(const QString& path, int line, const QString& message, const QString& code) {

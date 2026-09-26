@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "1.4.0"; }
+QString AboutInfo::version() { return "1.5.0"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,10 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "1.5.0 (Stage 31-34)\n"
+        "  • AI derinliği: görü (vision) girdisi, gömme tabanlı hibrit RAG v2, istem galerisi\n"
+        "  • Çok-modelli arena, sohbet dallanma ağacı, yanıt kalite puanı, oturum özeti\n"
+        "  • Kararlılık (bütünlük mührü, çökme izi, bellek tavanı) + hız (paralel arama, artımlı RAG)\n"
         "1.4.0 (Stage 19-22)\n"
         "  • Canlı işbirliği (WebSocket) + görev zinciri (dependsOn) + eklenti API v1\n"
         "  • Yeni dosya dil seçimi (20 dil + iskelet) + ilk-çalıştırma sihirbazı\n"

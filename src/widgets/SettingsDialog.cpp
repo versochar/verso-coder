@@ -197,6 +197,34 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     af->addRow("", m_ghost);
     af->addRow("Context Window:", m_ctx);
     af->addRow("Token bütçesi:", m_budget);
+    // Stage 33: görü + anlamsal RAG + sıcak tutma
+    m_aiVision = new QCheckBox("Görsel girdi (vision) etkin", ai);
+    m_aiVision->setChecked(s.aiVisionEnabled);
+    m_aiVision->setToolTip("Görü destekli modellerde resim eki göndermeyi açar");
+    af->addRow("", m_aiVision);
+    m_embed = new QLineEdit(s.aiEmbedModel, ai);
+    m_embed->setPlaceholderText("örn. nomic-embed-text (boş = anlamsal RAG kapalı)");
+    m_embed->setToolTip("Anlamsal RAG için gömme modeli; boş bırakılırsa anahtar kelime araması kullanılır");
+    af->addRow("Gömme modeli:", m_embed);
+    m_keepAlive = new QSpinBox(ai);
+    m_keepAlive->setRange(-1, 120);
+    m_keepAlive->setSuffix(" dk");
+    m_keepAlive->setSpecialValueText("Süresiz");
+    m_keepAlive->setValue(s.aiKeepAlive);
+    m_keepAlive->setToolTip("-1 = model bellekte süresiz kalsın; 0 = her istekten sonra boşalt");
+    af->addRow("Modeli sıcak tut:", m_keepAlive);
+    m_parallel = new QSpinBox(ai);
+    m_parallel->setRange(1, 8);
+    m_parallel->setValue(s.aiParallel);
+    m_parallel->setToolTip("Bilgi amaçlı: Ollama sunucu OLLAMA_NUM_PARALLEL değeri");
+    af->addRow("Eşzamanlı istek:", m_parallel);
+    m_summary = new QSpinBox(ai);
+    m_summary->setRange(0, 200000);
+    m_summary->setSingleStep(500);
+    m_summary->setSpecialValueText("Kapalı");
+    m_summary->setValue(s.aiSummaryTokens);
+    m_summary->setToolTip("Sohbet geçmişi bu token eşiğini aşınca eski turlar özetlenir (0 = kapalı)");
+    af->addRow("Sohbet özeti eşiği:", m_summary);
     af->addRow("GPU Backend:", m_backend);
     af->addRow("GPU Offload (num_gpu):", m_gpu);
     af->addRow("Temperature:", tempRow);
@@ -661,6 +689,12 @@ void SettingsDialog::saveAll() {    AppSettings cur = SettingsManager::instance(
     s.ollamaModel = m_model->currentText().trimmed();
     s.contextWindow = m_ctx->value();
     s.aiTokenBudget = m_budget ? m_budget->value() : 0; // Stage 25
+    // Stage 33
+    if (m_aiVision) s.aiVisionEnabled = m_aiVision->isChecked();
+    if (m_embed) s.aiEmbedModel = m_embed->text().trimmed();
+    if (m_keepAlive) s.aiKeepAlive = m_keepAlive->value();
+    if (m_parallel) s.aiParallel = m_parallel->value();
+    if (m_summary) s.aiSummaryTokens = m_summary->value();
     s.gpuBackend = m_backend->currentText();
     s.gpuLayers = (s.gpuBackend == "CPU") ? 0 : m_gpu->value();
     s.temperature = m_tempSlider->value() / 100.0;

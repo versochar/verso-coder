@@ -37,6 +37,13 @@ set(SOURCES
     src/core/ContextResolver.cpp
     src/core/ChatStore.cpp
     src/core/TokenStats.cpp
+    src/core/ModelCapabilities.cpp
+    src/core/ImageUtil.cpp
+    src/core/Embedding.cpp
+    src/core/EmbeddingClient.cpp
+    src/core/HybridRanker.cpp
+    src/core/ResponseScorer.cpp
+    src/core/ConversationSummarizer.cpp
     src/core/StartupArgs.cpp
     src/core/ToolchainProbe.cpp
     src/core/TaskRunner.cpp
@@ -192,6 +199,7 @@ set(SOURCES
     src/widgets/NewProjectDialog.cpp
     src/widgets/ClipboardDialog.cpp
     src/widgets/PromptLibraryDialog.cpp
+    src/widgets/ModelArenaDialog.cpp
 )
 set(HEADERS
     src/MainWindow.h
@@ -215,6 +223,13 @@ set(HEADERS
     src/core/ContextResolver.h
     src/core/ChatStore.h
     src/core/TokenStats.h
+    src/core/ModelCapabilities.h
+    src/core/ImageUtil.h
+    src/core/Embedding.h
+    src/core/EmbeddingClient.h
+    src/core/HybridRanker.h
+    src/core/ResponseScorer.h
+    src/core/ConversationSummarizer.h
     src/core/StartupArgs.h
     src/core/ToolchainProbe.h
     src/core/TaskRunner.h
@@ -355,6 +370,7 @@ set(HEADERS
     src/widgets/TimelinePanel.h
     src/widgets/SnippetDialog.h
     src/widgets/PromptLibraryDialog.h
+    src/widgets/ModelArenaDialog.h
     src/widgets/NewFileDialog.h
     src/widgets/FirstRunDialog.h
     src/widgets/ShortcutDialog.h
@@ -536,10 +552,29 @@ add_executable(test_stage32
     tests/test_stage32.cpp
     src/core/PerfTools.cpp
     src/core/RagIndexer.cpp
+    src/core/Embedding.cpp
+    src/core/HybridRanker.cpp
 )
 target_include_directories(test_stage32 PRIVATE src)
 target_link_libraries(test_stage32 PRIVATE Qt6::Core Qt6::Widgets Qt6::Concurrent)
 add_test(NAME stage32 COMMAND test_stage32)
+
+# --- Stage 33: yetenek/görü/gömme/hibrit/dallanma ---
+add_executable(test_stage33
+    tests/test_stage33.cpp
+    src/core/ModelCapabilities.cpp
+    src/core/ImageUtil.cpp
+    src/core/Embedding.cpp
+    src/core/EmbeddingClient.cpp
+    src/core/HybridRanker.cpp
+    src/core/ResponseScorer.cpp
+    src/core/ConversationSummarizer.cpp
+    src/core/ContextBudget.cpp
+    src/core/ChatStore.cpp
+)
+target_include_directories(test_stage33 PRIVATE src)
+target_link_libraries(test_stage33 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
+add_test(NAME stage33 COMMAND test_stage33)
 
 # QSS dosyalarını binary yanına kopyala
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD

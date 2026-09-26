@@ -1,4 +1,6 @@
 #include "RagIndexer.h"
+#include "Embedding.h"
+#include "HybridRanker.h"
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
@@ -98,7 +100,7 @@ void RagIndexer::buildIndex() {
     }
 }
 
-QList<RagChunk> RagIndexer::query(const QString& question, int topK) const {
+QList<int> RagIndexer::keywordOrder(const QString& question, int pool) const {
     const QStringList kws = PerfTools::keywords(question);
     if (kws.isEmpty() || m_chunks.isEmpty()) return {};
 
@@ -128,10 +130,81 @@ QList<RagChunk> RagIndexer::query(const QString& question, int topK) const {
         if (sc > 0) ranked.append({sc, i});
     }
     std::sort(ranked.begin(), ranked.end(),
-              [](const Scored& a, const Scored& b) { return a.score > b.score; });
+              [](const Scored& a, const Scored& b) {
+                  if (a.score != b.score) return a.score > b.score;
+                  return a.idx < b.idx;
+              });
+    QList<int> out;
+    for (int i = 0; i < ranked.size() && (pool <= 0 || out.size() < pool); ++i)
+        out << ranked[i].idx;
+    return out;
+}
+
+QList<RagChunk> RagIndexer::query(const QString& question, int topK) const {
+    const QList<int> order = keywordOrder(question, topK);
     QList<RagChunk> out;
-    for (int i = 0; i < qMin(topK, (int)ranked.size()); ++i)
-        out << m_chunks[ranked[i].idx];
+    for (int i : order) out << m_chunks[i];
+    return out;
+}
+
+// Stage 33: parçalar için eksik gömme vektörlerini üret.
+int RagIndexer::embedAll(int batch) {
+    if (!m_embedder || m_chunks.isEmpty()) return 0;
+    if (m_vecs.size() != m_chunks.size())
+        m_vecs = QList<QList<float>>(m_chunks.size());
+    QList<int> todo;
+    for (int i = 0; i < m_chunks.size(); ++i)
+        if (m_vecs[i].isEmpty()) todo << i;
+    int done = 0;
+    const int step = qMax(1, batch);
+    for (int s = 0; s < todo.size(); s += step) {
+        QStringList texts;
+        QList<int> idx;
+        for (int j = s; j < todo.size() && j < s + step; ++j) {
+            texts << m_chunks[todo[j]].text.left(2000);
+            idx << todo[j];
+        }
+        const QList<QList<float>> vs = m_embedder(texts);
+        for (int k = 0; k < idx.size() && k < vs.size(); ++k) {
+            if (!vs[k].isEmpty()) {
+                m_vecs[idx[k]] = vs[k];
+                ++done;
+            }
+        }
+    }
+    return done;
+}
+
+QList<RagChunk> RagIndexer::queryHybrid(const QString& question, const QList<float>& queryVec,
+                                        int topK, double kwWeight, double semWeight) const {
+    if (m_chunks.isEmpty()) return {};
+    const QList<int> kw = keywordOrder(question, 40);
+
+    QList<int> sem;
+    if (!queryVec.isEmpty() && m_vecs.size() == m_chunks.size()) {
+        QList<QPair<double, int>> scored;
+        for (int i = 0; i < m_vecs.size(); ++i) {
+            if (m_vecs[i].isEmpty() || m_vecs[i].size() != queryVec.size()) continue;
+            const double s = Embedding::cosine(queryVec, m_vecs[i]);
+            if (s > 0.0) scored.append({s, i});
+        }
+        std::sort(scored.begin(), scored.end(),
+                  [](const QPair<double, int>& a, const QPair<double, int>& b) {
+                      if (a.first != b.first) return a.first > b.first;
+                      return a.second < b.second;
+                  });
+        for (int i = 0; i < scored.size() && i < 40; ++i) sem << scored[i].second;
+    }
+
+    QList<int> order;
+    if (sem.isEmpty()) {
+        order = kw; // anlamsal katman yok: anahtar kelime
+    } else {
+        order = HybridRanker::fuse(kw, sem, kwWeight, semWeight, 60, topK);
+    }
+    QList<RagChunk> out;
+    for (int i = 0; i < order.size() && (topK <= 0 || out.size() < topK); ++i)
+        out << m_chunks[order[i]];
     return out;
 }
 

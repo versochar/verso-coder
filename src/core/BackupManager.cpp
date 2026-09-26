@@ -17,7 +17,12 @@ static QString hashOf(const QString& s) {
 }
 
 QString BackupManager::save(const QString& originalPath, const QString& content) {
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    // Stage 33 (kararlılık): aynı milisaniyedeki ardışık yedeklerde damgayı tekilleştir,
+    // böylece sıralama ve kota budama deterministik olur (eskiler doğru seçilir).
+    static qint64 g_lastBackupMs = 0;
+    qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (now <= g_lastBackupMs) now = g_lastBackupMs + 1;
+    g_lastBackupMs = now;
     const QString stem = QFileInfo(originalPath).fileName();
     const QString base = QString("%1_%2_%3").arg(now).arg(hashOf(originalPath)).arg(stem);
     const QString bak = m_dir + "/" + base + ".bak";
@@ -55,8 +60,10 @@ QList<BackupEntry> BackupManager::list() const {
         if (!QFile::exists(e.backupPath)) continue;
         out << e;
     }
-    std::sort(out.begin(), out.end(),
-              [](const BackupEntry& a, const BackupEntry& b) { return a.whenMs > b.whenMs; });
+    std::sort(out.begin(), out.end(), [](const BackupEntry& a, const BackupEntry& b) {
+        if (a.whenMs != b.whenMs) return a.whenMs > b.whenMs; // yeniden eskiye
+        return a.backupPath > b.backupPath;                   // deterministik eşitlik çözümü
+    });
     return out;
 }
 

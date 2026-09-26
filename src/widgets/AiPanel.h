@@ -3,12 +3,16 @@
 #include "../core/AgentTools.h"
 #include "../core/ChatStore.h"
 #include "../core/ContextResolver.h"
+#include "../core/ConversationSummarizer.h"
+#include "../core/ImageUtil.h"
+#include "../core/ModelCapabilities.h"
 #include "../core/OllamaClient.h"
 #include "../core/PatchQueue.h"
 #include "../core/RagIndexer.h"
 #include "../core/TokenStats.h"
 #include <QComboBox>
 #include <QFutureWatcher>
+#include <QHash>
 #include <QJsonObject>
 
 struct AppSettings;
@@ -57,6 +61,12 @@ public:
     // Stage 30: eski sohbetlerde metin bul
     void searchChats(const QString& query);
 
+    // --- Stage 33 ---
+    void attachImages();   // görsel ek (vision)
+    void clearImages();
+    void sendArena();      // çok-modelli arena
+    void showBranches();   // sohbet dallanma ağacı
+
 private slots:
     void stop();
     void saveProfile();
@@ -96,6 +106,12 @@ private:
     void openSessionMenu(const QPoint& pos);
     void persistMessage(const QString& role, const QString& text);
     QString problemsText();
+    // --- Stage 33 yardımcıları ---
+    ModelCapabilities capsFor(const QString& model) const;
+    QStringList currentImageBase64() const;
+    void refreshImageChips();
+    QString conversationContext();
+    void renderBranch(const ChatSession& s, const QString& leafId);
 
     OllamaClient m_client;
     RagIndexer m_rag;
@@ -134,4 +150,11 @@ private:
     QString m_activeModel; // token maliyeti için
     PatchQueue m_patchQueue;
     bool m_agentRunning = false;
+
+    // --- Stage 33 durum ---
+    QList<PreparedImage> m_images;              // görsel ekler
+    QWidget* m_chipBar = nullptr;               // ek rozet satırı
+    QHash<QString, ModelCapabilities> m_caps;   // model yetenek önbelleği
+    QString m_convSummary;                       // yerel sohbet özeti
+    QString m_activeBranch;                      // seçili dal yaprağı
 };

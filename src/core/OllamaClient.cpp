@@ -46,15 +46,25 @@ void OllamaClient::fetchModels() {
 }
 
 static QByteArray chatPayload(const QString& model, const QString& systemPrompt,
-                              const QString& userText, const QJsonObject& options, bool stream) {
+                              const QString& userText, const QJsonObject& options, bool stream,
+                              const QStringList& images = {}, int keepAliveMin = 5) {
     QJsonObject root;
     root["model"] = model;
     root["stream"] = stream;
     root["options"] = options;
+    // Stage 33: model sıcak tutma
+    if (keepAliveMin < 0) root["keep_alive"] = "-1";
+    else root["keep_alive"] = QString("%1m").arg(keepAliveMin);
     QJsonArray msgs;
     if (!systemPrompt.isEmpty())
         msgs.append(QJsonObject{{"role", "system"}, {"content", systemPrompt}});
-    msgs.append(QJsonObject{{"role", "user"}, {"content", userText}});
+    QJsonObject user{{"role", "user"}, {"content", userText}};
+    if (!images.isEmpty()) { // Stage 33: görü girdisi
+        QJsonArray imgs;
+        for (const QString& b : images) imgs.append(b);
+        user["images"] = imgs;
+    }
+    msgs.append(user);
     root["messages"] = msgs;
     return QJsonDocument(root).toJson();
 }
@@ -63,7 +73,7 @@ void OllamaClient::chat(const QString& model, const QString& systemPrompt,
                         const QString& userText, const QJsonObject& options) {
     QNetworkRequest req(QUrl(m_host + "/api/chat"));
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    QNetworkReply* r = m_net.post(req, chatPayload(model, systemPrompt, userText, options, false));
+    QNetworkReply* r = m_net.post(req, chatPayload(model, systemPrompt, userText, options, false, {}, m_keepAliveMin));
     armTimeout(r, 180000); // Stage 31: akışsız sohbette 3 dk tavan
     connect(r, &QNetworkReply::finished, this, [this, r]() {
         r->deleteLater();
@@ -85,7 +95,7 @@ QString OllamaClient::chatSync(const QString& model, const QString& systemPrompt
     error.clear();
     QNetworkRequest req(QUrl(m_host + "/api/chat"));
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    QNetworkReply* r = m_net.post(req, chatPayload(model, systemPrompt, userText, options, false));
+    QNetworkReply* r = m_net.post(req, chatPayload(model, systemPrompt, userText, options, false, {}, m_keepAliveMin));
     QEventLoop loop;
     QTimer timer;
     timer.setSingleShot(true);
@@ -125,7 +135,7 @@ void OllamaClient::chatStream(const QString& model, const QString& systemPrompt,
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     m_pending.clear();
     m_full.clear();
-    m_stream = m_net.post(req, chatPayload(model, systemPrompt, userText, options, true));
+    m_stream = m_net.post(req, chatPayload(model, systemPrompt, userText, options, true, {}, m_keepAliveMin));
     connect(m_stream, &QNetworkReply::readyRead, this, [this]() {
         if (m_stream) parseStreamChunk(m_stream->readAll());
     });
@@ -265,3 +275,100 @@ bool OllamaClient::ensureServer(const QString& host, int timeoutMs) {
     }
     return isServerUp(host, 2000);
 }
+
+// --- Stage 33: model yeteneği + görü ---
+
+void OllamaClient::showModel(const QString& model) {
+    QNetworkRequest req(QUrl(m_host + "/api/show"));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QNetworkReply* r =
+        m_net.post(req, QJsonDocument(QJsonObject{{"model", model}}).toJson());
+    armTimeout(r, 10000);
+    connect(r, &QNetworkReply::finished, this, [this, r, model]() {
+        r->deleteLater();
+        if (r->error() != QNetworkReply::NoError) {
+            emit error(r->errorString());
+            return;
+        }
+        emit modelShow(model, QJsonDocument::fromJson(r->readAll()).object());
+    });
+}
+
+QJsonObject OllamaClient::showSync(const QString& model, QString& error, int timeoutMs) {
+    error.clear();
+    QNetworkRequest req(QUrl(m_host + "/api/show"));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QNetworkReply* r =
+        m_net.post(req, QJsonDocument(QJsonObject{{"model", model}}).toJson());
+    QEventLoop loop;
+    QTimer timer;
+    timer.setSingleShot(true);
+    QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QObject::connect(r, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    timer.start(qMax(1000, timeoutMs));
+    loop.exec();
+    if (r->isRunning()) {
+        r->abort();
+        r->deleteLater();
+        error = "zaman aşımı";
+        return {};
+    }
+    if (r->error() != QNetworkReply::NoError) {
+        error = r->errorString();
+        r->deleteLater();
+        return {};
+    }
+    const QJsonObject o = QJsonDocument::fromJson(r->readAll()).object();
+    if (o.contains("error")) error = o.value("error").toString();
+    r->deleteLater();
+    return o;
+}
+
+void OllamaClient::chatWithImages(const QString& model, const QString& systemPrompt,
+                                  const QString& userText, const QJsonObject& options,
+                                  const QStringList& imagesBase64) {
+    QNetworkRequest req(QUrl(m_host + "/api/chat"));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QNetworkReply* r = m_net.post(
+        req, chatPayload(model, systemPrompt, userText, options, false, imagesBase64, m_keepAliveMin));
+    armTimeout(r, 180000);
+    connect(r, &QNetworkReply::finished, this, [this, r]() {
+        r->deleteLater();
+        if (r->error() != QNetworkReply::NoError) {
+            emit error(r->errorString());
+            return;
+        }
+        QJsonObject o = QJsonDocument::fromJson(r->readAll()).object();
+        emitTokenCounts(o);
+        QString txt = o.value("message").toObject().value("content").toString();
+        emit chatReply(txt.isEmpty() ? "(boş yanıt)" : txt);
+    });
+}
+
+void OllamaClient::chatStreamWithImages(const QString& model, const QString& systemPrompt,
+                                        const QString& userText, const QJsonObject& options,
+                                        const QStringList& imagesBase64) {
+    cancelStream();
+    QNetworkRequest req(QUrl(m_host + "/api/chat"));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    m_pending.clear();
+    m_full.clear();
+    m_stream = m_net.post(
+        req, chatPayload(model, systemPrompt, userText, options, true, imagesBase64, m_keepAliveMin));
+    connect(m_stream, &QNetworkReply::readyRead, this, [this]() {
+        if (m_stream) parseStreamChunk(m_stream->readAll());
+    });
+    connect(m_stream, &QNetworkReply::finished, this, [this]() {
+        if (!m_stream) return;
+        parseStreamChunk(m_stream->readAll());
+        bool ok = (m_stream->error() == QNetworkReply::NoError ||
+                   m_stream->error() == QNetworkReply::OperationCanceledError);
+        QString full = m_full;
+        m_stream->deleteLater();
+        m_stream = nullptr;
+        if (!ok) { emit error("ağ hatası"); return; }
+        if (full.isEmpty()) emit error("(boş yanıt)");
+        else emit chatFinished(full);
+    });
+}
+

@@ -14,6 +14,7 @@ public:
     explicit OllamaClient(QObject* parent = nullptr);
 
     void setHost(const QString& host);
+    void setKeepAlive(int minutes) { m_keepAliveMin = minutes; } // Stage 33
     void fetchModels(); // finished -> modelsReady / error
     void chat(const QString& model, const QString& systemPrompt,
               const QString& userText, const QJsonObject& options);
@@ -38,8 +39,19 @@ public:
     // Kapalıysa detached başlatıp açılmasını bekler (GUI thread'de çağırma!)
     static bool ensureServer(const QString& host, int timeoutMs = 25000);
 
+    // --- Stage 33: model yeteneği + görü (vision) ---
+    void showModel(const QString& model); // finished -> modelShow
+    QJsonObject showSync(const QString& model, QString& error, int timeoutMs = 8000);
+    void chatWithImages(const QString& model, const QString& systemPrompt,
+                        const QString& userText, const QJsonObject& options,
+                        const QStringList& imagesBase64);
+    void chatStreamWithImages(const QString& model, const QString& systemPrompt,
+                              const QString& userText, const QJsonObject& options,
+                              const QStringList& imagesBase64);
+
 signals:
     void modelsReady(const QStringList& models);
+    void modelShow(const QString& model, const QJsonObject& show); // Stage 33
     void chatReply(const QString& text);
     void chatToken(const QString& chunk);   // streaming parça
     void chatFinished(const QString& full); // streaming tamamı
@@ -58,6 +70,7 @@ private:
 
     QNetworkAccessManager m_net;
     QString m_host = "http://localhost:11434";
+    int m_keepAliveMin = 5; // Stage 33: Ollama keep_alive
     QNetworkReply* m_stream = nullptr;
     QNetworkReply* m_pull = nullptr; // Stage 15
     QByteArray m_pending;

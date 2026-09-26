@@ -1,9 +1,11 @@
 #include "ChatStore.h"
 #include <QDir>
 #include <QFile>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <algorithm>
 
 ChatStore::ChatStore(const QString& dir) : m_dir(dir) {
@@ -35,7 +37,11 @@ bool ChatStore::save(const ChatSession& s) {
     o["updated"] = s.updatedMs;
     QJsonArray arr;
     for (const ChatMessage& m : s.messages)
-        arr.append(QJsonObject{{"role", m.role}, {"text", m.text}, {"when", m.whenMs}});
+        arr.append(QJsonObject{{"id", m.id},
+                               {"parent", m.parentId},
+                               {"role", m.role},
+                               {"text", m.text},
+                               {"when", m.whenMs}});
     o["messages"] = arr;
     QFile f(filePath(s.id));
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
@@ -55,9 +61,12 @@ ChatSession ChatStore::load(const QString& id) const {
     for (const QJsonValue& v : o.value("messages").toArray()) {
         QJsonObject mo = v.toObject();
         ChatMessage m;
+        m.id = mo.value("id").toString();
+        m.parentId = mo.value("parent").toString();
         m.role = mo.value("role").toString();
         m.text = mo.value("text").toString();
         m.whenMs = qint64(mo.value("when").toDouble());
+        if (m.id.isEmpty()) m.id = QString("m%1").arg(s.messages.size()); // eski kayıt
         s.messages << m;
     }
     return s;
@@ -79,9 +88,68 @@ void ChatStore::append(const QString& id, const ChatMessage& m) {
     ChatSession s = load(id);
     s.id = id;
     if (s.title.isEmpty()) s.title = m.text.left(40);
-    s.messages << m;
+    ChatMessage msg = m;
+    if (msg.id.isEmpty()) msg.id = newMessageId();
+    // Stage 33: doğrusal eklemede üst = son mesaj
+    if (msg.parentId.isEmpty() && !s.messages.isEmpty())
+        msg.parentId = s.messages.last().id;
+    s.messages << msg;
     s.updatedMs = QDateTime::currentMSecsSinceEpoch();
     save(s);
+}
+
+// --- Stage 33: dallanma yardımcıları ---
+
+static int g_msgSeq = 0;
+
+QString ChatStore::newMessageId() {
+    return QString("m%1-%2").arg(QDateTime::currentMSecsSinceEpoch()).arg(++g_msgSeq);
+}
+
+QString ChatStore::appendMsg(const QString& sessionId, const QString& parentId,
+                             const ChatMessage& m) {
+    ChatSession s = load(sessionId);
+    s.id = sessionId;
+    if (s.title.isEmpty()) s.title = m.text.left(40);
+    ChatMessage msg = m;
+    msg.parentId = parentId;
+    if (msg.id.isEmpty()) msg.id = newMessageId();
+    s.messages << msg;
+    s.updatedMs = QDateTime::currentMSecsSinceEpoch();
+    save(s);
+    return msg.id;
+}
+
+QList<ChatMessage> ChatStore::pathTo(const ChatSession& s, const QString& leafId) {
+    QHash<QString, ChatMessage> byId;
+    for (const ChatMessage& m : s.messages) byId.insert(m.id, m);
+    QList<ChatMessage> rev;
+    QString cur = leafId;
+    int guard = 0;
+    while (!cur.isEmpty() && byId.contains(cur) && guard++ < 10000) {
+        const ChatMessage m = byId.value(cur);
+        rev << m;
+        cur = m.parentId;
+    }
+    std::reverse(rev.begin(), rev.end());
+    return rev;
+}
+
+QList<ChatMessage> ChatStore::childrenOf(const ChatSession& s, const QString& parentId) {
+    QList<ChatMessage> out;
+    for (const ChatMessage& m : s.messages)
+        if (m.parentId == parentId) out << m;
+    return out;
+}
+
+QStringList ChatStore::leafIds(const ChatSession& s) {
+    QSet<QString> parents;
+    for (const ChatMessage& m : s.messages)
+        if (!m.parentId.isEmpty()) parents.insert(m.parentId);
+    QStringList out;
+    for (const ChatMessage& m : s.messages)
+        if (!parents.contains(m.id)) out << m.id;
+    return out;
 }
 
 QString ChatStore::titleFor(const QString& id) const {

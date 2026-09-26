@@ -36,6 +36,12 @@ private:
     QComboBox* m_model;
     QSpinBox* m_ctx;        // context window
     QSpinBox* m_budget = nullptr; // Stage 25: token bütçesi
+    // Stage 33: görü + gömme + hız
+    QCheckBox* m_aiVision = nullptr;
+    QLineEdit* m_embed = nullptr;
+    QSpinBox* m_keepAlive = nullptr;
+    QSpinBox* m_parallel = nullptr;
+    QSpinBox* m_summary = nullptr;
     QSpinBox* m_threads;    // cpu threads
     QSpinBox* m_gpu;        // num_gpu
     QSlider* m_tempSlider;
