@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "1.8.0"; }
+QString AboutInfo::version() { return "1.9.0"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,15 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "1.9.0 (Stage 37)\n"
+        "  • Tek AI cephesi: 12 görevin tamamı aynı sağlayıcı/yönlendirme/kota yolunu kullanır\n"
+        "  • Dokuz yüzey artık bulut sağlayıcılarla da çalışır (inceleme, test, commit,\n"
+        "    belge, açıklama, satır içi düzeltme, hayalet tamamlama, tema, arena)\n"
+        "  • Arena: sağlayıcı × model yarışı, gecikme/jeton/gerçek maliyet, kazananı al\n"
+        "  • Hayalet tamamlama: yerelde FIM, bulutta önek modu (varsayılan kapalı)\n"
+        "  • Konuşma özeti sağlayıcıdan arka planda istenir (arayüz bloklanmaz)\n"
+        "  • Durum çubuğu sağlayıcı çipi (sağlık + kota), Ctrl+. ile AI iptali\n"
+        "  • Ayarlar → AI Kullanımı: günlük token/maliyet, dağılım, kota, sağlık\n"
         "1.8.0 (Stage 36)\n"
         "  • Sağlayıcı+model bazlı fiyatlandırma; ücretsiz katmanlar 0 USD\n"
         "  • Kalıcı token geçmişi + günlük istek/token kotası (kota dolunca erken ret)\n"

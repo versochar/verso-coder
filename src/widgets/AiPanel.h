@@ -127,11 +127,14 @@ private:
     QString conversationContext();
     void configureProvider();    // Stage 35: sağlayıcıyı uygula + modelleri getir
     void refreshEmbedRoute();   // Stage 36: gömme sağlayıcısı/modelini güncelle
+    void requestLlmSummary(const QList<ConvTurn>& turns); // Stage 37: LLM özeti
     bool isCloudProvider() const;
     void renderBranch(const ChatSession& s, const QString& leafId);
 
     OllamaClient m_client;
     LlmClient m_llm;                     // Stage 35: bulut sağlayıcıları
+    class AiRunner* m_summaryRunner = nullptr; // Stage 37: arka plan özeti
+    bool m_summaryBusy = false;             // Stage 37: tek özet isteği aynı anda
     EmbedBridge m_embed;                  // Stage 36: sağlayıcı-duyarsız gömme
     SecretStore m_secrets;               // Stage 35: API anahtarı kasası
     RagIndexer m_rag;

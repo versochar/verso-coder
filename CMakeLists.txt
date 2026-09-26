@@ -68,6 +68,7 @@ set(SOURCES
     src/core/ai/EmbedBridge.cpp
     src/core/ai/AgentLlmAdapter.cpp
     src/core/ai/ProviderBench.cpp
+    src/core/ai/AiRunner.cpp
     src/core/StartupArgs.cpp
     src/core/ToolchainProbe.cpp
     src/core/TaskRunner.cpp
@@ -279,6 +280,8 @@ set(HEADERS
     src/core/ai/EmbedBridge.h
     src/core/ai/AgentLlmAdapter.h
     src/core/ai/ProviderBench.h
+    src/core/ai/AiRunner.h
+    src/core/ai/AiProfiles.h
     src/core/StartupArgs.h
     src/core/ToolchainProbe.h
     src/core/TaskRunner.h
@@ -706,6 +709,42 @@ add_executable(test_stage36
 target_include_directories(test_stage36 PRIVATE src)
 target_link_libraries(test_stage36 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
 add_test(NAME stage36 COMMAND test_stage36)
+
+# --- Stage 37: tek AI cephesi (AiRunner) + görev profilleri ---
+add_executable(test_stage37
+    tests/test_stage37.cpp
+    src/widgets/ModelArenaDialog.cpp
+    src/core/ai/AiRunner.cpp
+    src/core/ai/LlmProvider.cpp
+    src/core/ai/SecretStore.cpp
+    src/core/ai/AiMessage.cpp
+    src/core/ai/AiToolBridge.cpp
+    src/core/ai/ProviderPrefs.cpp
+    src/core/ai/ProviderPricing.cpp
+    src/core/ai/ProviderHealth.cpp
+    src/core/ai/UsageLedger.cpp
+    src/core/ai/TaskRouter.cpp
+    src/core/ai/EmbedCache.cpp
+    src/core/ai/EmbedBridge.cpp
+    src/core/ai/ProviderBench.cpp
+    src/core/ai/LlmClient.cpp
+    src/core/ai/providers/ProviderCodec.cpp
+    src/core/ai/providers/SseParser.cpp
+    src/core/GhostCompletion.cpp
+    src/core/PromptLibrary.cpp
+    src/core/ResponseScorer.cpp
+    src/core/ConversationSummarizer.cpp
+    src/core/ContextBudget.cpp
+    src/core/ModelCapabilities.cpp
+    src/core/TokenStats.cpp
+    src/core/AgentTools.cpp
+    src/core/AgentPolicy.cpp
+    src/core/PatchQueue.cpp
+    src/core/ProjectHealth.cpp
+)
+target_include_directories(test_stage37 PRIVATE src)
+target_link_libraries(test_stage37 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Concurrent)
+add_test(NAME stage37 COMMAND test_stage37)
 
 # QSS dosyalarını binary yanına kopyala
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD

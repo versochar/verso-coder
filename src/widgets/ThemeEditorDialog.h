@@ -48,5 +48,7 @@ private:
     QComboBox* m_model;
     QLabel* m_aiStatus;
     QPushButton* m_generate;
-    class OllamaClient* m_client = nullptr;
+    // Stage 37: tema üretimi de sağlayıcı-duyarsız (AiRunner)
+    class AiRunner* m_runner = nullptr;
+    class SecretStore* m_secrets = nullptr;
 };

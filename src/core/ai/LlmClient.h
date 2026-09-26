@@ -22,6 +22,7 @@ public:
     void setApiKey(const QString& key) { m_apiKey = key; }
     QString apiKey() const;
     void setSecretStore(SecretStore* s) { m_secrets = s; }
+    SecretStore* secretStore() const { return m_secrets; }
     // Stage 36: sağlayıcı kalıcı olarak reddedilirse (401/403/404/5xx) eşdeğer
     // bir sağlayıcıya otomatik devret.
     void setFailoverEnabled(bool on) { m_failover = on; }

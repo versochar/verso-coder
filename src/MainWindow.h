@@ -234,6 +234,12 @@ private slots:
     void pullModel();
     void askAi(const QString& system, const QString& prompt, const QJsonObject& opts,
                std::function<void(QString, QString)> done);
+    // Stage 37: görev bilgisiyle tek AI cephesi (AiRunner)
+    void askAiTask(int taskId, const QString& system, const QString& prompt,
+                   const QJsonObject& opts, std::function<void(QString, QString)> done);
+    void cancelAi(); // Stage 37: ortak iptal
+    void updateProviderChip();  // Stage 37: sağlayıcı çipini tazele
+    void showProviderMenu();   // Stage 37: hızlı sağlayıcı değiştir
 
 private:
     QString sideTitleFor(int i) const;
@@ -507,6 +513,10 @@ private:
     // Stage 15: AI hattı
     class OllamaClient* m_ghostAi = nullptr; // hayalet tamamlama (ayrı istemci)
     class OllamaClient* m_flowAi = nullptr;  // tek seferlik AI akışları
+    class AiRunner* m_aiRunner = nullptr;       // Stage 37: tek AI cephesi
+    class QLabel* m_chipProvider = nullptr;    // Stage 37: sağlayıcı + sağlık noktası
+    class AiRunner* m_ghostRunner = nullptr;    // Stage 37: hayalet tamamlama koşucusu
+    class SecretStore* m_secrets = nullptr;     // Stage 37: anahtar kasası
     QTimer* m_ghostTimer = nullptr;
     int m_ghostReq = 0;
     QString m_ghostPrefix;

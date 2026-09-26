@@ -12,4 +12,12 @@ public:
     static bool exists(const QString& name);
     static QStringList names();
     static QString sanitize(const QString& raw);
+
+    // Stage 37: istem başındaki "!görev" yönlendirmesini çözer.
+    // "!test Bu fonksiyonu test et" → görev test, gövde "Bu fonksiyonu test et"
+    static bool hasTaskHint(const QString& raw);
+    static QString taskHint(const QString& raw);   // "test" | "" (yoksa boş)
+    static QString stripTaskHint(const QString& raw);
+    static QStringList knownTaskHints();
+    static bool isKnownTaskHint(const QString& h);
 };

@@ -7,6 +7,12 @@
 #include "core/LanguageManager.h"
 #include "core/LspClient.h"
 #include "core/OllamaClient.h"
+#include "core/ai/AiProfiles.h"
+#include "core/ai/AiRunner.h"
+#include "core/ai/ProviderHealth.h"
+#include "core/ai/ProviderPrefs.h"
+#include "core/ai/UsageLedger.h"
+#include "core/ai/SecretStore.h"
 #include "core/SshSession.h"
 #include "core/PortForwarder.h"
 #include "core/RemoteFileSystem.h"
@@ -47,6 +53,7 @@
 #include "core/CommitMsg.h"
 #include "core/DocGen.h"
 #include "core/GhostCompletion.h"
+#include "core/ai/AiRunner.h"
 #include "core/InlineEdit.h"
 #include "core/PromptLibrary.h"
 #include "core/TestGen.h"
@@ -461,6 +468,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     // --- Menü ---
     auto* fileMenu = menuBar()->addMenu("Dosya");
+    // Stage 37: AI isteğini iptal
+    {
+        QAction* a = new QAction("AI İsteğini İptal Et", this);
+        a->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Period));
+        connect(a, &QAction::triggered, this, &MainWindow::cancelAi);
+        addAction(a);
+        fileMenu->addSeparator();
+        fileMenu->addAction(a);
+    }
     fileMenu->addAction(m_actions["file.new"]);
     fileMenu->addAction(m_actions["file.openFolder"]);
     fileMenu->addAction(m_actions["file.save"]);
@@ -940,6 +956,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_chipProfile = makeChip("Görünüm profili — değiştirmek için tıkla", "ui.profiles"); // Stage 12
     m_chipAi = makeChip("AI durumu", QString()); // Stage 25: çevrimdışı rozeti
     m_chipAi->setText("AI ?");
+    // Stage 37: etkin sağlayıcı + sağlık noktası (tıklayınca hızlı değiştir)
+    m_chipProvider = makeChip("Etkin AI sağlayıcısı (tıklayınca değiştir)", QString());
+    m_chipProvider->setText("AI: —");
+    m_chipProvider->setProperty("cmd", QStringLiteral("ai.provider"));
     statusBar()->addWidget(m_status, 1);
     statusBar()->addPermanentWidget(m_chipGit);
     statusBar()->addPermanentWidget(m_chipProblems);
@@ -950,6 +970,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     statusBar()->addPermanentWidget(m_chipEnc);
     statusBar()->addPermanentWidget(m_chipProfile);
     statusBar()->addPermanentWidget(m_chipAi); // Stage 25
+    statusBar()->addPermanentWidget(m_chipProvider); // Stage 37
     m_chipEol->setText("LF");
     m_chipEnc->setText("UTF-8");
 
@@ -1058,6 +1079,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Stage 15: hayalet tamamlama istemcileri + debounce
     m_ghostAi = new OllamaClient(this);
     m_flowAi = new OllamaClient(this);
+    // Stage 37: tek AI cephesi + API anahtarı kasası
+    m_secrets = new SecretStore();
+    m_aiRunner = new AiRunner(this);
+    m_aiRunner->setSecretStore(m_secrets);
     connect(m_ghostAi, &OllamaClient::error, this, [this](const QString& e) {
         // Hayalet hataları sessiz (durum çubuğunda kısa bilgi)
         if (m_ghostReq > 0) m_status->setText("Hayalet: " + e.left(80));
@@ -2413,7 +2438,7 @@ void MainWindow::reviewStagedDiff() {
     if (!git.waitForFinished(8000)) { toast(3, "git diff zaman aşımı"); return; }
     const QString diff = QString::fromUtf8(git.readAllStandardOutput()).trimmed();
     if (diff.isEmpty()) { toast(0, "Staged değişiklik yok (önce Stage yapın)"); return; }
-    askAi("Titiz kod inceleme asistanı. Kısa, maddeli, Türkçe yaz.",
+    askAiTask(int(AiTask::Review), "Titiz kod inceleme asistanı. Kısa, maddeli, Türkçe yaz.",
           "Aşağıdaki staged diff'i incele: hata riski, kenar durumları, stil. "
           "Varsa en kritik 5 madde; yoksa 'Temiz ✓'.\n```diff\n" + diff.left(12000) + "\n```",
           QJsonObject(), [this](QString reply, QString err) {
@@ -3145,6 +3170,7 @@ bool MainWindow::eventFilter(QObject* o, QEvent* e) {
     if (e->type() == QEvent::MouseButtonPress)
         if (auto* l = qobject_cast<QLabel*>(o)) {
             const QString cmd = l->property("cmd").toString();
+            if (cmd == QLatin1String("ai.provider")) { showProviderMenu(); return true; }
             if (!cmd.isEmpty()) { runCommand(cmd); return true; }
         }
     // Stage 26: hata ayıklamada değişken hover balonu
@@ -6183,42 +6209,123 @@ static QString aiLangFor(const QString& path) {
     return "kod";
 }
 
-void MainWindow::askAi(const QString& system, const QString& prompt,
-                       const QJsonObject& opts,
-                       std::function<void(QString, QString)> done) {
+void MainWindow::askAiTask(int taskId, const QString& system, const QString& prompt,
+                            const QJsonObject& opts,
+                            std::function<void(QString, QString)> done) {
+    // Stage 37: tüm tek seferlik AI akışları (satır içi düzeltme, belge yorumu,
+    // test, commit mesajı, açıklama, inceleme) buradan geçer → sağlayıcı,
+    // yönlendirme, kota, sağlık, maliyet ve failover otomatik uygulanır.
     if (m_flowBusy) {
         m_status->setText("AI meşgul, bitmesini bekleyin.");
         return;
     }
     AppSettings s = SettingsManager::instance().load();
-    m_flowAi->setHost(s.ollamaHost);
     m_flowBusy = true;
-    m_status->setText("AI düşünüyor...");
-    QJsonObject o = opts;
-    if (!o.contains("temperature")) o["temperature"] = s.temperature;
-    if (!o.contains("num_ctx")) o["num_ctx"] = s.contextWindow;
-    connect(m_flowAi, &OllamaClient::chatReply, this,
-            [this, done](const QString& reply) {
-                m_flowBusy = false;
-                disconnect(m_flowAi, &OllamaClient::chatReply, this, nullptr);
-                disconnect(m_flowAi, &OllamaClient::error, this, nullptr);
-                m_status->setText("AI yanıt verdi.");
-                done(reply, QString());
-            },
-            Qt::SingleShotConnection);
-    connect(m_flowAi, &OllamaClient::error, this, [this, done](const QString& e) {
-        m_flowBusy = false;
-        disconnect(m_flowAi, &OllamaClient::chatReply, this, nullptr);
-        disconnect(m_flowAi, &OllamaClient::error, this, nullptr);
-        m_status->setText("AI hatası: " + e.left(100));
-        toast(3, "AI hatası: " + e.left(150));
-        done(QString(), e);
-    }, Qt::SingleShotConnection);
+    m_status->setText(QString("AI düşünüyor (%1)...")
+                          .arg(AiProfiles::label(AiTask(qBound(0, taskId, int(AiTask::Extract))))));
+    if (!m_aiRunner) {
+        m_aiRunner = new AiRunner(this);
+        if (m_secrets) m_aiRunner->setSecretStore(m_secrets);
+    }
+    AiRunner::Options o =
+        AiRunner::optionsFor(AiTask(qBound(0, taskId, int(AiTask::Extract))), system);
+    if (opts.contains("temperature")) o.temperature = opts.value("temperature").toDouble();
+    if (opts.contains("num_predict")) o.maxTokens = opts.value("num_predict").toInt();
     // Bağlam bütçesi: model penceresinin yarısı
     if (ContextBudget::exceeds(prompt, ContextBudget::maxFor(s.contextWindow)))
         toast(2, ContextBudget::warnText(prompt, ContextBudget::maxFor(s.contextWindow)));
     const QString safe = ContextBudget::trim(prompt, ContextBudget::maxFor(s.contextWindow));
-    m_flowAi->chat(s.ollamaModel, system, safe, o);
+
+    connect(m_aiRunner, &AiRunner::finished, this,
+            [this, done](const AiRunner::Result& r) {
+                m_flowBusy = false;
+                if (r.ok) {
+                    QString note = QString("AI yanıt verdi · %1 · %2ms")
+                                       .arg(AiProfiles::label(AiTask::Chat))
+                                       .arg(r.ms);
+                    if (r.usd > 0.0) note += QString(" · ~$%1").arg(r.usd, 0, 'f', 4);
+                    m_status->setText(note);
+                    done(r.text, QString());
+                } else {
+                    m_status->setText("AI hatası: " + r.error.left(100));
+                    toast(3, "AI hatası: " + r.error.left(150));
+                    done(QString(), r.error);
+                }
+            },
+            Qt::SingleShotConnection);
+    m_aiRunner->runAsync(o, safe);
+}
+
+// Stage 37: sağlayıcı çipi — ad + sağlık noktası + kalan kota
+void MainWindow::updateProviderChip() {
+    if (!m_chipProvider) return;
+    const ProviderSpec spec = ProviderPrefs::resolve();
+    const QString id = spec.id;
+    const QString dot = ProviderHealth::instance().entry(id).calls == 0
+                            ? QStringLiteral("⚪")
+                            : (ProviderHealth::instance().isHealthy(id) ? QStringLiteral("●")
+                                                                         : QStringLiteral("●"));
+    const QString color = ProviderHealth::instance().entry(id).calls == 0
+                              ? QStringLiteral("#858585")
+                              : (ProviderHealth::instance().isHealthy(id) ? QStringLiteral("#4ec9b0")
+                                                                           : QStringLiteral("#f44747"));
+    QString text = QString("%1 %2").arg(dot, spec.label);
+    const UsageLedger::Quota q = UsageLedger::instance().quota(id);
+    if (q.limited()) {
+        const UsageLedger::Day d = UsageLedger::instance().today(id);
+        const QString used = q.maxCalls > 0
+                                 ? QString("%1/%2 çağrı").arg(d.calls).arg(q.maxCalls)
+                                 : QString("%1 token").arg(d.total());
+        text += QStringLiteral(" · %1").arg(used);
+    }
+    m_chipProvider->setText(text);
+    m_chipProvider->setStyleSheet(QStringLiteral("color:%1;").arg(color));
+    m_chipProvider->setToolTip(
+        QStringLiteral("%1 · %2\nSağlık: %3\nTıkla: sağlayıcı değiştir")
+            .arg(spec.id, ProviderHealth::instance().statusLine(id))
+            .arg(ProviderHealth::verdict(ProviderHealth::instance().entry(id))));
+}
+
+void MainWindow::showProviderMenu() {
+    QMenu menu(this);
+    menu.setTitle("AI sağlayıcısı");
+    SecretStore store;
+    const QString active = ProviderPrefs::activeProvider();
+    for (const ProviderSpec& spec : ProviderRegistry::all()) {
+        const bool hasKey = !spec.requiresKey() || !store.effectiveKey(spec.id).isEmpty();
+        QAction* a = menu.addAction(
+            QString("%1%2  ·  %3")
+                .arg(spec.id == active ? QStringLiteral("● ") : QStringLiteral("   "), spec.label,
+                     hasKey ? QStringLiteral("hazır") : QStringLiteral("anahtar yok")));
+        a->setEnabled(true);
+        a->setCheckable(true);
+        a->setChecked(spec.id == active);
+        connect(a, &QAction::triggered, this, [this, spec]() {
+            ProviderPrefs::setActiveProvider(spec.id);
+            updateProviderChip();
+            toast(0, QString("AI sağlayıcısı: %1").arg(spec.label));
+        });
+    }
+    menu.exec(m_chipProvider->mapToGlobal(QPoint(0, -menu.sizeHint().height())));
+}
+
+void MainWindow::cancelAi() {
+    if (!m_flowBusy) return;
+    if (m_aiRunner && m_aiRunner->cancelActive()) {
+        m_flowBusy = false;
+        m_status->setText("AI isteği iptal edildi.");
+        toast(1, "AI isteği iptal edildi");
+    } else {
+        AiRunner::cancelAll();
+        m_flowBusy = false;
+        m_status->setText("AI iptal edildi.");
+    }
+}
+
+void MainWindow::askAi(const QString& system, const QString& prompt,
+                       const QJsonObject& opts,
+                       std::function<void(QString, QString)> done) {
+    askAiTask(int(AiTask::Chat), system, prompt, opts, std::move(done));
 }
 
 void MainWindow::toggleGhost() {
@@ -6244,33 +6351,40 @@ void MainWindow::requestGhost() {
     const QString full = e->toPlainText();
     const QString prefix = full.left(pos);
     const QString suffix = full.mid(pos);
-    m_ghostAi->setHost(s.ollamaHost);
+    // Stage 37: hayalet tamamlama da sağlayıcı-duyarsız (yerel FIM / bulut önek)
+    QSettings st;
+    const bool cloudEnabled = st.value("ai/ghostCloud", false).toBool();
+    const QString provId = ProviderPrefs::activeProvider();
+    const GhostCompletion::Mode mode = GhostCompletion::modeFor(provId, cloudEnabled);
+    if (mode == GhostCompletion::Mode::Off) return;
     const int req = ++m_ghostReq;
     m_ghostPrefix = prefix;
     m_ghostEditor = e;
     QPointer<CodeEditor> guard(e);
-    const QString prompt = GhostCompletion::buildPrompt(prefix, suffix, aiLangFor(e->filePath()));
-    QJsonObject opts;
-    opts["temperature"] = 0.2;
-    opts["num_predict"] = 64;
-    opts["num_ctx"] = qMin(s.contextWindow, 4096);
-    disconnect(m_ghostAi, &OllamaClient::chatReply, this, nullptr);
-    connect(m_ghostAi, &OllamaClient::chatReply, this,
-            [this, req, guard, prefix](const QString& reply) {
-                if (req != m_ghostReq || !guard || guard != currentEditor()) return;
-                const QString g = GhostCompletion::clean(reply, prefix.split('\n').last());
+    const QString prompt = GhostCompletion::buildPrompt(mode, prefix, suffix,
+                                                        aiLangFor(e->filePath()));
+    if (ContextBudget::exceeds(prompt, 2048))
+        m_status->setText(ContextBudget::warnText(prompt, 2048));
+
+    // Hayalet kendi kısa ömürlü koşucusu (sohbet akışını meşgul etmez)
+    if (!m_ghostRunner) {
+        m_ghostRunner = new AiRunner(this);
+        if (m_secrets) m_ghostRunner->setSecretStore(m_secrets);
+    }
+    AiRunner::Options o = AiRunner::optionsFor(AiTask::Fim,
+                                              "Kısa kod tamamlama motoru. Sadece devam kodunu yaz.");
+    o.allowFailover = false;  // hayalet gecikmesi kabul edilmez
+    connect(m_ghostRunner, &AiRunner::finished, this,
+            [this, req, guard, prefix](const AiRunner::Result& r) {
+                if (req != m_ghostReq || !r.ok || !guard || guard != currentEditor()) return;
+                const QString g = GhostCompletion::clean(r.text, prefix.split('\n').last());
                 if (g.isEmpty()) return;
-                // Önek hâlâ aynı mı?
                 const int p = guard->textCursor().position();
                 if (guard->toPlainText().left(p) != m_ghostPrefix) return;
                 guard->setGhostText(g, m_ghostPrefix);
             },
             Qt::SingleShotConnection);
-    if (ContextBudget::exceeds(prompt, 2048))
-        m_status->setText(ContextBudget::warnText(prompt, 2048));
-    m_ghostAi->chat(s.ollamaModel,
-                    "Kısa kod tamamlama motoru. Sadece devam kodunu yaz.",
-                    ContextBudget::trim(prompt, 2048), opts);
+    m_ghostRunner->runAsync(o, ContextBudget::trim(prompt, 2048));
 }
 
 void MainWindow::inlineEditSelection() {
@@ -6292,7 +6406,8 @@ void MainWindow::inlineEditSelection() {
         this, "AI ile Yeniden Yaz", "Tarif:", QLineEdit::Normal, QString(), &ok);
     if (!ok || instruction.trimmed().isEmpty()) return;
     const QString path = e->filePath();
-    askAi("Kısa kod düzenleyici.", InlineEdit::buildPrompt(instruction, sel, aiLangFor(path)),
+    askAiTask(int(AiTask::Explain), "Kısa kod düzenleyici.",
+              InlineEdit::buildPrompt(instruction, sel, aiLangFor(path)),
           QJsonObject(), [this, path, st, ln, sel](QString reply, QString err) {
               if (!err.isEmpty()) return;
               const QString code = InlineEdit::extractCode(reply);
@@ -6319,7 +6434,7 @@ void MainWindow::fixSelectionAi() {
     }
     const QString path = e->filePath();
     m_status->setText("AI seçimi düzeltiyor...");
-    askAi("Kısa kod düzenleyici.",
+    askAiTask(int(AiTask::Explain), "Kısa kod düzenleyici.",
           InlineEdit::buildPrompt("Hataları düzelt, okunabilirliği artır, davranışı koru.",
                                   sel, aiLangFor(path)),
           QJsonObject(), [this, path, st, ln, sel](QString reply, QString err) {
@@ -6350,7 +6465,8 @@ void MainWindow::documentFunction() {
     QStringList slice;
     for (int i = start; i < qMin(start + 12, lines.size()); ++i) slice << lines[i];
     const QString path = e->filePath();
-    askAi("Belge yorum yazarı.", DocGen::buildPrompt(slice.join('\n'), aiLangFor(path)),
+    askAiTask(int(AiTask::Doc), "Belge yorum yazarı.",
+              DocGen::buildPrompt(slice.join('\n'), aiLangFor(path)),
           QJsonObject(), [this, path, start](QString reply, QString err) {
               if (!err.isEmpty()) return;
               const QString doc = InlineEdit::extractCode(reply);
@@ -6394,7 +6510,7 @@ void MainWindow::genTestForCurrent() {
                                          ContextBudget::maxFor(s.contextWindow) / 2));
     const QString code = ContextBudget::trim(e->toPlainText(),
                                             ContextBudget::maxFor(s.contextWindow) / 2);
-    askAi("Test yazarı.",
+    askAiTask(int(AiTask::Test), "Test yazarı.",
           TestGen::buildPrompt(code, aiLangFor(path), QFileInfo(target).fileName()),
           QJsonObject(), [this, target](QString reply, QString err) {
               if (!err.isEmpty()) return;
@@ -6424,7 +6540,8 @@ void MainWindow::commitMessageAi() {
         toast(2, "Staged değişiklik yok.");
         return;
     }
-    askAi("Commit mesaj yazarı.", CommitMsg::buildPrompt(diff), QJsonObject(),
+    askAiTask(int(AiTask::Commit), "Commit mesaj yazarı.", CommitMsg::buildPrompt(diff),
+              QJsonObject(),
           [this](QString reply, QString err) {
               if (!err.isEmpty()) return;
               const QString first = reply.trimmed().split('\n').first().trimmed();
@@ -6460,7 +6577,7 @@ void MainWindow::explainSymbol() {
     }
     const QRect r = e->cursorRect(c);
     const QString title = QString("%1 — %2").arg(QFileInfo(e->filePath()).fileName(), sym);
-    askAi("Kod açıklayıcı.",
+    askAiTask(int(AiTask::Explain), "Kod açıklayıcı.",
           QString("Şu %1 sembolünü 3-4 cümleyle Türkçe açıkla (bağlamdaki rolünü vurgula). "
                   "Kod bloğu kullanma:\nSembol: %2\nBağlam:\n%3")
               .arg(sym, sym, ctx.join('\n').left(3000)),
@@ -6484,7 +6601,7 @@ void MainWindow::promptLibrary() {
     auto* d = new PromptLibraryDialog(this);
     d->setAttribute(Qt::WA_DeleteOnClose);
     connect(d, &PromptLibraryDialog::runRequested, this,
-            [this, d](const QString& name, const QString& prompt) {
+            [this, d](const QString& name, const QString& prompt, const QString& taskHint) {
                 d->close();
                 showSidePanel(3);
                 // Stage 25: {{selection}} {{file}} {{date}} genişletme

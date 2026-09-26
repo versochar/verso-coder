@@ -14,7 +14,8 @@ public:
     explicit PromptLibraryDialog(QWidget* parent = nullptr);
 
 signals:
-    void runRequested(const QString& name, const QString& prompt);
+    // taskHint: "!test ..." gibi ipucundan gelen görev (boşsa serbest sohbet)
+    void runRequested(const QString& name, const QString& prompt, const QString& taskHint);
 
 private slots:
     void refresh();

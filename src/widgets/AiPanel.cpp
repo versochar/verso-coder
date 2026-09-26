@@ -1,6 +1,7 @@
 #include "AiPanel.h"
 #include "../core/EmbeddingClient.h"
 #include "../core/TokenStats.h"
+#include "../core/ai/AiRunner.h"
 #include "../core/ai/ProviderHealth.h"
 #include "../core/ai/TaskRouter.h"
 #include "../core/ai/UsageLedger.h"
@@ -754,8 +755,8 @@ void AiPanel::beginAnswer(const QString& model, const AppSettings& s, const QStr
             r.messages << m;
         } else {
             if (!imgs.isEmpty())
-                m_view->append("<i style='color:#cca700'>Bu sağlayıcı/model görsel "
-                               "desteklemiyor; ekler yok sayıldı.</i>");
+                m_view->append(QString("<i style='color:#cca700'>%1</i>")
+                                   .arg(AiRunner::imageBlockReason(spec.id, imgs.size())));
             r.messages << AiMessage::user(prompt);
         }
         if (m_stream->isChecked()) {
@@ -1278,9 +1279,15 @@ void AiPanel::attachImages() {
     if (paths.isEmpty()) return;
     const AppSettings s = SettingsManager::instance().load();
     const QString model = m_models->currentText().trimmed();
-    if (!s.aiVisionEnabled || !capsFor(model).vision)
-        m_view->append("<i style='color:#cca700'>Bu model görsel desteklemiyor ya da görü kapalı; "
-                       "ekler gönderimde yok sayılır.</i>");
+    // Stage 37: kesin karar — sağlayıcı+model birlikte değerlendirilir
+    const QString provId = ProviderPrefs::resolve().id;
+    if (!s.aiVisionEnabled || !capsFor(model).vision ||
+        !AiRunner::canRunWithImages(provId, model, 1)) {
+        m_view->append(QString("<i style='color:#cca700'>%1</i>")
+                           .arg(!s.aiVisionEnabled
+                                    ? QStringLiteral("Görü kapalı; ekler gönderimde yok sayılır.")
+                                    : AiRunner::imageBlockReason(provId, 1)));
+    }
     int added = 0;
     for (const QString& p : paths) {
         const QImage img(p);
@@ -1327,6 +1334,29 @@ void AiPanel::refreshImageChips() {
 }
 
 // Sohbet geçmişini sıkıştır: eski turlar yerel özet, son turlar tam metin.
+// Stage 37: konuşma özetini sağlayıcıdan ister (AiRunner, arka planda).
+// Aynı anda tek istek; sonuç m_convSummary'ye yazılır, sonraki turda kullanılır.
+void AiPanel::requestLlmSummary(const QList<ConvTurn>& turns) {
+    if (m_summaryBusy) return; // aynı anda tek özet isteği
+    const QList<ConvTurn> older = ConversationSummarizer::olderTurns(turns, 6);
+    if (older.isEmpty()) return;
+    m_summaryBusy = true;
+    if (!m_summaryRunner) {
+        m_summaryRunner = new AiRunner(this);
+        m_summaryRunner->setSecretStore(&m_secrets);
+    }
+    const QString prompt = ConversationSummarizer::summarizePrompt(older, 6000);
+    AiRunner::Options o = AiRunner::optionsFor(AiTask::Summarize);
+    o.allowFailover = true;
+    connect(m_summaryRunner, &AiRunner::finished, this,
+            [this](const AiRunner::Result& r) {
+                if (r.ok && !r.text.trimmed().isEmpty()) m_convSummary = r.text.trimmed();
+                m_summaryBusy = false;
+            },
+            Qt::SingleShotConnection);
+    m_summaryRunner->runAsync(o, prompt);
+}
+
 QString AiPanel::conversationContext() {
     const AppSettings s = SettingsManager::instance().load();
     if (s.aiSummaryTokens <= 0 || m_activeSessionId.isEmpty() || !m_chatStore) return {};
@@ -1336,7 +1366,12 @@ QString AiPanel::conversationContext() {
         if (m.role == "user" || m.role == "ai") turns << ConvTurn{m.role, m.text};
     if (turns.size() < 4) return {}; // kısa sohbet: geçmiş eklemeye gerek yok
 
-    if (ConversationSummarizer::needed(turns, m_convSummary, s.aiSummaryTokens, 6)) {
+    const bool needSummary = ConversationSummarizer::needed(turns, m_convSummary,
+                                                            s.aiSummaryTokens, 6);
+    // Stage 37: özet gerekiyorsa sağlayıcıdan arka planda iste (bloklamaz);
+    // gelene kadar yerel sezgisel özet kullanılır.
+    if (needSummary) requestLlmSummary(turns);
+    if (needSummary && m_convSummary.isEmpty()) {
         QString summary;
         for (const ConvTurn& t : ConversationSummarizer::olderTurns(turns, 6)) {
             const QString line = (t.role == "ai" ? "AI: " : "Sen: ") +
@@ -1413,8 +1448,19 @@ void AiPanel::sendArena() {
         return;
     }
     prompt += "\n" + buildContext(prompt);
-    auto* d = new ModelArenaDialog(s.ollamaHost, models, s.systemPrompt, prompt,
-                                   currentOptions(), this);
+    // Stage 37: arena artık (sağlayıcı, model) hedefleriyle çalışır; yapılandırılmış
+    // sağlayıcılar da (anahtarı varsa) havuza otomatik katılır.
+    QList<ArenaTarget> targets = ModelArenaDialog::defaultTargets(
+        models, m_provider ? m_provider->currentData().toString() : ProviderPrefs::activeProvider());
+    if (targets.isEmpty()) targets << ArenaTarget{m_provider->currentData().toString(),
+                                                 m_models->currentText().trimmed()};
+    auto* d = new ModelArenaDialog(targets, s.systemPrompt, prompt, currentOptions(), this);
+    connect(d, &ModelArenaDialog::adoptRequested, this, [this](const QString& text) {
+        m_view->append("<hr><b>AI (arena kazananı):</b><br>" +
+                       text.toHtmlEscaped().replace("\n", "<br>"));
+        m_lastResponse = text;
+        persistMessage("ai", text);
+    });
     d->setAttribute(Qt::WA_DeleteOnClose);
     d->show();
 }

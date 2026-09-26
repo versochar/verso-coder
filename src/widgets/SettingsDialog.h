@@ -84,6 +84,13 @@ private:
     QSpinBox* m_quotaTokens = nullptr;
     QLabel* m_usageLabel = nullptr;
     QLabel* m_healthLabel = nullptr;
+    // Stage 37: kullanım paneli
+    void buildUsageTab();
+    void loadUsageTab();
+    QWidget* m_usagePage = nullptr;
+    QTableWidget* m_usageDays = nullptr;
+    QTableWidget* m_usageTable = nullptr;
+    QLabel* m_usageSummary = nullptr;
     QSpinBox* m_threads;    // cpu threads
     QSpinBox* m_gpu;        // num_gpu
     QSlider* m_tempSlider;

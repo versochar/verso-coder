@@ -29,6 +29,10 @@ struct ModelCapabilities {
     // İki kaynağı birleştir: a (daha zayıf) + b (daha güçlü) → b kazanır
     static ModelCapabilities merge(const ModelCapabilities& a, const ModelCapabilities& b);
 
+    // Model adı gerçekten bir gömme modeli mi? (sağlayıcının gömme *desteklemesi*
+    // ile bu modelin gömme olması farklıdır: Groq/Mistral da gömme yapar.)
+    static bool isEmbeddingModel(const QString& model);
+
     bool supportsImageInput() const { return vision; }
     // Görü/araç/gömme/araç çağırma yeteneklerinden herhangi biri var mı?
     bool anyUse() const { return completion || embedding; }

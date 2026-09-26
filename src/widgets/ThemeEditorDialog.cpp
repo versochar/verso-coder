@@ -1,5 +1,8 @@
 #include "ThemeEditorDialog.h"
-#include "../core/OllamaClient.h"
+#include "../core/ai/AiProfiles.h"
+#include "../core/ai/AiRunner.h"
+#include "../core/ai/ProviderPrefs.h"
+#include "../core/ai/SecretStore.h"
 #include "../core/SettingsManager.h"
 #include "../core/ThemeManager.h"
 #include "../core/ThemeStore.h"
@@ -109,15 +112,23 @@ ThemeEditorDialog::ThemeEditorDialog(const QString& baseTheme, QWidget* parent)
         reject();
     });
 
-    // Model listesi + istemci
-    m_client = new OllamaClient(this);
+    // Stage 37: model listesi etkin sağlayıcıdan gelir (tüm sağlayıcılar)
     AppSettings s = SettingsManager::instance().load();
-    m_client->setHost(s.ollamaHost);
+    m_secrets = new SecretStore();
+    m_runner = new AiRunner(this);
+    m_runner->setSecretStore(m_secrets);
     m_model->addItem(s.ollamaModel);
-    connect(m_client, &OllamaClient::modelsReady, this, [this](const QStringList& ms) {
+    m_model->setCurrentText(ProviderPrefs::modelFor(ProviderPrefs::activeProvider(),
+                                                   s.ollamaModel));
+    m_runner->fetchModels([this](const QStringList& ms) {
+        if (ms.isEmpty()) return;
         m_model->clear();
         m_model->addItems(ms);
-        m_aiStatus->setText(QString("%1 model bulundu.").arg(ms.size()));
+        const QString want = ProviderPrefs::modelFor(ProviderPrefs::activeProvider());
+        if (!want.isEmpty() && ms.contains(want)) m_model->setCurrentText(want);
+        m_aiStatus->setText(QString("%1 model bulundu (%2).")
+                                .arg(ms.size())
+                                .arg(ProviderPrefs::resolve().label));
     });
 
     preview();
@@ -279,8 +290,19 @@ void ThemeEditorDialog::saveTheme() {
 }
 
 void ThemeEditorDialog::refreshModels() {
-    m_aiStatus->setText("Modeller alınıyor...");
-    m_client->fetchModels();
+    m_aiStatus->setText(QString("Modeller alınıyor (%1)...").arg(ProviderPrefs::resolve().label));
+    if (!m_runner) return;
+    m_runner->fetchModels([this](const QStringList& ms) {
+        if (ms.isEmpty()) {
+            m_aiStatus->setText("Model listesi alınamadı.");
+            return;
+        }
+        const QString cur = m_model->currentText();
+        m_model->clear();
+        m_model->addItems(ms);
+        if (!cur.isEmpty() && ms.contains(cur)) m_model->setCurrentText(cur);
+        m_aiStatus->setText(QString("%1 model bulundu.").arg(ms.size()));
+    });
 }
 
 QString ThemeEditorDialog::aiSystemPrompt() const {
@@ -304,17 +326,20 @@ void ThemeEditorDialog::generateWithAi() {
     m_aiStatus->setText("Üretiliyor... (bu biraz sürebilir)");
     QApplication::setOverrideCursor(Qt::WaitCursor);
     QApplication::processEvents();
-    QString err;
-    const QString reply = m_client->chatSync(
-        m_model->currentText().trimmed(), aiSystemPrompt(),
-        "Şu tarifte bir editör teması üret: " + desc,
-        QJsonObject{{"temperature", 0.7}}, err, 120000);
+    // Stage 37: tek AI cephesi — sağlayıcı seçimi/yönlendirme/kota burada
+    AiRunner::Options o = AiRunner::optionsFor(AiTask::Theme, aiSystemPrompt());
+    o.temperature = 0.7;
+    o.model = m_model->currentText().trimmed();
+    o.bypassRouting = true; // kullanıcı modeli seçti
+    o.timeoutMs = 120000;
+    const AiRunner::Result r = m_runner->run(o, "Şu tarifte bir editör teması üret: " + desc);
     QApplication::restoreOverrideCursor();
     m_generate->setEnabled(true);
-    if (!err.isEmpty()) {
-        m_aiStatus->setText("Hata: " + err);
+    if (!r.ok) {
+        m_aiStatus->setText("Hata: " + r.error);
         return;
     }
+    const QString reply = r.text;
     const QString json = ThemeValidator::extractJson(reply);
     QString verr;
     if (!ThemeValidator::validate(json, &verr)) {

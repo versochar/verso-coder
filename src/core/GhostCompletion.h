@@ -5,8 +5,25 @@
 // Stage 15: hayalet tamamlama — FIM istemi + yanıt temizliği + tetik kuralları.
 class GhostCompletion {
 public:
+    // Stage 37: üç mod.
+    //  Fim    — yerel modeller (Ollama) için özel "ara" + "yol" etiketli istem
+    //  Prefix — bulut sağlayıcılar için düz önek istemi (FIM desteği yok)
+    //  Off    — bulutta varsayılan kapalı (yanlış modelde hayalet metin üretmesin)
+    enum class Mode { Fim, Prefix, Off };
+
+    // Sağlayıcı + kullanıcı tercihine göre mod seçimi
+    static Mode modeFor(const QString& providerId, bool cloudEnabled);
+    static QString modeLabel(Mode m);
+    // Bu sağlayıcı/modda FIM etiketleri kullanılır mı?
+    static bool wantsSuffix(const QString& providerId, bool cloudEnabled);
+
     // Önekteki son N satır + sonekteki ilk M satırı ile FIM istemi kur
     static QString buildPrompt(const QString& prefix, const QString& suffix,
+                               const QString& lang);
+    // Bulut için düz önek istemi (sonek bilgisi yok)
+    static QString buildPromptPrefix(const QString& prefix, const QString& lang);
+    // Seçilen moda göre istem kurar
+    static QString buildPrompt(Mode mode, const QString& prefix, const QString& suffix,
                                const QString& lang);
     // Yanıtı tek hayalet öneriye indir (fence temizle, en fazla 3 satır)
     static QString clean(const QString& reply, const QString& prefixEnd);

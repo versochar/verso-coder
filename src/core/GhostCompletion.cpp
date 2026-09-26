@@ -1,4 +1,5 @@
 #include "GhostCompletion.h"
+#include "ai/LlmProvider.h"
 
 QString GhostCompletion::buildPrompt(const QString& prefix, const QString& suffix,
                                      const QString& lang) {
@@ -51,4 +52,42 @@ bool GhostCompletion::stillValid(const QString& currentPrefix,
     if (ghostPrefix.isEmpty()) return false;
     // Kullanıcı yazmaya devam ettiyse önek, istek anındaki öneki kapsar
     return currentPrefix.startsWith(ghostPrefix);
+}
+
+GhostCompletion::Mode GhostCompletion::modeFor(const QString& providerId, bool cloudEnabled) {
+    const ProviderSpec spec = ProviderRegistry::byId(providerId);
+    const bool local = spec.id.isEmpty() || spec.kind == ProviderKind::Ollama;
+    if (local) return Mode::Fim;
+    return cloudEnabled ? Mode::Prefix : Mode::Off;
+}
+
+QString GhostCompletion::modeLabel(Mode m) {
+    switch (m) {
+    case Mode::Fim: return QStringLiteral("FIM (yerel)");
+    case Mode::Prefix: return QStringLiteral("önek (bulut)");
+    case Mode::Off: return QStringLiteral("kapalı");
+    }
+    return QStringLiteral("?");
+}
+
+bool GhostCompletion::wantsSuffix(const QString& providerId, bool cloudEnabled) {
+    return modeFor(providerId, cloudEnabled) == Mode::Fim;
+}
+
+QString GhostCompletion::buildPromptPrefix(const QString& prefix, const QString& lang) {
+    // Son ~40 satır bağlam; yalnız devam kodunu iste
+    const QStringList lines = prefix.split(QLatin1Char('\n'));
+    const int take = qMin(lines.size(), 40);
+    const QStringList tail = lines.mid(lines.size() - take);
+    return QStringLiteral("Aşağıdaki %1 kodunun devamını yaz. Yalnız kod, açıklama yok.\n\n"
+                          "```%2\n%3")
+        .arg(lang)
+        .arg(lang.isEmpty() ? QString() : lang,
+             tail.join(QLatin1Char('\n')));
+}
+
+QString GhostCompletion::buildPrompt(Mode mode, const QString& prefix, const QString& suffix,
+                                     const QString& lang) {
+    if (mode == Mode::Fim) return buildPrompt(prefix, suffix, lang);
+    return buildPromptPrefix(prefix, lang);
 }

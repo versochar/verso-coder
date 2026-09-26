@@ -146,3 +146,9 @@ QStringList ModelCapabilities::badges() const {
     if (freeTier) out << "ücretsiz";
     return out;
 }
+
+bool ModelCapabilities::isEmbeddingModel(const QString& model) {
+    const QString m = model.toLower();
+    return m.contains("embed") || m.contains("nv-embed") || m.contains("e5-v") ||
+           m.contains("minilm") || m.contains("bge-") || m.contains("arctic");
+}

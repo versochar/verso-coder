@@ -143,8 +143,10 @@ void PromptLibraryDialog::removeSelected() {
 void PromptLibraryDialog::runSelected() {
     const QString n = currentName();
     if (n.isEmpty()) return;
-    const QString prompt = m_text->toPlainText();
-    if (!prompt.isEmpty()) emit runRequested(n, prompt);
+    const QString raw = m_text->toPlainText();
+    const QString prompt = PromptLibrary::stripTaskHint(raw);
+    if (prompt.isEmpty()) return;
+    emit runRequested(n, prompt, PromptLibrary::taskHint(raw));
 }
 
 void PromptLibraryDialog::importJson() {

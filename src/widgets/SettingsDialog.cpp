@@ -17,6 +17,7 @@
 #include "../core/ai/SecretStore.h"
 #include "../core/ai/TaskRouter.h"
 #include "../core/ai/UsageLedger.h"
+#include "../core/ModelCapabilities.h"
 #include "../core/TokenStats.h"
 #include "../core/SettingsIO.h"
 #include "../core/SettingsManager.h"
@@ -324,6 +325,9 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     // --- Stage 35: AI Sağlayıcıları (çok sağlayıcı) ---
     buildProviderTab();
     tabs->addTab(m_provPage, "AI Sağlayıcıları");
+    // --- Stage 37: kullanım paneli ---
+    buildUsageTab();
+    tabs->addTab(m_usagePage, "AI Kullanımı");
 
     // --- Stage 9: Görünüm (tasarım sistemi) ---
     auto* look = new QWidget(this);
@@ -1076,7 +1080,6 @@ void SettingsDialog::onProviderBench() {
     QList<ProviderSpec> pool;
     const QString active = m_provCombo ? m_provCombo->currentData().toString() : QString();
     for (const ProviderSpec& spec : ProviderRegistry::all()) {
-        if (spec.supportsEmbed) continue; // yalnız sohbet sağlayıcıları
         if (spec.requiresKey() && store.effectiveKey(spec.id).isEmpty()) continue;
         if (spec.id == active) continue;
         pool << spec;
@@ -1097,6 +1100,7 @@ void SettingsDialog::onProviderBench() {
         const QString model = ProviderPrefs::modelFor(
             spec.id, ProviderRegistry::sampleModels(spec.id).value(0));
         if (model.isEmpty()) continue;
+        if (ModelCapabilities::isEmbeddingModel(model)) continue; // gömme modeli yarışmaz
         LlmClient client;
         client.setProvider(spec);
         client.setSecretStore(&store);
@@ -1143,6 +1147,120 @@ void SettingsDialog::onProviderBench() {
                             return acc + ProviderBench::explain(r) + "\n";
                         }));
     box.exec();
+}
+
+// ============================================================
+// Stage 37: AI Kullanımı sekmesi — günlük token/maliyet, sağlayıcı dağılımı,
+// kota durumu, sağlık tablosu
+// ============================================================
+void SettingsDialog::buildUsageTab() {
+    m_usagePage = new QWidget(this);
+    auto* root = new QVBoxLayout(m_usagePage);
+
+    m_usageSummary = new QLabel(m_usagePage);
+    m_usageSummary->setWordWrap(true);
+    m_usageSummary->setStyleSheet("color:#858585;");
+    root->addWidget(m_usageSummary);
+
+    auto* daysLabel = new QLabel("Son 14 gün", m_usagePage);
+    daysLabel->setStyleSheet("color:#569cd6;font-weight:600;");
+    root->addWidget(daysLabel);
+    m_usageDays = new QTableWidget(0, 5, m_usagePage);
+    auto* days = m_usageDays;
+    days->setHorizontalHeaderLabels({"Tarih", "Çağrı", "Token", "Maliyet", "Not"});
+    days->horizontalHeader()->setStretchLastSection(true);
+    days->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    days->setSelectionBehavior(QAbstractItemView::SelectRows);
+    days->setMaximumHeight(190);
+    root->addWidget(days);
+
+    auto* provLabel = new QLabel("Sağlayıcı dağılımı (bugün)", m_usagePage);
+    provLabel->setStyleSheet("color:#569cd6;font-weight:600;");
+    root->addWidget(provLabel);
+    m_usageTable = new QTableWidget(0, 6, m_usagePage);
+    m_usageTable->setHorizontalHeaderLabels({"Sağlayıcı", "Çağrı", "Giriş", "Çıkış", "Maliyet",
+                                            "Sağlık"});
+    m_usageTable->horizontalHeader()->setStretchLastSection(true);
+    m_usageTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_usageTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    root->addWidget(m_usageTable, 1);
+
+    auto* row = new QHBoxLayout;
+    auto* bRefresh = new QPushButton("Yenile", m_usagePage);
+    auto* bClear = new QPushButton("Geçmişi Temizle", m_usagePage);
+    bClear->setToolTip("Tüm kullanım geçmişi silinir (kotalar korunur).");
+    row->addWidget(bRefresh);
+    row->addWidget(bClear);
+    row->addStretch(1);
+    root->addLayout(row);
+
+    connect(bRefresh, &QPushButton::clicked, this, [this]() { loadUsageTab(); });
+    connect(bClear, &QPushButton::clicked, this, [this]() {
+        const auto r = QMessageBox::question(this, "Kullanım geçmişi",
+                                            "Tüm token kullanım geçmişi silinsin mi?",
+                                            QMessageBox::Yes | QMessageBox::No);
+        if (r != QMessageBox::Yes) return;
+        UsageLedger::instance().reset();
+        loadUsageTab();
+    });
+    loadUsageTab();
+}
+
+void SettingsDialog::loadUsageTab() {
+    if (!m_usageTable) return;
+    UsageLedger& u = UsageLedger::instance();
+    const UsageLedger::Day today = u.today();
+    m_usageSummary->setText(
+        QString("Bugün: %1 çağrı · %2 token (giriş %3 / çıkış %4) · %5")
+            .arg(today.calls)
+            .arg(today.total())
+            .arg(today.prompt)
+            .arg(today.eval)
+            .arg(today.usd > 0.0 ? QString("~$%1").arg(today.usd, 0, 'f', 4)
+                                  : QString("ücretsiz")));
+    // Gün tablosu
+    if (m_usageDays) {
+        auto* days = m_usageDays;
+        const auto hist = u.lastDays(14);
+        days->setRowCount(int(hist.size()));
+        for (int i = 0; i < hist.size(); ++i) {
+            const UsageLedger::Day& d = hist.at(i).second;
+            days->setItem(i, 0, new QTableWidgetItem(hist.at(i).first));
+            days->setItem(i, 1, new QTableWidgetItem(QString::number(d.calls)));
+            days->setItem(i, 2, new QTableWidgetItem(QString::number(d.total())));
+            days->setItem(i, 3, new QTableWidgetItem(
+                                   d.usd > 0.0 ? QString("$%1").arg(d.usd, 0, 'f', 4)
+                                               : QString("—")));
+            days->setItem(i, 4, new QTableWidgetItem(QString()));
+        }
+    }
+    // Sağlayıcı tablosu
+    QStringList ids = u.providers();
+    const QString active = m_provCombo ? m_provCombo->currentData().toString() : QString();
+    if (!active.isEmpty() && !ids.contains(active)) ids.prepend(active);
+    m_usageTable->setRowCount(int(ids.size()));
+    for (int i = 0; i < ids.size(); ++i) {
+        const QString id = ids.at(i);
+        const UsageLedger::Day d = u.today(id);
+        const ProviderSpec spec = ProviderRegistry::byId(id);
+        m_usageTable->setItem(i, 0, new QTableWidgetItem(spec.label.isEmpty() ? id : spec.label));
+        m_usageTable->setItem(i, 1, new QTableWidgetItem(QString::number(d.calls)));
+        m_usageTable->setItem(i, 2, new QTableWidgetItem(QString::number(d.prompt)));
+        m_usageTable->setItem(i, 3, new QTableWidgetItem(QString::number(d.eval)));
+        m_usageTable->setItem(i, 4, new QTableWidgetItem(
+                                       d.usd > 0.0 ? QString("$%1").arg(d.usd, 0, 'f', 4)
+                                                   : QString("—")));
+        const UsageLedger::Quota q = u.quota(id);
+        QString health = ProviderHealth::instance().statusLine(id);
+        if (q.limited())
+            health += QString(" · kota %1/%2")
+                          .arg(d.calls)
+                          .arg(q.maxCalls > 0 ? q.maxCalls : q.maxTokens);
+        QString why;
+        if (u.quotaExceeded(id, why)) health += " · ⚠ " + why;
+        m_usageTable->setItem(i, 5, new QTableWidgetItem(health));
+    }
+    m_usageTable->resizeColumnsToContents();
 }
 
 void SettingsDialog::saveAll() {    AppSettings cur = SettingsManager::instance().load(); // oturum alanlarını koru
