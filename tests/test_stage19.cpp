@@ -177,11 +177,12 @@ static void testPluginEngine() {
     f3.write("// @permission fs.write\n"
              "verso.registerCommand(\"w\", \"W\", function(p) { return verso.writeFile(p, \"ok\"); });\n");
     f3.close();
+    // Stage 41: eklenti yazma çalışma alanına kapsamlıdır — kök kurulur
+    eng.setWorkspaceRoot(dir3.path());
     eng.loadAll(dir3.path());
-    const QString target = dir3.filePath("out.txt");
-    const QJSValue r3 = eng.callCommand("plugin.writer.w", target);
+    const QJSValue r3 = eng.callCommand("plugin.writer.w", "out.txt");
     CHECK(r3.toBool() == true);
-    QFile check(target);
+    QFile check(dir3.filePath("out.txt"));
     CHECK(check.open(QIODevice::ReadOnly) &&
           QString::fromUtf8(check.readAll()) == "ok");
 }

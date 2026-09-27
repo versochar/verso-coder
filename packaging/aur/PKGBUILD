@@ -6,7 +6,7 @@ pkgdesc="Yerel öncelikli Qt6 kod editörü — çok sağlayıcılı AI, ajan, L
 arch=('x86_64')
 url="https://github.com/versochar/verso-coder"
 license=('MIT')
-depends=('qt6-base' 'qt6-svg' 'qt6-websockets' 'qt6-qml' 'hunspell' 'hicolor-icon-theme')
+depends=('qt6-base' 'qt6-svg' 'qt6-websockets' 'qt6-declarative' 'hunspell' 'hicolor-icon-theme')
 makedepends=('cmake' 'pkgconf')
 optdepends=('clangd: C/C++ dil sunucusu'
             'pyright: Python dil sunucusu'

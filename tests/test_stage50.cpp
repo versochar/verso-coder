@@ -3,7 +3,9 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QMap>
 #include <QRegularExpression>
+#include <QSet>
 #include <QSettings>
 #include <cstdio>
 
@@ -80,6 +82,26 @@ int main(int argc, char** argv) {
         }
     }
     fprintf(stderr, "NOT: %d kaynak denetlendi\n", checked);
+
+    // Hedef başına tekrarlanan kaynak yok (ODR/link kırılması üretir)
+    {
+        QRegularExpression reExe("add_executable\\((\\w+)[\\s\\S]*?\\\)");
+        auto it2 = reExe.globalMatch(cmake);
+        while (it2.hasNext()) {
+            const QString body = it2.next().captured(0);
+            QRegularExpression reSrc("^\\s*(\\S+\.cpp)\\s*\$",
+                                     QRegularExpression::MultilineOption);
+            QSet<QString> seen;
+            auto it3 = reSrc.globalMatch(body);
+            while (it3.hasNext()) {
+                const QString src = it3.next().captured(1);
+                if (src.startsWith("\$")) continue;
+                CHECK2(!seen.contains(src),
+                       qPrintable(QString("tekrar: %1").arg(src)));
+                seen << src;
+            }
+        }
+    }
 
     // Beklenen paketler: stage19..50 + ui (tam yol haritası)
     QStringList expected = {"ui_widgets", "ui_smoke", "stage50"};
