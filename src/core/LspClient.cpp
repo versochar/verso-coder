@@ -101,6 +101,25 @@ void LspClient::stop() {
         if (!m_proc.waitForFinished(1500)) m_proc.kill();
     }
     m_ready = false;
+    // Stage 42: bekleyen istekleri düşür (geç yanıtlar hayalet çağrı yapmasın)
+    for (QTimer* t : m_pendingTimers) {
+        t->stop();
+        t->deleteLater();
+    }
+    m_pendingTimers.clear();
+    m_pendingMethod.clear();
+    m_handlers.clear();
+}
+
+void LspClient::onRequestTimeout(int id) {
+    auto it = m_handlers.find(id);
+    if (it == m_handlers.end()) return; // yanıt çoktan geldi
+    m_handlers.erase(it);
+    if (QTimer* t = m_pendingTimers.take(id)) t->deleteLater();
+    const QString method = m_pendingMethod.take(id);
+    logMsg("!", QString("zaman aşımı: %1 (#%2)").arg(method).arg(id));
+    cancelRequest(id); // sunucuya da bildir (ölüyse no-op)
+    emit requestTimedOut(method, id);
 }
 
 bool LspClient::isRunning() const {
@@ -241,6 +260,12 @@ void LspClient::handleMessage(const QJsonObject& obj) {
         if (it != m_handlers.end()) {
             auto h = *it;
             m_handlers.erase(it);
+            // Stage 42: yanıt geldi — zamanlayıcıyı temizle
+            if (QTimer* t = m_pendingTimers.take(id)) {
+                t->stop();
+                t->deleteLater();
+            }
+            m_pendingMethod.remove(id);
             // Stage 13: sonuç dizi de olabilir (references/completion/symbols)
             const QJsonValue r = obj.value("result");
             if (r.isObject()) h(r.toObject());
@@ -266,6 +291,15 @@ int LspClient::request(const QString& method, const QJsonObject& params,
     int id = m_nextId++;
     m_handlers[id] = handler;
     sendMessage(QJsonObject{{"jsonrpc", "2.0"}, {"id", id}, {"method", method}, {"params", params}});
+    // Stage 42: zaman aşımı — yanıtsız sunucuda handler sonsuza dek kalmasın
+    if (m_requestTimeoutMs > 0) {
+        auto* t = new QTimer(this);
+        t->setSingleShot(true);
+        m_pendingMethod[id] = method;
+        m_pendingTimers[id] = t;
+        connect(t, &QTimer::timeout, this, [this, id]() { onRequestTimeout(id); });
+        t->start(m_requestTimeoutMs);
+    }
     return id;
 }
 

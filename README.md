@@ -83,7 +83,7 @@ cmake --build build -j
 ./build/verso-coder
 ```
 
-## Yol haritası (20 + 464 özellik, 41 stage — tamamlandı)
+## Yol haritası (20 + 471 özellik, 42 stage — tamamlandı)
 
 - **Stage 1 — Editör temeli ✅ (yapıldı):** oturum geri yükleme (açık dosyalar + aktif sekme + imleç), otomatik kaydetme (2 sn) + crash yedekleme, harici değişiklik uyarısı, hızlı açma (Ctrl+P fuzzy), font boyutu + sekme genişliği ayarı, status bar'da Ln/Col + LF/CRLF + UTF-8, otomatik parantez kapatma.
 - **Stage 5 — Editör gücü ✅ (yapıldı):** çoklu imleç (Alt+tık, Ctrl+D, Esc), kod katlama (gutter ▸/▾, Ctrl+Shift+[/], oturumda kalıcı), akıllı girinti + `}` geri-girinti + blok Tab, bracket eşleşme (derinlik renkli) + girinti kılavuzları, aramada ±3 satır önizleme, split editör (2 grup + taşı/böl + grup oturumu), satır işlemleri (taşı/çoğalt/sırala/trim), .editorconfig, büyük-dosya önizleme modu, hunspell yazım denetimi (TR+EN, F7, sağ-tık öneri).
@@ -290,6 +290,10 @@ src/core/ai/ProviderBench.*             → sağlayıcı mikro-karşılaştırma
 src/core/ai/AiRunner.* + AiProfiles.h   → tek AI cephesi (12 görev) + görev profilleri
 src/widgets/ModelArenaDialog.*         → çok sağlayıcı arena (gerçek maliyet, kazananı al)
 src/core/PerfTools.*                  → ikili sez, boyut süzgeci, LRU önbellek, ters indeks
+- **Stage 42 — LSP Dayanıklılık ✅ (yapıldı, canlı clangd):** `LspClient::request`'te **zaman aşımı yoktu**: yanıtsız sunucuda handler'lar sonsuza dek birikiyor, geç yanıtlar kapanmış düzenleyicilere hayalet çağrı yapıyordu. Artık her istekte 30 sn zaman aşımı (ayarlanabilir, 0 = kapalı), aşımda handler düşer + `requestTimedOut` sinyali + sunucuya `$/cancelRequest`; `stop()` bekleyenleri temizler. `test_stage42` (40 kontrol: sahte JSON-RPC sunucusuna karşı initialize/hover/zaman aşımı/çökme-temizliği + **gerçek clangd hover** — `toplanan` değişkeni bulundu) + ctest **26/26**. Sürüm 2.4.0.
+
+**LSP matriksi (kablolu → doğrulandı):** clangd (hover/tanım/tamamlama/imza/semantik, canlı ✅) · pylsp (aynı yol, canlı ❌ — makinede yok) · rust-analyzer/gopls (kayıt + yeniden başlatma, canlı ❌). Yeniden başlatma fırtına koruması (60 sn'de 3 çökme → 5 dk bekleme) + çökme sonrası belge geri-açma mevcut. `pyright` bu makinede yok; kurulu makinede `ai-probe` benzeri canlı doğrulama Stage 43'e not düşüldü.
+
 - **Stage 41 — Eklenti Güvenliği ✅ (yapıldı):** Stage 22/29 motoru zaten vardı; denetimde **gerçek açık** bulundu: `fs.read`/`fs.write` izni olan eklenti **herhangi bir yolu** okuyup yazabiliyordu (`/etc/passwd`, `~/.ssh/id_rsa` — `m_wsRoot` kuruluyor ama hiç kullanılmıyordu). Artık eklenti dosya erişimi `PathGuard` ile çalışma alanına kapsanır (ajanla aynı kural), kök yoksa erişim yok, ret `pluginLog`'a yazılır. Bilinmeyen `@permission` satırları sessizce yutulurken artık günlüğe bildirilir. Yeni API: `verso.currentFile()` (yol verir, okuma ayrı izin ister). Referans eklenti `kelime.js` (kelime sayacı, yalnız read+ui). `test_stage41` (27 kontrol: kapsam kaçışı, sembolik bağlantı, köksüz erişim, izin reddi, karantina, olay, `file://` reddi) + ctest **25/25**. Sürüm 2.3.0.
 
 **Eklenti güvenlik modeli:** izinler `// @permission` başlığında (`fs.read`, `fs.write`, `events`, `ui`, `net`); bilinmeyen izin yüklenmez + bildirilir. İzin olsa bile dosya erişimi çalışma alanı köküne kapsanır; ağ yalnız http(s), 1 MB kapaklı, 1–60 sn zaman aşımlı. 3 JS hatasında karantina (kalıcı). Yazma onayı istenmez — eklentiye `fs.write` verildiğinde kök içi yazma serbesttir, bu yüzden izin verirken dikkat.

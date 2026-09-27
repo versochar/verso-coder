@@ -1,6 +1,7 @@
 #pragma once
 #include <QJsonObject>
 #include <QObject>
+#include <QTimer>
 #include <QProcess>
 #include <functional>
 
@@ -98,12 +99,15 @@ signals:
     void started();
     void diagnosticsReady(const QString& path, const QList<LspDiag>& diags);
     void serverError(const QString& msg);
+    // Stage 42: istek zaman aşımı (yöntem + kimlik; handler düşürülür)
+    void requestTimedOut(const QString& method, int id);
     // Stage 27: $/progress (begin/report/end)
     void progressUpdate(const QString& kind, const QString& title, int percent);
 
 private slots:
     void onReadyRead();
     void onFinished(int code);
+    void onRequestTimeout(int id); // Stage 42
 
 private:
     void sendMessage(const QJsonObject& obj);
@@ -122,5 +126,15 @@ private:
     void logMsg(const QString& dir, const QString& text);
     QJsonObject m_caps; // Stage 13: sunucu yetenekleri (initialize result.capabilities)
     QMap<int, std::function<void(QJsonObject)>> m_handlers;
+    // Stage 42: zaman aşımı takibi (id -> yöntem + zamanlayıcı)
+    QMap<int, QString> m_pendingMethod;
+    QMap<int, QTimer*> m_pendingTimers;
+    int m_requestTimeoutMs = 30000;
     QMap<QString, int> m_versions; // path -> version
+public:
+    // Stage 42: istek zaman aşımı (varsayılan 30 sn; 0 = kapalı)
+    void setRequestTimeoutMs(int ms) { m_requestTimeoutMs = qMax(0, ms); }
+    int requestTimeoutMs() const { return m_requestTimeoutMs; }
+    int pendingCount() const { return m_handlers.size(); }
+private:
 };
