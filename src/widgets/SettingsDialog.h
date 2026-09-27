@@ -32,6 +32,8 @@ private:
     QComboBox* m_lang;
     QComboBox* m_theme;
     QLineEdit* m_host;
+    QCheckBox* m_ollamaAutoStart = nullptr; // Stage 50
+    QCheckBox* m_lazyModels = nullptr;      // Stage 50
     QComboBox* m_backend;   // CUDA | ROCm | Vulkan | CPU
     QComboBox* m_model;
     QSpinBox* m_ctx;        // context window

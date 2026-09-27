@@ -153,6 +153,13 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     auto* af = new QFormLayout(ai);
     m_host = new QLineEdit(s.ollamaHost, ai);
     m_host->setPlaceholderText("http://localhost:11434");
+    // Stage 48/50: görünür anahtarlar (daha önce yalnız kodda okunuyordu)
+    m_ollamaAutoStart = new QCheckBox("Ollama kapalıysa açılışta başlatmayı dene", ai);
+    m_ollamaAutoStart->setChecked(s.ollamaAutoStart);
+    af->addRow("", m_ollamaAutoStart);
+    m_lazyModels = new QCheckBox("Model kataloğunu tembel yükle (açılışta yoklama yok)", ai);
+    m_lazyModels->setChecked(QSettings("Verso", "VersoCoder").value("ai/lazyModels", true).toBool());
+    af->addRow("", m_lazyModels);
     m_model = new QComboBox(ai);
     m_model->setEditable(true);
     m_model->addItem(s.ollamaModel);
@@ -1451,6 +1458,8 @@ void SettingsDialog::saveAll() {    AppSettings cur = SettingsManager::instance(
     s.language = (m_lang->currentIndex() == 1) ? "en" : "tr";
     s.theme = m_theme->currentText();
     s.ollamaHost = m_host->text().trimmed();
+    s.ollamaAutoStart = m_ollamaAutoStart && m_ollamaAutoStart->isChecked();
+    QSettings("Verso", "VersoCoder").setValue("ai/lazyModels", m_lazyModels && m_lazyModels->isChecked());
     s.ollamaModel = m_model->currentText().trimmed();
     s.contextWindow = m_ctx->value();
     s.aiTokenBudget = m_budget ? m_budget->value() : 0; // Stage 25
