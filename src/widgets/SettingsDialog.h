@@ -51,6 +51,10 @@ private:
     QCheckBox* m_agentMemory = nullptr;
     QCheckBox* m_agentSkills = nullptr;
     QLineEdit* m_agentTestCmd = nullptr;
+    // Stage 38: ajan komut güvenliği
+    QCheckBox* m_agentShellSecure = nullptr;
+    QCheckBox* m_agentAudit = nullptr;
+    QLabel* m_agentSandboxInfo = nullptr;
     // Stage 35: sağlayıcılar
     void buildProviderTab();
     void onProviderChanged();
@@ -93,6 +97,9 @@ private:
     QTableWidget* m_usageDays = nullptr;
     QTableWidget* m_usageTable = nullptr;
     QLabel* m_usageSummary = nullptr;
+    QLabel* m_cacheLabel = nullptr;   // Stage 38: AI önbellek boyutu
+    QLabel* m_advisorLabel = nullptr; // Stage 38: eylem listesi
+    void loadAdvisor();
     QSpinBox* m_threads;    // cpu threads
     QSpinBox* m_gpu;        // num_gpu
     QSlider* m_tempSlider;

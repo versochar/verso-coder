@@ -8,6 +8,10 @@
 class PatchQueue;
 
 // Modelin istediği tek bir araç çağrısı.
+#include "CommandAudit.h"
+#include "PathGuard.h"
+#include <QProcessEnvironment>
+
 struct ToolCall {
     QString name;
     QJsonObject args;
@@ -86,6 +90,29 @@ public:
 
     // kök dışına çıkan yolları reddet
     bool isInsideRoot(const QString& absPath) const;
+    // Stage 38: sembolik bağlantı çözen kanonik denetim. isInsideRoot
+    // geriye uyum için korunur; dosya araçları PathGuard üzerinden geçer.
+    const PathGuard& guard() const { return m_guard; }
+    // Yol denetimi: başarılıysa doğrulanmış mutlak yolu yazar.
+    bool safePath(const QString& input, QString& outAbs, QString& why) const;
+
+    // Stage 38: kabuk kipi. Varsayılan "bash -c" (profil YÜKLENMEZ: kullanıcının
+    // .bashrc'sindeki alias/fonksiyon komutu sessizce değiştirebilirdi).
+    // "legacy" = eski davranış (bash -lc), ayarlardan seçilebilir.
+    enum class ShellMode { Secure, Legacy };
+    void setShellMode(ShellMode m) { m_shellMode = m; }
+    void setReadOnlyWrap(bool on) { m_readOnlyWrap = on; }
+    ShellMode shellMode() const { return m_shellMode; }
+    // Ortam değişkeni temizliği: anahtar/token/AI sırlarını komuta taşıma
+    static QProcessEnvironment sanitizedEnvironment();
+    // Salt-okunur kip kullanılabilir mi? (bwrap/unshare)
+    static QString readOnlyWrapper();
+    static bool readOnlyAvailable();
+    // Komut denetimi
+    CommandAudit& audit() { return m_audit; }
+    void setAuditEnabled(bool on) { m_auditOn = on; }
+    // Onay diyaloğunda gösterilecek yol uyarısı (mutlak yol içeren komutlar)
+    static QString pathWarning(const QString& command);
     QString absoluteInRoot(const QString& rel) const;
 
 private:
@@ -94,6 +121,11 @@ private:
                         bool needsApproval);
 
     QString m_root;
+    PathGuard m_guard; // Stage 38: yol güvenliği
+    ShellMode m_shellMode = ShellMode::Secure; // Stage 38
+    bool m_auditOn = true;
+    CommandAudit m_audit; // Stage 38: komut denetimi
+    bool m_readOnlyWrap = false; // varsa salt-okunur kip kullan
     Approver m_approver;
     ProblemsProvider m_problems;
     WriteMode m_writeMode = Direct;

@@ -312,6 +312,18 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
         const QString embedProvider = m_embed.provider();
         const QString embedModel = m_embed.model().isEmpty() ? rs.aiEmbedModel.trimmed()
                                                               : m_embed.model();
+        // Stage 38: kesintili indeksleme — bekleyen ilerleme varsa kullanıcıya
+        // bildir (ücretsiz katmanlarda gömme 1 istek/30 dk; tamamlama tek
+        // oturuma sığmıyor).
+        if (!m_ragProgress) m_ragProgress = new RagProgressStore();
+        if (m_ragProgress->matchesRoot(root) && m_ragProgress->progress().valid()) {
+            m_ragLabel->setText(m_ragProgress->isWaiting()
+                                    ? QString("beklemede (%1 sn) — %2")
+                                          .arg(m_ragProgress->waitLeftSec())
+                                          .arg(m_ragProgress->progress().describe())
+                                    : QString("kaldığı yerden: %1")
+                                          .arg(m_ragProgress->progress().describe()));
+        }
         m_ragWatcher.setFuture(QtConcurrent::run([this, root, embedModel, embedProvider]() {
             int n = m_rag.indexProjectIncremental(root); // Stage 32: artımlı
             if (!embedModel.isEmpty() && m_rag.chunkCount() > 0) {
@@ -334,6 +346,7 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
         if (m_ragWatcher.isCanceled()) return;
         auto r = m_ragWatcher.result();
         m_ragLabel->setText(QString("indeks: %1 dosya, %2 parça").arg(r.first).arg(r.second));
+        if (m_ragProgress) m_ragProgress->clear(); // tamamlandı
     });
     connect(bExplain, &QPushButton::clicked, this, [this]() {
         send("Aşağıdaki kodu satır satır Türkçe açıkla:");
@@ -1148,6 +1161,17 @@ void AiPanel::runAgent(const QString& task) {
         m_agentMaxSteps = steps;
     }
     AgentTools tools(root);
+    // Stage 38: komut güvenliği ayarlarını uygula
+    {
+        QSettings st;
+        tools.setShellMode(st.value("agent/shellSecure", true).toBool()
+                               ? AgentTools::ShellMode::Secure
+                               : AgentTools::ShellMode::Legacy);
+        tools.setAuditEnabled(st.value("agent/audit", true).toBool());
+        // Mutlak yol içeren komut varsa kullanıcıya önceden haber ver
+        const QString warn = AgentTools::pathWarning(QString());
+        Q_UNUSED(warn);
+    }
     tools.setProblemsProvider([this]() { return problemsText(); });
     tools.setAllowCommand(m_agentCmd->isChecked());
     tools.setWriteMode(AgentTools::Queue);

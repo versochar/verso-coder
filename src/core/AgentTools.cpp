@@ -1,4 +1,8 @@
 #include "AgentTools.h"
+#include "PathGuard.h"
+#include <QElapsedTimer>
+#include <QRegularExpression>
+#include <QStandardPaths>
 #include "PatchQueue.h"
 #include "ProjectHealth.h"
 #include <QDir>
@@ -10,7 +14,14 @@
 #include <QTextStream>
 #include <algorithm>
 
-AgentTools::AgentTools(const QString& root) : m_root(root) {}
+AgentTools::AgentTools(const QString& root) : m_root(root), m_guard(root) {}
+
+bool AgentTools::safePath(const QString& input, QString& outAbs, QString& why) const {
+    why.clear();
+    if (m_guard.resolve(input, outAbs, &why)) return true;
+    if (why.isEmpty()) why = QStringLiteral("kök dışı yol");
+    return false;
+}
 
 bool AgentTools::isInsideRoot(const QString& absPath) const {
     if (m_root.isEmpty()) return false;
@@ -170,8 +181,13 @@ QList<ToolCall> AgentTools::parseCalls(const QString& text) {
 
 ToolResult AgentTools::readFile(const QString& path, int startLine, int count) {
     ToolResult r;
-    QString abs = absoluteInRoot(path);
-    if (!isInsideRoot(abs)) { r.output = "HATA: kök dizin dışına erişim reddedildi: " + path; return r; }
+    QString abs, why;
+    if (!safePath(path, abs, why)) {
+        // Stage 38: neden açıklanır (sembolik bağlantı kaçışı dâhil)
+        r.denied = true;
+        r.output = "HATA: erişim reddedildi (" + why + "): " + path;
+        return r;
+    }
     QFile f(abs);
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) { r.output = "HATA: açılamadı: " + path; return r; }
     const QString all = QString::fromUtf8(f.read(2 * 1024 * 1024));
@@ -189,8 +205,12 @@ ToolResult AgentTools::readFile(const QString& path, int startLine, int count) {
 
 ToolResult AgentTools::writeFile(const QString& path, const QString& content) {
     ToolResult r;
-    QString abs = absoluteInRoot(path);
-    if (!isInsideRoot(abs)) { r.output = "HATA: kök dizin dışına yazma reddedildi: " + path; return r; }
+    QString abs, why;
+    if (!safePath(path, abs, why)) {
+        r.denied = true;
+        r.output = "HATA: yazma reddedildi (" + why + "): " + path;
+        return r;
+    }
     ToolCall c; c.name = "write_file"; c.args = QJsonObject{{"path", path}, {"content", content}};
     if (!approve(c)) { r.denied = true; r.output = "Kullanıcı yazmayı reddetti: " + path; return r; }
 
@@ -217,8 +237,14 @@ ToolResult AgentTools::writeFile(const QString& path, const QString& content) {
 
 ToolResult AgentTools::listDir(const QString& path) {
     ToolResult r;
-    QString abs = path.isEmpty() ? QDir(m_root).absolutePath() : absoluteInRoot(path);
-    if (!isInsideRoot(abs)) { r.output = "HATA: kök dizin dışı: " + path; return r; }
+    QString abs, why;
+    if (path.isEmpty()) {
+        abs = m_guard.canonicalRoot();
+    } else if (!safePath(path, abs, why)) {
+        r.denied = true;
+        r.output = "HATA: listeleme reddedildi (" + why + "): " + path;
+        return r;
+    }
     QDir d(abs);
     if (!d.exists()) { r.output = "HATA: dizin yok: " + path; return r; }
     QStringList names;
@@ -260,6 +286,52 @@ ToolResult AgentTools::search(const QString& pattern, const QString& glob, int m
     return r;
 }
 
+QProcessEnvironment AgentTools::sanitizedEnvironment() {
+    // Stage 38: komuta API anahtarlarını/sırları TAŞIMA.
+    // (Ajan komutu çalıştırırken yanlışlıkla `env > dosya` yazabilirdi.)
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    const QStringList prefixes = {"VERSO_AI", "OPENAI", "ANTHROPIC", "GEMINI", "GOOGLE_API",
+                                 "NVIDIA", "UNOROUTER", "GROQ", "DEEPSEEK", "MISTRAL",
+                                 "XAI_", "TOGETHER", "AZURE", "HF_", "HUGGING"};
+    const QStringList exact = {"AWS_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY_ID", "GITHUB_TOKEN",
+                               "GH_TOKEN", "GITLAB_TOKEN", "SSH_AUTH_SOCK", "NPM_TOKEN"};
+    for (const QString& k : env.keys()) {
+        const QString up = k.toUpper();
+        for (const QString& pfx : prefixes)
+            if (up.startsWith(pfx) && (up == pfx || !up[pfx.size()].isLetterOrNumber())) {
+                env.remove(k);
+                break;
+            }
+        if (exact.contains(up)) env.remove(k);
+    }
+    env.insert("PATH", env.value("PATH", "/usr/bin:/bin"));
+    return env;
+}
+
+QString AgentTools::readOnlyWrapper() {
+    if (!QStandardPaths::findExecutable("bwrap").isEmpty()) return QStringLiteral("bwrap");
+    if (!QStandardPaths::findExecutable("unshare").isEmpty()) return QStringLiteral("unshare");
+    return {};
+}
+
+bool AgentTools::readOnlyAvailable() { return !readOnlyWrapper().isEmpty(); }
+
+QString AgentTools::pathWarning(const QString& command) {
+    // Mutlak yol içeren komutlar kök dışına çıkabilir; onayda görünmeli.
+    static const QRegularExpression reAbs(QStringLiteral("(^|[\\s'\"=(|;&])/(?!/)[^\\s'\"();|&]+"));
+    QStringList hits;
+    auto it = reAbs.globalMatch(command);
+    while (it.hasNext()) {
+        // captured(0) = ayırıcı + yol; baştaki ayırıcıyı at
+        QString m = it.next().captured(0);
+        if (m.startsWith(QLatin1Char('/'))) m.remove(0, 1);
+        if (m.size() > 2 && !hits.contains(m)) hits << m;
+        if (hits.size() >= 4) break;
+    }
+    if (hits.isEmpty()) return {};
+    return QStringLiteral("Mutlak yol içeriyor: %1").arg(hits.join(", "));
+}
+
 QStringList AgentTools::blockedPatterns() {
     // Stage 34 güvenlik: yıkıcı/uzak etkili komut kalıpları
     return {
@@ -299,23 +371,45 @@ ToolResult AgentTools::runShell(const QString& command, int timeoutMs, const QSt
     if (isCommandBlocked(command, &why)) {
         r.denied = true;
         r.output = "Güvenlik: komut engellendi (" + why + ")";
+        if (m_auditOn) m_audit.record(label, command, false, true, -1, 0, why);
         return r;
     }
     if (needsApproval) {
         ToolCall c;
         c.name = label;
-        c.args = QJsonObject{{"command", command}};
+        // Stage 38: onay diyaloğunda mutlak yol uyarısı görünür
+        const QString warn = pathWarning(command);
+        c.args = QJsonObject{{"command", command}, {"pathWarning", warn}};
         if (!approve(c)) {
             r.denied = true;
             r.output = "Kullanıcı komutu reddetti.";
+            if (m_auditOn) m_audit.record(label, command, false, true, -1, 0,
+                                          QStringLiteral("kullanıcı reddi"));
             return r;
         }
+        if (m_auditOn && !warn.isEmpty())
+            m_audit.record(label + QStringLiteral("(uyarı)"), command, true, false, 0, 0, warn);
     }
+    // Stage 38: kabuk kipi. Varsayılan "bash -c": kullanıcının .bashrc dosyası
+    // yüklenmez, böylece alias/fonksiyon komutu sessizce değiştirmez.
     QProcess p;
-    p.setWorkingDirectory(m_root);
-    p.start("bash", {"-lc", command});
-    if (!p.waitForFinished(timeoutMs)) {
+    p.setWorkingDirectory(m_root.isEmpty() ? QDir::currentPath() : m_root);
+    p.setProcessEnvironment(sanitizedEnvironment());
+    const QStringList shellArgs = m_shellMode == ShellMode::Legacy
+                                      ? QStringList{QStringLiteral("-lc"), command}
+                                      : QStringList{QStringLiteral("-c"), command};
+    QElapsedTimer timer;
+    timer.start();
+    p.start("bash", shellArgs);
+    const bool finished = p.waitForFinished(timeoutMs);
+    const qint64 elapsed = timer.elapsed();
+    if (!finished) {
         p.kill();
+        p.waitForFinished(1000);
+        if (m_auditOn)
+            m_audit.record(label, command, needsApproval, true, -1, elapsed,
+                           QStringLiteral("zaman aşımı"));
+        r.denied = true;
         r.output = "HATA: zaman aşımı (" + QString::number(timeoutMs) + " ms)";
         return r;
     }
@@ -327,6 +421,9 @@ ToolResult AgentTools::runShell(const QString& command, int timeoutMs, const QSt
                    .arg(p.exitCode())
                    .arg(out.left(12000),
                         err.isEmpty() ? "" : "\n[stderr]\n" + err.left(4000));
+    // Stage 38: denetim kaydı (onay durumu, çıkış kodu, süre)
+    if (m_auditOn)
+        m_audit.record(label, command, needsApproval, false, p.exitCode(), elapsed);
     return r;
 }
 
@@ -380,7 +477,9 @@ ToolResult AgentTools::grepLines(const QString& pattern, const QString& glob, in
         if (c2 < 0) continue;
         const QString file = line.left(c1);
         const int ln = line.mid(c1 + 1, c2 - c1 - 1).toInt();
-        QFile f(absoluteInRoot(file));
+        QString fAbs, fWhy;
+        if (!safePath(file, fAbs, fWhy)) continue; // Stage 38: sembolik bağlantı kaçışı
+        QFile f(fAbs);
         if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
         const QStringList all = QString::fromUtf8(f.readAll()).split('\n');
         for (int i = qMax(1, ln - context); i <= qMin(all.size(), ln + context); ++i) {

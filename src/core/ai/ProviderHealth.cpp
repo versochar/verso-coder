@@ -52,6 +52,8 @@ void ProviderHealth::write(const QString& id, const ProviderHealthEntry& e) {
     o["consec"] = e.consecutiveErrors;
     o["lat"] = double(e.totalLatencyMs);
     o["status"] = e.lastStatus;
+    o["busy"] = e.busyFails;
+    if (e.openUntil.isValid()) o["openUntil"] = e.openUntil.toString(Qt::ISODate);
     if (e.lastOk.isValid()) o["lastOk"] = e.lastOk.toString(Qt::ISODate);
     if (e.lastFail.isValid()) o["lastFail"] = e.lastFail.toString(Qt::ISODate);
     m_data[id] = o;
@@ -67,6 +69,9 @@ ProviderHealthEntry ProviderHealth::read(const QString& id) const {
     e.consecutiveErrors = o.value("consec").toInt();
     e.totalLatencyMs = qint64(o.value("lat").toDouble());
     e.lastStatus = o.value("status").toInt();
+    e.busyFails = o.value("busy").toInt();
+    if (o.contains("openUntil"))
+        e.openUntil = QDateTime::fromString(o.value("openUntil").toString(), Qt::ISODate);
     if (o.contains("lastOk")) e.lastOk = QDateTime::fromString(o.value("lastOk").toString(), Qt::ISODate);
     if (o.contains("lastFail"))
         e.lastFail = QDateTime::fromString(o.value("lastFail").toString(), Qt::ISODate);
@@ -80,6 +85,7 @@ void ProviderHealth::record(const QString& providerId, bool ok, int latencyMs, i
     e.lastStatus = httpStatus;
     if (ok) {
         e.consecutiveErrors = 0;
+        if (e.tripped()) e.openUntil = QDateTime(); // başarı → devre kapandı
         e.totalLatencyMs += qMax(0, latencyMs);
         e.lastOk = QDateTime::currentDateTime();
     } else {
@@ -87,6 +93,14 @@ void ProviderHealth::record(const QString& providerId, bool ok, int latencyMs, i
         e.consecutiveErrors++;
         e.totalLatencyMs += qMax(0, latencyMs);
         e.lastFail = QDateTime::currentDateTime();
+        // 429/503/408 → "yoğun" sayılır (sabit hata değil, geçici)
+        if (httpStatus == 429 || httpStatus == 503 || httpStatus == 408) {
+            ++e.busyFails;
+            if (e.busyFails >= busyThreshold()) {
+                e.openUntil = QDateTime::currentDateTime().addSecs(cooldownSec());
+                e.busyFails = 0;
+            }
+        }
     }
     write(providerId, e);
 }
@@ -195,4 +209,46 @@ QString ProviderHealth::statusLine(const QString& providerId) const {
         .arg(e.errors)
         .arg(e.calls)
         .arg(e.avgLatencyMs());
+}
+
+void ProviderHealth::recordBusy(const QString& providerId) {
+    if (providerId.isEmpty()) return;
+    ProviderHealthEntry e = read(providerId);
+    ++e.busyFails;
+    if (e.busyFails >= busyThreshold()) {
+        e.openUntil = QDateTime::currentDateTime().addSecs(cooldownSec());
+        e.busyFails = 0; // sayaç sıfırlanır, açık devre durumu korunur
+    }
+    write(providerId, e);
+}
+
+void ProviderHealth::clearTripped(const QString& providerId) {
+    if (providerId.isEmpty()) return;
+    ProviderHealthEntry e = read(providerId);
+    const bool was = e.tripped();
+    e.openUntil = QDateTime();
+    e.busyFails = 0;
+    if (was) write(providerId, e);
+}
+
+bool ProviderHealth::isTripped(const QString& providerId) const {
+    return read(providerId).tripped();
+}
+
+int ProviderHealth::cooldownLeft(const QString& providerId) const {
+    const ProviderHealthEntry e = read(providerId);
+    if (!e.openUntil.isValid()) return 0;
+    const qint64 ms = QDateTime::currentDateTime().msecsTo(e.openUntil);
+    return ms <= 0 ? 0 : int(ms / 1000);
+}
+
+bool ProviderHealth::isUsable(const QString& providerId) const {
+    return !read(providerId).tripped();
+}
+
+QStringList ProviderHealth::filterUsable(const QStringList& providerIds) const {
+    QStringList out;
+    for (const QString& id : providerIds)
+        if (isUsable(id)) out << id;
+    return out;
 }

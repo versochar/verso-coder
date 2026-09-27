@@ -17,7 +17,9 @@ SecretStore::SecretStore(const QString& filePath) {
             QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
         m_file = dir + "/ai-keys.json";
     }
-    if (!m_useKeyring) loadFile();
+    // Dosya kopyası HER ZAMAN okunur: anahtar deposu kilitli/erişilemez olsa
+    // bile (ya da anahtar dosyaya yazılmışsa) kayıt kaybolmuş gibi görünmez.
+    loadFile();
 }
 
 void SecretStore::setUseKeyring(bool on) {
@@ -90,8 +92,11 @@ QString SecretStore::envKey(const QString& providerId) {
 QString SecretStore::get(const QString& providerId) const {
     if (providerId.isEmpty()) return {};
     QString v;
-    if (keyringLookup(providerId, v)) return v;
+    if (m_useKeyring && keyringLookup(providerId, v)) return v;
     if (m_keys.contains(providerId)) return m_keys.value(providerId).toString();
+    if (!m_useKeyring) return {};
+    // Anahtar deposu yanıt vermedi → dosya kopyasına son kez bak
+    if (keyringLookup(providerId, v)) return v;
     return {};
 }
 

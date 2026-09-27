@@ -5,6 +5,7 @@
 
 class QWidget;
 class QRect;
+class QGraphicsOpacityEffect;
 
 // Stage 10: animasyon yardımcıları. "Azaltılmış hareket" tercihine saygı duyar:
 // etkinse tüm animasyonlar anında (sıçramasız) uygulanır.
@@ -29,6 +30,8 @@ public:
 
 private:
     static void setOpacity(QWidget* w, qreal value);
+    // Stage 38: opaklık efekti (animasyonun gerçek hedefi)
+    static QGraphicsOpacityEffect* opacityEffect(QWidget* w);
     static void runProperty(QWidget* w, const QByteArray& prop, const QVariant& from,
                             const QVariant& to, int ms, std::function<void()> finished = nullptr);
 };

@@ -25,6 +25,7 @@ private slots:
     void forgetNote();
     void addNote();
     void runHealth();
+    void refreshAudit(); // Stage 38: komut denetimi
 
 private:
     QString m_root;
@@ -38,4 +39,8 @@ private:
     QListWidget* m_memory = nullptr;
     QListWidget* m_runs = nullptr;
     QPlainTextEdit* m_runDetail = nullptr;
+    // Stage 38: komut denetimi sekmesi
+    class QTextBrowser* m_auditView = nullptr;
+    class QLineEdit* m_auditSearch = nullptr;
+    class QLabel* m_auditSummary = nullptr;
 };

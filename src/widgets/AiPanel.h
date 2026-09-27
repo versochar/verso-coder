@@ -1,5 +1,6 @@
 #pragma once
 #include "../core/AgentLoop.h"
+#include "../core/RagProgress.h"
 #include "../core/AgentMemory.h"
 #include "../core/AgentRunStore.h"
 #include "../core/AgentTools.h"
@@ -13,6 +14,7 @@
 #include "../core/RagIndexer.h"
 #include "../core/SkillChain.h"
 #include "../core/AgentLoop.h"
+#include "../core/RagProgress.h"
 #include "../core/ai/AgentLlmAdapter.h"
 #include "../core/ai/AiMessage.h"
 #include "../core/ai/EmbedBridge.h"
@@ -134,6 +136,7 @@ private:
     OllamaClient m_client;
     LlmClient m_llm;                     // Stage 35: bulut sağlayıcıları
     class AiRunner* m_summaryRunner = nullptr; // Stage 37: arka plan özeti
+    class RagProgressStore* m_ragProgress = nullptr; // Stage 38: kesintili indeksleme
     bool m_summaryBusy = false;             // Stage 37: tek özet isteği aynı anda
     EmbedBridge m_embed;                  // Stage 36: sağlayıcı-duyarsız gömme
     SecretStore m_secrets;               // Stage 35: API anahtarı kasası

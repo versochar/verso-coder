@@ -20,6 +20,10 @@ struct ProviderHealthEntry {
     int avgLatencyMs() const { return calls > 0 ? int(totalLatencyMs / qMax(1, calls - errors)) : 0; }
     bool healthy() const { return consecutiveErrors < 3; }
     qint64 uptimeMs() const;
+    // Stage 38: sigorta — arka arkaya "yoğun" hatalarda sağlayıcı devre dışı
+    int busyFails = 0;        // 429/403/503 "rate limit" sayısı
+    QDateTime openUntil;      // bu zamana kadar yönlendirmeden çıkarılır
+    bool tripped() const { return openUntil.isValid() && QDateTime::currentDateTime() < openUntil; }
 };
 
 class ProviderHealth {
@@ -58,6 +62,21 @@ public:
     // Görüntüleme
     QString statusLine(const QString& providerId) const;
     static QString verdict(const ProviderHealthEntry& e);
+
+    // --- Stage 38: sigorta (circuit breaker) ---
+    // "Yoğun" hatalar art arda gelirse sağlayıcı soğuma süresince havuzdan
+    // çıkarılır; süre dolunca veya başarılı istekte yeniden alınır.
+    static int busyThreshold() { return 3; }
+    static int cooldownSec() { return 120; }
+    // Başarılı istek: sigortayı sıfırlar
+    void recordBusy(const QString& providerId);
+    void clearTripped(const QString& providerId);
+    bool isTripped(const QString& providerId) const;
+    int cooldownLeft(const QString& providerId) const;
+    // Sağlayıcı seçiminden çıkarılacak mı?
+    bool isUsable(const QString& providerId) const;
+    // Havuzdan tripped olanları ayıkla (kendi dosyasına göre)
+    QStringList filterUsable(const QStringList& providerIds) const;
 
 private:
     QString m_file;

@@ -247,6 +247,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // --- Komut eylemleri (kısayollar ayarlardan uygulanır) ---
     auto mkAct = [this](const QString& id, const QString& title, auto&& fn) {
         QAction* a = new QAction(title, this);
+        a->setObjectName(id); // Stage 38: testler/eklenti erişimi için kimlik
         connect(a, &QAction::triggered, this, std::forward<decltype(fn)>(fn));
         addAction(a); // pencere genelinde kısayol
         m_actions[id] = a;

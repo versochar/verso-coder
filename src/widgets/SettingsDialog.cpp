@@ -18,6 +18,8 @@
 #include "../core/ai/TaskRouter.h"
 #include "../core/ai/UsageLedger.h"
 #include "../core/ModelCapabilities.h"
+#include "../core/CacheCleaner.h"
+#include "../core/SetupAdvisor.h"
 #include "../core/TokenStats.h"
 #include "../core/SettingsIO.h"
 #include "../core/SettingsManager.h"
@@ -278,6 +280,24 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_agentTestCmd = new QLineEdit(s.agentTestCommand, ai);
     m_agentTestCmd->setPlaceholderText("boş = otomatik (ctest / npm test / pytest …)");
     af->addRow("Ajan test komutu:", m_agentTestCmd);
+
+    // --- Stage 38: komut güvenliği ---
+    auto* sec = new QLabel("Komut güvenliği", ai);
+    sec->setStyleSheet("color:#569cd6;font-weight:600;margin-top:8px;");
+    af->insertRow(af->rowCount(), sec);
+    m_agentShellSecure = new QCheckBox("Güvenli kabuk (profil yüklenmesin, anahtarlar temizlensin)", ai);
+    m_agentShellSecure->setToolTip(
+        QStringLiteral("Kapalıyken \"bash -l\" (giriş kabuğu) kullanılır: .bashrc'deki "
+                        "alias ve fonksiyonlar komutu sessizce değiştirebilir. Açıkken "
+                        "\"bash -c\" ve API anahtarları komutun ortamından temizlenir."));
+    af->addRow("", m_agentShellSecure);
+    m_agentAudit = new QCheckBox("Komut denetim kaydı tut", ai);
+    m_agentAudit->setToolTip("Ajanın çalıştırdığı her komut, onay/ret ve çıkış koduyla günlüğe yazılır.");
+    af->addRow("", m_agentAudit);
+    m_agentSandboxInfo = new QLabel(ai);
+    m_agentSandboxInfo->setWordWrap(true);
+    m_agentSandboxInfo->setStyleSheet("color:#858585;font-size:11px;");
+    af->addRow("", m_agentSandboxInfo);
     af->addRow("GPU Backend:", m_backend);
     af->addRow("GPU Offload (num_gpu):", m_gpu);
     af->addRow("Temperature:", tempRow);
@@ -916,6 +936,25 @@ void SettingsDialog::buildProviderTab() {
             &SettingsDialog::onProviderChanged);
 
     loadProviderForm(); // etkin sağlayıcı + kayıtlı anahtar/model gelsin
+    // Stage 38: ajan komut güvenliği ayarları yüklenir
+    {
+        QSettings stg;
+        if (m_agentShellSecure)
+            m_agentShellSecure->setChecked(stg.value("agent/shellSecure", true).toBool());
+        if (m_agentAudit) m_agentAudit->setChecked(stg.value("agent/audit", true).toBool());
+    }
+    // Stage 38: sandbox durumu bilgisi
+    if (m_agentSandboxInfo) {
+        const QString ro = AgentTools::readOnlyAvailable()
+                               ? QString("salt-okunur kip mevcut: %1").arg(AgentTools::readOnlyWrapper())
+                               : QString("salt-okunur kip yok (bwrap/unshare bulunamadı) — "
+                                         "dosya yazma onayına güveniliyor");
+        const QString guard = AgentTools::readOnlyWrapper().isEmpty()
+                                  ? QString("yol denetimi: sembolik bağlantı çözülerek kök dışı reddedilir")
+                                  : QString("yol denetimi: sembolik bağlantı çözülür");
+        m_agentSandboxInfo->setText(QString("Komut ortamı: %1\n%2")
+                                        .arg(ro, guard));
+    }
 }
 
 void SettingsDialog::onProviderChanged() {
@@ -1205,6 +1244,31 @@ void SettingsDialog::buildUsageTab() {
     m_usageTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     root->addWidget(m_usageTable, 1);
 
+    // --- Stage 38: yönlendirme rehberi + AI önbelleği ---
+    auto* advLabel = new QLabel("Yapılacaklar", m_usagePage);
+    advLabel->setStyleSheet("color:#569cd6;font-weight:600;");
+    root->addWidget(advLabel);
+    m_advisorLabel = new QLabel(m_usagePage);
+    m_advisorLabel->setWordWrap(true);
+    m_advisorLabel->setTextFormat(Qt::RichText);
+    m_advisorLabel->setStyleSheet("color:#c9c9c9;font-size:11px;");
+    root->addWidget(m_advisorLabel);
+
+    m_cacheLabel = new QLabel(m_usagePage);
+    m_cacheLabel->setStyleSheet("color:#858585;font-size:11px;");
+    root->addWidget(m_cacheLabel);
+    auto* cacheRow = new QHBoxLayout;
+    auto* bCacheClean = new QPushButton("AI Önbelleğini Temizle", m_usagePage);
+    bCacheClean->setToolTip("Model kataloğu, sağlık geçmişi ve komut denetimi silinir.\n"
+                            "Kullanım geçmişi ve API anahtarları KORUNUR.");
+    cacheRow->addWidget(bCacheClean);
+    cacheRow->addStretch(1);
+    root->addLayout(cacheRow);
+    connect(bCacheClean, &QPushButton::clicked, this, [this]() {
+        CacheCleaner cc(this);
+        if (cc.cleanAiCache(false)) loadUsageTab();
+    });
+
     auto* row = new QHBoxLayout;
     auto* bRefresh = new QPushButton("Yenile", m_usagePage);
     auto* bClear = new QPushButton("Geçmişi Temizle", m_usagePage);
@@ -1281,6 +1345,43 @@ void SettingsDialog::loadUsageTab() {
         m_usageTable->setItem(i, 5, new QTableWidgetItem(health));
     }
     m_usageTable->resizeColumnsToContents();
+    loadAdvisor();
+}
+
+// Stage 38: "neden çalışmıyor?" rehberi — sağlık verisi değil, eylem listesi
+void SettingsDialog::loadAdvisor() {
+    if (!m_advisorLabel) return;
+    const auto actions = SetupAdvisor::analyze();
+    if (actions.isEmpty()) {
+        m_advisorLabel->setText(QStringLiteral("<span style='color:#4ec9b0'>"
+                                              "✓ Her şey hazır — etkin sağlayıcı kullanılabilir.</span>"));
+    } else {
+        QStringList lines;
+        int shown = 0;
+        for (const SetupAction& a : actions) {
+            if (shown++ >= 4) {
+                lines << QStringLiteral("<i>… ve %1 eylem daha</i>").arg(actions.size() - 4);
+                break;
+            }
+            const QString color = a.severity == SetupAction::Critical
+                                      ? QStringLiteral("#f44747")
+                                      : (a.severity == SetupAction::Warning
+                                             ? QStringLiteral("#cca700")
+                                             : QStringLiteral("#858585"));
+            lines << QStringLiteral("<span style='color:%1'>● %2</span><br>%3")
+                         .arg(color, a.title.toHtmlEscaped(),
+                              a.action.isEmpty() ? QString()
+                                                 : QStringLiteral("<span style='color:#9a9a9a'>→ %1</span>")
+                                                       .arg(a.action.toHtmlEscaped()));
+        }
+        m_advisorLabel->setText(lines.join(QStringLiteral("<br><br>")));
+    }
+    if (m_cacheLabel) {
+        CacheCleaner cc(this);
+        m_cacheLabel->setText(QStringLiteral("%1 · %2 KB")
+                                  .arg(cc.totalSummary())
+                                  .arg(CacheCleaner::aiCacheBytes() / 1024));
+    }
 }
 
 void SettingsDialog::saveAll() {    AppSettings cur = SettingsManager::instance().load(); // oturum alanlarını koru
@@ -1310,6 +1411,13 @@ void SettingsDialog::saveAll() {    AppSettings cur = SettingsManager::instance(
     storeProviderForm();
     // Stage 36: maliyet tavanı + kota + yönlendirme
     storeStage36();
+    // Stage 38: ajan komut güvenliği ayarları
+    {
+        QSettings stg;
+        if (m_agentShellSecure)
+            stg.setValue("agent/shellSecure", m_agentShellSecure->isChecked());
+        if (m_agentAudit) stg.setValue("agent/audit", m_agentAudit->isChecked());
+    }
     s.gpuBackend = m_backend->currentText();
     s.gpuLayers = (s.gpuBackend == "CPU") ? 0 : m_gpu->value();
     s.temperature = m_tempSlider->value() / 100.0;

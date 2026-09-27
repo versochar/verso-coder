@@ -1,4 +1,9 @@
 #include "AgentPanelDialog.h"
+#include "../core/CommandAudit.h"
+#include <QApplication>
+#include <QClipboard>
+#include <QLineEdit>
+#include <QTextBrowser>
 #include "../core/AgentBudget.h"
 #include "../core/AgentMemory.h"
 #include "../core/AgentPolicy.h"
@@ -113,6 +118,44 @@ AgentPanelDialog::AgentPanelDialog(const QString& projectRoot, QWidget* parent)
     connect(bDelete, &QPushButton::clicked, this, &AgentPanelDialog::deleteRun);
     m_tabs->addTab(rl, "Koşu Günlüğü");
 
+    // --- Stage 38: komut denetimi ---
+    auto* au = new QWidget(this);
+    auto* auLay = new QVBoxLayout(au);
+    auto* auNote = new QLabel(
+        "Ajanın çalıştırdığı her komut, onay/ret durumu ve çıkış koduyla buraya yazılır. "
+        "Tehlikeli kalıp listesi veri sızdıran her komutu yakalayamaz; bu kayıt o boşluğu kapatır.",
+        au);
+    auNote->setWordWrap(true);
+    auNote->setStyleSheet("color:#858585;font-size:11px;");
+    auLay->addWidget(auNote);
+    m_auditSearch = new QLineEdit(au);
+    m_auditSearch->setPlaceholderText("Komut ara…");
+    auLay->addWidget(m_auditSearch);
+    m_auditView = new QTextBrowser(au);
+    m_auditView->setReadOnly(true);
+    m_auditView->setStyleSheet("font-family:Consolas,monospace;font-size:11px;");
+    auLay->addWidget(m_auditView, 1);
+    auto* auRow = new QHBoxLayout;
+    m_auditSummary = new QLabel(au);
+    m_auditSummary->setStyleSheet("color:#858585;");
+    auRow->addWidget(m_auditSummary, 1);
+    auto* auCopy = new QPushButton("Kopyala", au);
+    auto* auClear = new QPushButton("Temizle", au);
+    auRow->addWidget(auCopy);
+    auRow->addWidget(auClear);
+    auLay->addLayout(auRow);
+    connect(auClear, &QPushButton::clicked, this, [this]() {
+        CommandAudit().clear();
+        refreshAudit();
+    });
+    connect(auCopy, &QPushButton::clicked, this, [this]() {
+        QApplication::clipboard()->setText(m_auditView->toPlainText());
+    });
+    connect(m_auditSearch, &QLineEdit::textChanged, this,
+            [this](const QString&) { refreshAudit(); });
+    m_tabs->addTab(au, "Son Komutlar");
+    refreshAudit();
+
     auto* lay = new QVBoxLayout(this);
     lay->addWidget(m_tabs, 1);
     auto* box = new QDialogButtonBox(QDialogButtonBox::Close, this);
@@ -214,6 +257,22 @@ void AgentPanelDialog::deleteRun() {
     AgentRunStore store(agentDataDir() + "/runs");
     if (store.remove(id)) refreshAll();
     m_runDetail->clear();
+}
+
+void AgentPanelDialog::refreshAudit() {
+    if (!m_auditView) return;
+    CommandAudit log;
+    const QString needle = m_auditSearch ? m_auditSearch->text().trimmed() : QString();
+    const auto list = needle.isEmpty() ? log.last(300) : log.search(needle);
+    m_auditView->setPlainText(list.isEmpty() ? QString("(kayıt yok)")
+                                              : CommandAudit::toText(list));
+    if (m_auditSummary) {
+        const CommandAudit::Summary s = log.summary();
+        m_auditSummary->setText(QString("%1 komut · %2 reddedildi · toplam %3 sn")
+                                    .arg(s.total)
+                                    .arg(s.denied)
+                                    .arg(double(s.totalMs) / 1000.0, 0, 'f', 1));
+    }
 }
 
 void AgentPanelDialog::refreshAll() {

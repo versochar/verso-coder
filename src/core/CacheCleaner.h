@@ -1,5 +1,6 @@
 #pragma once
 #include <QString>
+#include <QList>
 #include <QObject>
 
 class CacheCleaner : public QObject {
@@ -18,6 +19,22 @@ public:
 
     // Tüm cache'leri temizle
     bool cleanAll();
+
+    // --- Stage 38: AI önbellekleri ---
+    // AI tarafının ürettiği dosyalar (model kataloğu, gömme önbelleği, kullanım
+    // geçmişi, sağlık, komut denetimi) tek yerde toplanır; boyut raporuyla.
+    struct AiEntry {
+        QString id;
+        QString label;
+        QString path;
+        qint64 bytes = 0;
+        bool removable = false; // kullanım geçmişi silinmez (veri kaybı)
+    };
+    static QList<AiEntry> aiCacheEntries();
+    static qint64 aiCacheBytes();
+    bool cleanAiCache(bool includeHistory = false);
+    // Tüm önbelleklerin (clangd + AI) toplam özeti
+    QString totalSummary() const;
 
 signals:
     void cleaned(int bytesFreed);

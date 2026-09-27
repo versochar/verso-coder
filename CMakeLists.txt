@@ -32,6 +32,11 @@ set(SOURCES
     src/core/ProjectSessions.cpp
     src/core/FileIcons.cpp
     src/core/AgentTools.cpp
+    src/core/PathGuard.cpp
+    src/core/LeakWatch.cpp
+    src/core/RagProgress.cpp
+    src/core/SetupAdvisor.cpp
+    src/core/CommandAudit.cpp
     src/core/AgentLoop.cpp
     src/core/PatchQueue.cpp
     src/core/ContextResolver.cpp
@@ -245,6 +250,11 @@ set(HEADERS
     src/core/ProjectSessions.h
     src/core/FileIcons.h
     src/core/AgentTools.h
+    src/core/PathGuard.h
+    src/core/LeakWatch.h
+    src/core/RagProgress.h
+    src/core/SetupAdvisor.h
+    src/core/CommandAudit.h
     src/core/AgentLoop.h
     src/core/PatchQueue.h
     src/core/ContextResolver.h
@@ -707,6 +717,9 @@ add_executable(test_stage36
     src/core/AgentLoop.cpp
     src/core/PatchQueue.cpp
     src/core/ProjectHealth.cpp
+    src/core/PathGuard.cpp
+    src/core/CommandAudit.cpp
+    src/core/ai/ModelPool.cpp
 )
 target_include_directories(test_stage36 PRIVATE src)
 target_link_libraries(test_stage36 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
@@ -797,3 +810,142 @@ add_executable(ai-probe EXCLUDE_FROM_ALL
 )
 target_include_directories(ai-probe PRIVATE src)
 target_link_libraries(ai-probe PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
+
+# --- Stage 38: arayüz (widget) testleri — gerçek diyaloglar, offscreen ---
+find_package(Qt6 COMPONENTS Test QUIET)
+if(Qt6Test_FOUND)
+    add_executable(test_ui_widgets
+        tests/ui/test_ui_widgets.cpp
+        src/core/PathGuard.cpp
+        src/core/CommandAudit.cpp
+        src/core/AgentTools.cpp
+        src/core/AgentPolicy.cpp
+        src/core/AgentBudget.cpp
+        src/core/AgentMemory.cpp
+        src/core/AgentReflection.cpp
+        src/core/SkillRegistry.cpp
+        src/core/SkillChain.cpp
+        src/core/AgentRunStore.cpp
+        src/core/PatchQueue.cpp
+        src/core/ProjectHealth.cpp
+        src/core/ModelCapabilities.cpp
+        src/core/TokenStats.cpp
+        src/core/ContextBudget.cpp
+        src/core/ResponseScorer.cpp
+        src/core/Embedding.cpp
+        src/core/EmbeddingClient.cpp
+        src/core/RagIndexer.cpp
+        src/core/HybridRanker.cpp
+        src/core/ChatStore.cpp
+        src/core/ImageUtil.cpp
+        src/core/SettingsManager.cpp
+        src/core/ThemeManager.cpp
+        src/core/ThemeTokens.cpp
+        src/core/ThemeStore.cpp
+        src/core/ai/LlmProvider.cpp
+        src/core/ai/SecretStore.cpp
+        src/core/ai/AiMessage.cpp
+        src/core/ai/AiToolBridge.cpp
+        src/core/ai/ProviderPrefs.cpp
+        src/core/ai/ProviderPricing.cpp
+        src/core/ai/ProviderHealth.cpp
+        src/core/ai/UsageLedger.cpp
+        src/core/ai/TaskRouter.cpp
+        src/core/ai/ModelPool.cpp
+        src/core/ai/EmbedCache.cpp
+        src/core/ai/EmbedBridge.cpp
+        src/core/ai/AgentLlmAdapter.cpp
+        src/core/ai/ProviderBench.cpp
+        src/core/ai/AiRunner.cpp
+        src/core/ai/LlmClient.cpp
+        src/core/ai/providers/ProviderCodec.cpp
+        src/core/ai/providers/SseParser.cpp
+        src/widgets/SettingsDialog.cpp
+        src/widgets/ModelArenaDialog.cpp
+        src/widgets/AgentPanelDialog.cpp
+        src/widgets/PatchReviewDialog.cpp
+        src/widgets/EmptyState.cpp
+        src/core/IconTheme.cpp
+        src/core/PerfTools.cpp
+        src/core/SettingsIO.cpp
+        src/core/AccentColor.cpp
+        src/core/Animator.cpp
+        src/core/ColorBlind.cpp
+        src/core/KeymapPresets.cpp
+        src/core/OllamaClient.cpp
+        src/core/Density.cpp
+        src/core/UiMetrics.cpp
+        src/core/Typography.cpp
+        src/core/QssBuilder.cpp
+        src/core/AccentColor.cpp
+    )
+    target_include_directories(test_ui_widgets PRIVATE src)
+    target_link_libraries(test_ui_widgets PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Concurrent Qt6::Svg Qt6::Test)
+
+    add_test(NAME ui_widgets COMMAND test_ui_widgets)
+    set_tests_properties(ui_widgets PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/ui-home;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/ui-home")
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ui-home)
+
+    # --- Stage 38: duman otomasyonu (MainWindow'ı gerçekten kurar) ---
+    # Uygulamanın KENDİ kaynak listesi kullanılır (${SOURCES}); böylece
+    # panel bağımlılıkları elle kopyalanmaz ve iki hedef asla ayrışmaz.
+    set(VERSO_UI_SOURCES ${SOURCES})
+    list(REMOVE_ITEM VERSO_UI_SOURCES src/main.cpp) # ikinci main olurdu
+    # Stage 38: yeni çekirdek dosyalar SOURCES'a zaten ekli
+    add_executable(test_ui_smoke tests/ui/test_ui_smoke.cpp ${VERSO_UI_SOURCES})
+    target_include_directories(test_ui_smoke PRIVATE src)
+    target_link_libraries(test_ui_smoke PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Concurrent Qt6::Svg Qt6::Qml Qt6::WebSockets Qt6::Test ${HUNSPELL_LIBRARIES})
+    target_include_directories(test_ui_smoke PRIVATE ${HUNSPELL_INCLUDE_DIRS})
+    if(LIBSSH2_FOUND)
+        target_link_libraries(test_ui_smoke PRIVATE ${LIBSSH2_LIBRARIES})
+        target_compile_definitions(test_ui_smoke PRIVATE VERSO_HAVE_LIBSSH2)
+    endif()
+    add_test(NAME ui_smoke COMMAND test_ui_smoke)
+    set_tests_properties(ui_smoke PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/ui-smoke-home;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/ui-smoke-home")
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ui-smoke-home)
+endif()
+
+# --- Stage 38: güvenlik, doğrulama, dayanıklılık ---
+add_executable(test_stage38
+    tests/test_stage38.cpp
+    src/core/PathGuard.cpp
+    src/core/CommandAudit.cpp
+    src/core/LeakWatch.cpp
+    src/core/RagProgress.cpp
+    src/core/SetupAdvisor.cpp
+    src/core/CacheCleaner.cpp
+    src/core/AgentTools.cpp
+    src/core/AgentPolicy.cpp
+    src/core/AgentBudget.cpp
+    src/core/AgentMemory.cpp
+    src/core/AgentReflection.cpp
+    src/core/SkillRegistry.cpp
+    src/core/SkillChain.cpp
+    src/core/AgentRunStore.cpp
+    src/core/PatchQueue.cpp
+    src/core/ProjectHealth.cpp
+    src/core/ModelCapabilities.cpp
+    src/core/TokenStats.cpp
+    src/core/ContextBudget.cpp
+    src/core/ai/LlmProvider.cpp
+    src/core/ai/SecretStore.cpp
+    src/core/ai/AiMessage.cpp
+    src/core/ai/AiToolBridge.cpp
+    src/core/ai/ProviderPrefs.cpp
+    src/core/ai/ProviderPricing.cpp
+    src/core/ai/ProviderHealth.cpp
+    src/core/ai/UsageLedger.cpp
+    src/core/ai/TaskRouter.cpp
+    src/core/ai/ModelPool.cpp
+    src/core/ai/EmbedCache.cpp
+    src/core/ai/EmbedBridge.cpp
+    src/core/ai/AgentLlmAdapter.cpp
+    src/core/ai/ProviderBench.cpp
+    src/core/ai/AiRunner.cpp
+    src/core/ai/LlmClient.cpp
+    src/core/ai/providers/ProviderCodec.cpp
+    src/core/ai/providers/SseParser.cpp
+)
+target_include_directories(test_stage38 PRIVATE src)
+target_link_libraries(test_stage38 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
+add_test(NAME stage38 COMMAND test_stage38)

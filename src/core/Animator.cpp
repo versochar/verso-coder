@@ -10,18 +10,46 @@ static bool g_reducedMotion = false;
 bool Animator::reducedMotion() { return g_reducedMotion; }
 void Animator::setReducedMotion(bool on) { g_reducedMotion = on; }
 
-void Animator::setOpacity(QWidget* w, qreal value) {
+// Widget üzerindeki opaklık efektini döndürür (yoksa oluşturur).
+QGraphicsOpacityEffect* Animator::opacityEffect(QWidget* w) {
+    if (!w) return nullptr;
     auto* eff = qobject_cast<QGraphicsOpacityEffect*>(w->graphicsEffect());
-    if (!eff) {
-        eff = new QGraphicsOpacityEffect(w);
-        w->setGraphicsEffect(eff);
-    }
-    eff->setOpacity(value);
+    if (eff) return eff;
+    // Başka bir efekt varsa (drop shadow vb.) dokunma: üstüne yeni efekt
+    // eklemek görsel olarak bozar.
+    if (w->graphicsEffect()) return nullptr;
+    eff = new QGraphicsOpacityEffect(w);
+    w->setGraphicsEffect(eff);
+    return eff;
+}
+
+void Animator::setOpacity(QWidget* w, qreal value) {
+    auto* eff = opacityEffect(w);
+    if (eff) eff->setOpacity(value);
 }
 
 void Animator::runProperty(QWidget* w, const QByteArray& prop, const QVariant& from,
                            const QVariant& to, int ms, std::function<void()> finished) {
-    auto* anim = new QPropertyAnimation(w, prop, w);
+    if (!w) {
+        if (finished) finished();
+        return;
+    }
+    // "opacity" widget'in değil GÖRSEL EFEKTİN özelliğidir; widget üzerinde
+    // hedeflenirse Qt "non-existing property" uyarısı verir ve animasyon
+    // hiç çalışmaz.
+    QObject* target = w;
+    if (prop == "opacity") {
+        target = opacityEffect(w);
+        if (!target) {
+            if (finished) finished();
+            return;
+        }
+    } else if (w->metaObject()->indexOfProperty(prop.constData()) < 0) {
+        // Var olmayan özellik: sessizce atla, Qt uyarısı üretme
+        if (finished) finished();
+        return;
+    }
+    auto* anim = new QPropertyAnimation(target, prop, w);
     anim->setDuration(Animator::reducedMotion() ? 0 : qMax(0, ms));
     anim->setStartValue(from);
     anim->setEndValue(to);

@@ -1,4 +1,5 @@
 #include "TaskRouter.h"
+#include "ProviderHealth.h"
 #include "ProviderPrefs.h"
 #include "SecretStore.h"
 #include <QJsonDocument>
@@ -146,6 +147,29 @@ TaskRouter::Route TaskRouter::route(const QString& task, const Prefs& p) {
         }
     }
     // 4) Ücretsiz tercihi: bilinen ücretsiz bir sağlayıcı anahtarsız ise
+    // Stage 38: devrede olan (üst üste yoğun) sağlayıcılar yönlendirmeden çıkarılır
+    const ProviderHealth& health = ProviderHealth::instance();
+    if (p.enabled && health.isTripped(spec.id)) {
+        // Devrede olanları havuzdan ayıkla
+        QStringList usableIds;
+        for (const ProviderSpec& c : ProviderRegistry::all()) usableIds << c.id;
+        const QStringList usable = health.filterUsable(usableIds);
+        for (const ProviderSpec& alt : ProviderRegistry::all()) {
+            if (!usable.contains(alt.id)) continue;
+            if (alt.kind != spec.kind) continue;
+            if (alt.requiresKey() && SecretStore().effectiveKey(alt.id).isEmpty()) continue;
+            if (r.cls == TaskClass::Vision && !alt.supportsVision) continue;
+            spec = alt;
+            wantModel.clear();
+            wantModel = ProviderPrefs::modelFor(spec.id,
+                                               ProviderRegistry::sampleModels(spec.id).value(0));
+            r.reason = QString("%1 geçici olarak devrede; %2 kullanılıyor")
+                           .arg(r.cls == TaskClass::Vision ? QLatin1String("görsel sağlayıcı")
+                                                          : QLatin1String("sağlayıcı"),
+                                spec.label);
+            break;
+        }
+    }
     if (p.useFreeFirst) {
         if (spec.kind == ProviderKind::Ollama && heavy) {
             // Karmaşık işi ücretsiz yerel modele yükleme

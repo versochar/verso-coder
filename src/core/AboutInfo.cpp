@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "1.9.0"; }
+QString AboutInfo::version() { return "2.0.0"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,14 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "2.0.0 (Stage 38)\n"
+        "  • Güvenlik: sembolik bağlantı kaçışı kapatıldı (yol denetimi)\n"
+        "  • Ajan komutları: profil yüklenmiyor, anahtarlar komuttan temizleniyor\n"
+        "  • Komut denetimi: her komut onay/ret/çıkış koduyla kayda giriyor\n"
+        "  • İlk kez arayüz testleri: diyaloglar + MainWindow (offscreen)\n"
+        "  • Sağlayıcı sigortası: yoğun sağlayıcı 120 sn yönlendirme dışı\n"
+        "  • Kesintili RAG indeksleme (ilerleme kaydedilir, kaldığı yerden sürer)\n"
+        "  • Ayarlar → AI Kullanımı: eylem listesi + AI önbellek boyutu/temizleme\n"
         "1.9.0 (Stage 37)\n"
         "  • Tek AI cephesi: 12 görevin tamamı aynı sağlayıcı/yönlendirme/kota yolunu kullanır\n"
         "  • Dokuz yüzey artık bulut sağlayıcılarla da çalışır (inceleme, test, commit,\n"
