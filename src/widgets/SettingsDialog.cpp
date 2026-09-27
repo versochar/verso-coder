@@ -90,6 +90,11 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_autoSave->setChecked(s.autoSave);
     m_restore = new QCheckBox("Açılışta oturumu geri yükle", general);
     m_restore->setChecked(s.restoreSession);
+    // Stage 48: güncelleme denetimi (haftada 1, kapatılabilir)
+    m_updateCheck = new QCheckBox("Güncellemeleri haftada bir denetle", general);
+    m_updateCheck->setToolTip("GitHub releases yoklaması. Kapalıysa hiç ağ isteği yapılmaz.");
+    m_updateCheck->setChecked(QSettings("Verso", "VersoCoder").value("update/check", true).toBool());
+    gf->addRow("", m_updateCheck);
     gf->addRow("Font boyutu:", m_fontSize);
     gf->addRow("Sekme genişliği:", m_tabWidth);
     m_largeFile = new QSpinBox(general);
@@ -138,6 +143,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_crashReport->setChecked(s.crashReport);
     gf->addRow(m_crashReport); // Stage 31
     gf->addRow(m_restore);
+    gf->addRow(m_updateCheck);
     auto* note = new QLabel("Dil ve tema Kaydet'e basınca anında uygulanır.", general);
     note->setWordWrap(true);
     gf->addRow(note);
@@ -1496,6 +1502,7 @@ void SettingsDialog::saveAll() {    AppSettings cur = SettingsManager::instance(
     s.autoReload = m_autoReload->isChecked(); // Stage 28
     s.crashReport = m_crashReport->isChecked(); // Stage 31
     s.restoreSession = m_restore->isChecked();
+    QSettings("Verso", "VersoCoder").setValue("update/check", m_updateCheck->isChecked());
     s.aiStreaming = m_streaming->isChecked();
     s.aiGhost = m_ghost->isChecked(); // Stage 15
     s.contextMode = m_ctxMode->currentText();

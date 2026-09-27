@@ -38,12 +38,14 @@ private:
     QTabWidget* m_tabs;
     QTextBrowser* m_about;
     QTextEdit* m_updateIn;
+    QTextEdit* m_crash = nullptr; // Stage 48
     QTextEdit* m_tools;
     QTextEdit* m_perf;
     QTreeWidget* m_backups;
     QTextEdit* m_a11y = nullptr; // Stage 22
     QTextEdit* m_plugins = nullptr;  // Stage 29
     class PluginEngine* m_pluginEng = nullptr;
+    void refreshCrashes(); // Stage 48
     BackupManager* m_bm = nullptr;
     QFutureWatcher<QList<ToolInfo>> m_probeWatcher;
 };

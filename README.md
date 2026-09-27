@@ -83,7 +83,7 @@ cmake --build build -j
 ./build/verso-coder
 ```
 
-## Yol haritası (20 + 501 özellik, 47 stage — tamamlandı)
+## Yol haritası (20 + 508 özellik, 48 stage — tamamlandı)
 
 - **Stage 1 — Editör temeli ✅ (yapıldı):** oturum geri yükleme (açık dosyalar + aktif sekme + imleç), otomatik kaydetme (2 sn) + crash yedekleme, harici değişiklik uyarısı, hızlı açma (Ctrl+P fuzzy), font boyutu + sekme genişliği ayarı, status bar'da Ln/Col + LF/CRLF + UTF-8, otomatik parantez kapatma.
 - **Stage 5 — Editör gücü ✅ (yapıldı):** çoklu imleç (Alt+tık, Ctrl+D, Esc), kod katlama (gutter ▸/▾, Ctrl+Shift+[/], oturumda kalıcı), akıllı girinti + `}` geri-girinti + blok Tab, bracket eşleşme (derinlik renkli) + girinti kılavuzları, aramada ±3 satır önizleme, split editör (2 grup + taşı/böl + grup oturumu), satır işlemleri (taşı/çoğalt/sırala/trim), .editorconfig, büyük-dosya önizleme modu, hunspell yazım denetimi (TR+EN, F7, sağ-tık öneri).
@@ -290,6 +290,10 @@ src/core/ai/ProviderBench.*             → sağlayıcı mikro-karşılaştırma
 src/core/ai/AiRunner.* + AiProfiles.h   → tek AI cephesi (12 görev) + görev profilleri
 src/widgets/ModelArenaDialog.*         → çok sağlayıcı arena (gerçek maliyet, kazananı al)
 src/core/PerfTools.*                  → ikili sez, boyut süzgeci, LRU önbellek, ters indeks
+- **Stage 48 — Dağıtım ✅ (yapıldı):** kurulum kuralları + AppImage betiği vardı (Stage 8); eksikler kapatıldı: `--portable` kipi (ayarlar uygulama yanında, ilk QSettings kullanımından önce), `UpdateChecker` (GitHub releases, haftada 1, kapatılabilir, sessiz başarısızlık; `file://` ile test edilir), Tanı diyaloğuna "Çökmeler" sekmesi (bekleyen dökümler + temizleme; gönderim yok — onamlı yerel günlük). `test_stage48` (32 kontrol) + ctest **32/32**. Sürüm **3.0.0**.
+
+**Kurulum matriksi:** kaynak derleme (cmake) · `cmake --install` (desktop girdisi + simge + metainfo) · AppImage (`packaging/build-appimage.sh`) · taşınabilir (`--portable`). İmza doğrulama yok (dürüst sınır — GitHub releases toplamı elle denetlenir).
+
 - **Stage 47 — Erişilebilirlik ✅ (yapıldı):** tıklanabilir durum çipleri + düzenleyici sekmeleri + `CodeEditor` ekran okuyucu adları aldı (dosya adı açılışta güncellenir). `test_stage47` (29 kontrol: WCAG matematiği, **high-contrast.json 6 renk çifti kilidi** — hepsi ≥4.5, TR+EN çeviri kapsama eksiksiz, 3 renk körü modu) + ctest **31/31**. Sürüm 2.9.0.
 
 **Erişilebilirlik beyanı:** WCAG AA (4.5 normal / 3.0 büyük metin) yüksek kontrast temasında testle kilitli; deuteranopia/protanopia/tritanopia desteklenir. Gerçek ekran okuyucu ile uçtan uca test yapılmadı (kullanıcı testi notu Stage 50'ye taşındı); sağdan-sola diller kapsam dışı.

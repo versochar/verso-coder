@@ -33,6 +33,7 @@ set(SOURCES
     src/core/FileIcons.cpp
     src/core/AgentTools.cpp
     src/core/PathGuard.cpp
+    src/core/UpdateChecker.cpp
     src/core/PluginEngine.cpp
     src/core/LeakWatch.cpp
     src/core/RagProgress.cpp
@@ -252,6 +253,7 @@ set(HEADERS
     src/core/FileIcons.h
     src/core/AgentTools.h
     src/core/PathGuard.h
+    src/core/UpdateChecker.h
     src/core/PluginEngine.h
     src/core/LeakWatch.h
     src/core/RagProgress.h
@@ -1360,3 +1362,14 @@ target_include_directories(test_stage47 PRIVATE src)
 target_link_libraries(test_stage47 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml Qt6::Test ${HUNSPELL_LIBRARIES})
 target_include_directories(test_stage47 PRIVATE ${HUNSPELL_INCLUDE_DIRS})
 add_test(NAME stage47 COMMAND test_stage47)
+
+add_executable(test_stage48
+    tests/test_stage48.cpp
+    src/core/UpdateChecker.cpp
+    src/core/StartupArgs.cpp
+    src/core/CrashHandler.cpp
+)
+target_include_directories(test_stage48 PRIVATE src)
+target_link_libraries(test_stage48 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml Qt6::Test ${HUNSPELL_LIBRARIES})
+target_include_directories(test_stage48 PRIVATE ${HUNSPELL_INCLUDE_DIRS})
+add_test(NAME stage48 COMMAND test_stage48)

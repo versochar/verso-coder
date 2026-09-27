@@ -9,6 +9,7 @@ StartupOptions StartupArgs::parse(const QStringList& args) {
         if (a == "--new" || a == "-n") { o.isNew = true; continue; }
         if (a == "--wait" || a == "-w") { o.wait = true; continue; }
         if (a == "--no-restore") { o.noRestore = true; continue; }
+        if (a == "--portable") { o.portable = true; continue; }
         if (a == "--line" || a == "-l") {
             if (i + 1 < args.size()) o.line = args[++i].toInt();
             continue;
@@ -36,6 +37,7 @@ QString StartupArgs::helpText() {
         "  -c, --command ID    Açılışta verilen komutu çalıştır\n"
         "  -w, --wait          Kapanana kadar bekle (tek örnek ile)\n"
         "      --no-restore    Oturum geri yüklemeyi kapat\n"
+        "      --portable      Taşınabilir kip (ayarlar uygulama yanında)\n"
         "  -h, --help          Bu yardımı göster\n"
         "  -v, --version       Sürümü göster\n");
 }

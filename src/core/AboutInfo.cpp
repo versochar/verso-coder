@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "2.9.0"; }
+QString AboutInfo::version() { return "3.0.0"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,10 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "3.0.0 (Stage 48)\n"
+        "  • Taşınabilir kip (--portable)\n"
+        "  • Haftalık güncelleme denetimi (kapatılabilir)\n"
+        "  • Çökme dökümleri sekmesi\n"
         "2.9.0 (Stage 47)\n"
         "  • Ekran okuyucu adları (çip/sekme/düzenleyici)\n"
         "  • Kontrast + çeviri + renk körü kilit testleri\n"

@@ -117,6 +117,7 @@ private:
     QCheckBox* m_autoReload = nullptr; // Stage 28
     QCheckBox* m_crashReport = nullptr; // Stage 31
     QCheckBox* m_restore;
+    QCheckBox* m_updateCheck = nullptr; // Stage 48
     // Stage 3: AI
     QCheckBox* m_streaming;
     QComboBox* m_ctxMode;

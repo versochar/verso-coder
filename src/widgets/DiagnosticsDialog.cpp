@@ -1,3 +1,4 @@
+#include "../core/CrashHandler.h"
 #include "DiagnosticsDialog.h"
 #include "../core/A11yCheck.h"
 #include "../core/BackupManager.h"
@@ -53,6 +54,28 @@ DiagnosticsDialog::DiagnosticsDialog(QWidget* parent) : QDialog(parent) {
     aboutLay->addWidget(upBtn);
     connect(upBtn, &QPushButton::clicked, this, &DiagnosticsDialog::checkUpdate);
     m_tabs->addTab(aboutTab, "Hakkında");
+
+    // --- Stage 48: çökme dökümleri (onamlı: görüntüle/temizle) ---
+    auto* crashTab = new QWidget(this);
+    auto* crashLay = new QVBoxLayout(crashTab);
+    m_crash = new QTextEdit(crashTab);
+    m_crash->setReadOnly(true);
+    m_crash->setFont(QFont("Consolas, monospace", 10));
+    auto* crashRow = new QHBoxLayout();
+    auto* cRef = new QPushButton("Yenile", crashTab);
+    auto* cClear = new QPushButton("Temizle", crashTab);
+    crashRow->addWidget(cRef);
+    crashRow->addWidget(cClear);
+    crashRow->addStretch(1);
+    crashLay->addWidget(m_crash, 1);
+    crashLay->addLayout(crashRow);
+    connect(cRef, &QPushButton::clicked, this, &DiagnosticsDialog::refreshCrashes);
+    connect(cClear, &QPushButton::clicked, this, [this]() {
+        CrashHandler::clearDumps();
+        refreshCrashes();
+    });
+    m_tabs->addTab(crashTab, "Çökmeler");
+    refreshCrashes();
 
     // --- Araç zinciri ---
     auto* toolsTab = new QWidget(this);
@@ -260,4 +283,16 @@ void DiagnosticsDialog::exportReport() {
     r += "== Erişilebilirlik ==\n" + m_a11y->toPlainText() + "\n";
     QFile f(p);
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) f.write(r.toUtf8());
+}
+
+void DiagnosticsDialog::refreshCrashes() {
+    if (!m_crash) return;
+    const QStringList dumps = CrashHandler::pendingDumps();
+    if (dumps.isEmpty()) {
+        m_crash->setPlainText(QStringLiteral("Çökme dökümü yok."));
+        return;
+    }
+    QStringList lines;
+    for (const QString& d : dumps) lines << CrashHandler::crashDir() + "/" + d;
+    m_crash->setPlainText(QString("%1 döküm:\n").arg(dumps.size()) + lines.join("\n"));
 }

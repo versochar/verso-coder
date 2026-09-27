@@ -6,6 +6,7 @@
 #include <QApplication>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QDir>
 #include <QSettings>
 #include <cstdio>
 
@@ -41,14 +42,25 @@ int main(int argc, char** argv) {
     app.setApplicationName("VersoCoder");
     app.setApplicationVersion(AboutInfo::version());
     app.setApplicationDisplayName("Verso Coder");
-    // Stage 31: çökme izi (opt-in ayar)
-    if (QSettings("Verso", "VersoCoder").value("app/crashReport", false).toBool())
-        CrashHandler::install();
+
     PerfMonitor::instance().reset();      // Stage 22: başlangıç ölçümü
     PerfMonitor::instance().mark("main"); // Stage 22
     migrateLegacySettings();
 
     const StartupOptions opts = StartupArgs::parse(app.arguments().mid(1));
+    // Stage 48: taşınabilir kip — TÜM QSettings yolu uygulama yanına alınır.
+    // main() başında, ilk QSettings kullanımından önce olmalı.
+    if (opts.portable) {
+        const QString portableDir =
+            QDir(QCoreApplication::applicationDirPath()).filePath("verso-data");
+        QDir().mkpath(portableDir);
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, portableDir);
+        QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, portableDir);
+    }
+    // Stage 31: çökme izi (opt-in ayar) — taşınabilir kip yolundan sonra
+    if (QSettings("Verso", "VersoCoder").value("app/crashReport", false).toBool())
+        CrashHandler::install();
     if (opts.help) {
         std::fputs(StartupArgs::helpText().toUtf8().constData(), stdout);
         return 0;

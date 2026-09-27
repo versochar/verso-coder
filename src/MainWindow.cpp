@@ -37,6 +37,7 @@
 #include "core/Spelling.h"
 #include "core/StartupArgs.h"
 #include "core/ThemeManager.h"
+#include "core/UpdateChecker.h"
 #include "core/ThemeStore.h"
 #include "core/IconTheme.h"
 #include "core/Animator.h"
@@ -1126,6 +1127,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         });
         w->setFuture(QtConcurrent::run(
             [host]() { return OllamaClient::ensureServer(host, 12000); }));
+    });
+    // Stage 48: güncelleme denetimi (haftada 1, ayarlanabilir, sessiz başarısızlık)
+    QTimer::singleShot(30000, this, [this]() {
+        if (!UpdateChecker::shouldCheck()) return;
+        auto *uc = new UpdateChecker(this);
+        uc->setCurrentVersion(AboutInfo::version());
+        connect(uc, &UpdateChecker::ready, this, [this, uc](const UpdateChecker::Result &r) {
+            uc->deleteLater();
+            if (!r.checked || !r.newer) return;
+            toast(0, QString("Yeni sürüm mevcut: %1 (yardım menüsünden indirin)").arg(r.latest));
+            m_status->setText(QString("Güncelleme: %1").arg(r.latest));
+        });
+        uc->check();
     });
     // Stage 9: tema/accent değişince tüm görselleri tazele
     ThemeManager::instance().onApplied([this]() {

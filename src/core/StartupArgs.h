@@ -12,6 +12,7 @@ struct StartupOptions {
     bool noRestore = false; // --no-restore (oturum geri yükleme kapalı)
     bool help = false;      // --help / -h
     bool version = false;   // --version / -v
+    bool portable = false;  // Stage 48: --portable (ayarlar uygulama yanında)
 };
 
 class StartupArgs {
