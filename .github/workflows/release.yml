@@ -22,7 +22,7 @@ jobs:
           version: "6.7.2"
           modules: "qtwebsockets"
       - name: Bağımlılıklar
-        run: sudo apt-get update -q && sudo apt-get install -qy libhunspell-dev libgl1-mesa-dev rsvg-convert
+        run: sudo apt-get update -q && sudo apt-get install -qy libhunspell-dev libgl1-mesa-dev librsvg2-bin
       - name: Derle
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
