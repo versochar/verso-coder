@@ -108,12 +108,22 @@ QProcess* SshSession::execAsync(const QString& command, const QString& cwd) {
     return p;
 }
 
+// Stage 44: sftp toplu-iş alıntısı. Yol içinde " ya da \ varsa çıplak
+// çift tırnak komutu kırıyordu; kaçışlı sürüm kullanılır.
+QString SshSession::sftpQuote(const QString& path) {
+    QString q = path;
+    q.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+    q.replace(QLatin1Char('"'), QStringLiteral("\\\""));
+    return QStringLiteral("\"") + q + QStringLiteral("\"");
+}
+
 bool SshSession::upload(const QString& local, const QString& remote, int timeoutMs) {
     QProcess p;
     QStringList args = sftpBatchArgs(m_profile);
     p.start("sftp", args);
     if (!p.waitForStarted(8000)) return false;
-    const QString batch = "put \"" + local + "\" \"" + remote + "\"\nbye\n";
+    const QString batch =
+        "put " + sftpQuote(local) + " " + sftpQuote(remote) + "\nbye\n";
     p.write(batch.toUtf8());
     p.closeWriteChannel();
     if (!p.waitForFinished(timeoutMs)) { p.kill(); return false; }
@@ -125,7 +135,8 @@ bool SshSession::download(const QString& remote, const QString& local, int timeo
     QStringList args = sftpBatchArgs(m_profile);
     p.start("sftp", args);
     if (!p.waitForStarted(8000)) return false;
-    const QString batch = "get \"" + remote + "\" \"" + local + "\"\nbye\n";
+    const QString batch =
+        "get " + sftpQuote(remote) + " " + sftpQuote(local) + "\nbye\n";
     p.write(batch.toUtf8());
     p.closeWriteChannel();
     if (!p.waitForFinished(timeoutMs)) { p.kill(); return false; }

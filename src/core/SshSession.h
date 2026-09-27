@@ -42,6 +42,8 @@ public:
     static QString remoteShellCmd(const ConnectionProfile& p, const QString& command,
                                   const QString& cwd);
     static QStringList sftpBatchArgs(const ConnectionProfile& p);
+    // Stage 44: sftp toplu-iş yolu alıntısı (test edilebilir)
+    static QString sftpQuote(const QString& path);
     static bool haveNative(); // libssh2 derleme desteği
 
 signals:
