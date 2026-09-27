@@ -31,6 +31,16 @@ if(NOT HUNSPELL_INCLUDE_DIRS)
     endif()
 endif()
 message(STATUS "HUNSPELL_INCLUDE_DIRS=${HUNSPELL_INCLUDE_DIRS}")
+# Bazı .pc dosyaları -I'yi bir alt dizine verir (.../include/hunspell)
+# ama kod <hunspell/...> önekli include eder.
+# Varlık denetimiyle üst dizine çık.
+if(HUNSPELL_INCLUDE_DIRS AND NOT EXISTS "${HUNSPELL_INCLUDE_DIRS}/hunspell/hunspell.hxx")
+    get_filename_component(HUNSPELL_PARENT "${HUNSPELL_INCLUDE_DIRS}" DIRECTORY)
+    if(EXISTS "${HUNSPELL_PARENT}/hunspell/hunspell.hxx")
+        set(HUNSPELL_INCLUDE_DIRS "${HUNSPELL_PARENT}")
+        message(STATUS "HUNSPELL dizini üst seviyeye alındı: ${HUNSPELL_INCLUDE_DIRS}")
+    endif()
+endif()
 if(LIBSSH2_FOUND AND NOT LIBSSH2_INCLUDE_DIRS)
     find_path(LIBSSH2_FALLBACK libssh2.h
         PATHS /opt/homebrew/include /usr/local/include /usr/include
