@@ -304,7 +304,7 @@ src/core/PerfTools.*                  → ikili sez, boyut süzgeci, LRU önbell
 
 - **Stage 48 — Dağıtım ✅ (yapıldı):** kurulum kuralları + AppImage betiği vardı (Stage 8); eksikler kapatıldı: `--portable` kipi (ayarlar uygulama yanında, ilk QSettings kullanımından önce), `UpdateChecker` (GitHub releases, haftada 1, kapatılabilir, sessiz başarısızlık; `file://` ile test edilir), Tanı diyaloğuna "Çökmeler" sekmesi (bekleyen dökümler + temizleme; gönderim yok — onamlı yerel günlük). `test_stage48` (32 kontrol) + ctest **32/32**. Sürüm **3.0.0**.
 
-**Kurulum matriksi:** kaynak derleme (cmake) · `cmake --install` (desktop girdisi + simge + metainfo) · AppImage (`packaging/build-appimage.sh`) · taşınabilir (`--portable`). İmza doğrulama yok (dürüst sınır — GitHub releases toplamı elle denetlenir).
+**Kurulum:** `pacman -S verso-coder` ([verso] deposu: docs/PACMAN-REPO.md) · **Kurulum matriksi:** kaynak derleme (cmake) · `cmake --install` (desktop girdisi + simge + metainfo) · AppImage (`packaging/build-appimage.sh`) · taşınabilir (`--portable`). İmza doğrulama yok (dürüst sınır — GitHub releases toplamı elle denetlenir).
 
 - **Stage 47 — Erişilebilirlik ✅ (yapıldı):** tıklanabilir durum çipleri + düzenleyici sekmeleri + `CodeEditor` ekran okuyucu adları aldı (dosya adı açılışta güncellenir). `test_stage47` (29 kontrol: WCAG matematiği, **high-contrast.json 6 renk çifti kilidi** — hepsi ≥4.5, TR+EN çeviri kapsama eksiksiz, 3 renk körü modu) + ctest **31/31**. Sürüm 2.9.0.
 
