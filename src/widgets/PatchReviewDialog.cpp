@@ -94,3 +94,7 @@ void PatchReviewDialog::refreshPreview() {
     }
     m_preview->clear();
 }
+
+void PatchReviewDialog::setBulkWarning(int threshold) {
+    m_bulkThreshold = threshold;
+}

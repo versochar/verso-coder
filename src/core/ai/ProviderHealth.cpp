@@ -252,3 +252,15 @@ QStringList ProviderHealth::filterUsable(const QStringList& providerIds) const {
         if (isUsable(id)) out << id;
     return out;
 }
+
+namespace {
+int g_cooldownSecOverride = -1;
+}
+
+int ProviderHealth::cooldownSec() {
+    return g_cooldownSecOverride > 0 ? g_cooldownSecOverride : 120;
+}
+
+void ProviderHealth::setCooldownSecForTests(int sec) {
+    g_cooldownSecOverride = sec > 0 ? sec : -1;
+}

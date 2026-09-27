@@ -102,6 +102,11 @@ public:
     enum class ShellMode { Secure, Legacy };
     void setShellMode(ShellMode m) { m_shellMode = m; }
     void setReadOnlyWrap(bool on) { m_readOnlyWrap = on; }
+    // Stage 39: kuyruk eşiği. Kuyruktaki dosya sayısı eşiği aşarsa tek "evet"
+    // ile geçmemeli; gözden geçirme diyaloğunda tek tek işaretlenmeli.
+    void setQueueReviewThreshold(int n) { m_queueThreshold = qMax(1, n); }
+    int queueReviewThreshold() const { return m_queueThreshold; }
+    bool queueNeedsReview() const;
     ShellMode shellMode() const { return m_shellMode; }
     // Ortam değişkeni temizliği: anahtar/token/AI sırlarını komuta taşıma
     static QProcessEnvironment sanitizedEnvironment();
@@ -123,6 +128,7 @@ private:
     QString m_root;
     PathGuard m_guard; // Stage 38: yol güvenliği
     ShellMode m_shellMode = ShellMode::Secure; // Stage 38
+    int m_queueThreshold = 5; // Stage 39: toplu onay eşiği
     bool m_auditOn = true;
     CommandAudit m_audit; // Stage 38: komut denetimi
     bool m_readOnlyWrap = false; // varsa salt-okunur kip kullan

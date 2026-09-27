@@ -15,6 +15,8 @@ public:
     explicit PatchReviewDialog(QWidget* parent = nullptr);
 
     void setEdits(const QList<QueuedEdit>& edits);
+    // Stage 39: kuyruk eşiği aşıldıysa başlıkta toplu-onay uyarısı göster
+    void setBulkWarning(int threshold);
     QList<QueuedEdit> selectedEdits() const;
 
 private slots:
@@ -22,6 +24,7 @@ private slots:
 
 private:
     QList<QueuedEdit> m_edits;
+    int m_bulkThreshold = -1; // Stage 39: -1 = uyarı yok
     QTreeWidget* m_tree;
     QTextEdit* m_preview;
     QLabel* m_summary;

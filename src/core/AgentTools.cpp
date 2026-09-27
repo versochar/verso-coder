@@ -224,6 +224,12 @@ ToolResult AgentTools::writeFile(const QString& path, const QString& content) {
         m_queue->add(e);
         r.ok = true;
         r.output = "Onay kuyruğuna alındı (yazılmadı): " + path;
+        // Stage 39: eşik aşılınca uyar — kullanıcı tek "evet" ile geçmemeli
+        if (queueNeedsReview())
+            r.output += QString("\nUYARI: kuyrukta %1 dosya var (eşik %2) — "
+                                "gözden geçirmede tek tek işaretleyin.")
+                            .arg(m_queue->count())
+                            .arg(m_queueThreshold);
         return r;
     }
     QDir().mkpath(QFileInfo(abs).absolutePath());
@@ -328,8 +334,44 @@ QString AgentTools::pathWarning(const QString& command) {
         if (m.size() > 2 && !hits.contains(m)) hits << m;
         if (hits.size() >= 4) break;
     }
-    if (hits.isEmpty()) return {};
-    return QStringLiteral("Mutlak yol içeriyor: %1").arg(hits.join(", "));
+    QStringList warnings;
+    if (!hits.isEmpty())
+        warnings << QStringLiteral("Mutlak yol içeriyor: %1").arg(hits.join(", "));
+    // Stage 39: komut zincirleme/girdi ikamesi/yönlendirme kalıpları. "&&"/"|"
+    // tek başına zararsızdır (derleme komutlarında normaldir); yalnız gerçekten
+    // tehlikeli olanlar bildirilir: komut ikamesi, kabuğa borulama, köke yazma.
+    // Backtick her zaman bildirilir (modern kabukta gereksiz, gözden kaçar);
+    // $(...) için zararsız izin listesi vardır (derleme komutlarında standart).
+    static const QRegularExpression reBacktick(QStringLiteral("`[^`]*`"));
+    static const QRegularExpression reDollar(QStringLiteral("\\$\\(([^)]*)\\)"));
+    static const QStringList benignSubst = {"nproc", "pwd", "hostname", "uname", "date",
+                                            "dirname $0", "basename $0"};
+    bool riskySubst = command.contains(reBacktick);
+    if (!riskySubst) {
+        auto subIt = reDollar.globalMatch(command);
+        while (subIt.hasNext()) {
+            const QString inner = subIt.next().captured(1).trimmed();
+            const QString first =
+                inner.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts).value(0);
+            if (!benignSubst.contains(first, Qt::CaseInsensitive)
+                && !benignSubst.contains(inner, Qt::CaseInsensitive)) {
+                riskySubst = true;
+                break;
+            }
+        }
+    }
+    if (riskySubst)
+        warnings << QStringLiteral("Komut ikamesi içeriyor ($(...)/backtick): çalışmadan önce açılmış halini denetleyin");
+    static const QRegularExpression rePipeSh(
+        QStringLiteral("\\|\\s*(?:sh|bash|zsh|dash|python3?|perl|ruby)\\b"));
+    if (command.contains(rePipeSh))
+        warnings << QStringLiteral("Çıktı doğrudan kabuğa/yorumlayıcıya borulanıyor: indir-çalıştır kalıbı");
+    static const QRegularExpression reRootWrite(
+        QStringLiteral("(^|[\\s;&|])(?:sudo\\s+)?(tee\\s+)?/(?:etc|usr|bin|sbin|boot|proc|sys|dev)/[^\\s]*"));
+    if (command.contains(reRootWrite))
+        warnings << QStringLiteral("Sistem dizinine yazma içeriyor: kök dışına çıkıyor");
+    if (warnings.isEmpty()) return {};
+    return warnings.join("\n");
 }
 
 QStringList AgentTools::blockedPatterns() {
@@ -593,4 +635,8 @@ ToolResult AgentTools::execute(const ToolCall& call) {
         return healthScan();
     r.output = "Bilinmeyen araç: " + n;
     return r;
+}
+
+bool AgentTools::queueNeedsReview() const {
+    return m_queue && m_queue->count() > m_queueThreshold;
 }

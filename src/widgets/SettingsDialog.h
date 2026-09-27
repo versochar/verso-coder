@@ -54,6 +54,7 @@ private:
     // Stage 38: ajan komut güvenliği
     QCheckBox* m_agentShellSecure = nullptr;
     QCheckBox* m_agentAudit = nullptr;
+    class QSpinBox* m_agentQueueThreshold = nullptr; // Stage 39
     QLabel* m_agentSandboxInfo = nullptr;
     // Stage 35: sağlayıcılar
     void buildProviderTab();

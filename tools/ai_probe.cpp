@@ -21,6 +21,9 @@
 #include <QRegularExpression>
 #include <QTextStream>
 #include <algorithm>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QTimer>
 
 #include "../src/core/ai/AiProfiles.h"
@@ -35,6 +38,7 @@
 #include "../src/core/ai/ProviderPricing.h"
 #include "../src/core/ai/SecretStore.h"
 #include "../src/core/ai/UsageLedger.h"
+#include "../src/core/RagProgress.h"
 #include "../src/core/ai/providers/ProviderCodec.h"
 
 static QTextStream out(stdout);
@@ -395,6 +399,108 @@ int main(int argc, char** argv) {
                     }
                 }
                 check(client.maxModelFailovers() == 2, "en fazla 2 model denemesi");
+            }
+        }
+    }
+
+    // --- 6c) sigorta (canlı: yoğunluk → devre açma → soğuma → kapanma) ---
+    if (wants("sigorta")) {
+        out << "[sigorta — circuit breaker]\n";
+        ProviderHealth& h = ProviderHealth::instance();
+        const QString pid = spec.id + "-probe";
+        h.reset(pid);
+        check(!h.isTripped(pid), "başta devre kapalı");
+        // Gerçek 429 üretmek kotayı yakardı; aynı sayaçtan geçen yapay
+        // yoğunluk kayıtlarıyla devre davranışı ölçülür.
+        h.recordFailure(pid, 50, 429);
+        h.recordFailure(pid, 50, 503);
+        check(!h.isTripped(pid), "eşik altında devre açık değil (2 kayıt)");
+        h.recordFailure(pid, 50, 429);
+        check(h.isTripped(pid), "3 yoğun kayıtta devre açıldı");
+        check(!h.isUsable(pid), "devredeki sağlayıcı kullanılamaz");
+        check(h.cooldownLeft(pid) > 0 && h.cooldownLeft(pid) <= ProviderHealth::cooldownSec(),
+              "soğuma süresi aralıkta", QString("%1 sn").arg(h.cooldownLeft(pid)));
+        // Yönlendirme devredeki sağlayıcıyı eler
+        const QStringList usable = h.filterUsable({QStringLiteral("a"), pid, QStringLiteral("b")});
+        check(!usable.contains(pid) && usable.size() == 2, "yönlendirme havuzdan ayıklar");
+        // Başarılı istek devreyi kapatır (canlı kanıt için tek gerçek istek)
+        h.recordSuccess(pid, 120);
+        check(!h.isTripped(pid) && h.isUsable(pid), "başarıda devre kapandı");
+        // Sabit hata (401) sigortayı tetiklemez
+        for (int i = 0; i < 5; ++i) h.recordFailure(pid, 10, 401);
+        check(!h.isTripped(pid), "401 sigortayı açmıyor (kalıcı hata)");
+        // Gerçek istek hâlâ geçiyor mu?
+        AiRunner::Options o = AiRunner::optionsFor(AiTask::Chat);
+        o.providerId = spec.id;
+        o.model = model;
+        o.bypassRouting = true;
+        const AiRunner::Result live = runner.run(o, "tek kelimeyle: ok");
+        check(live.ok, "devre sonrası gerçek istek geçiyor",
+              live.ok ? live.text.trimmed().left(40) : live.error);
+        h.reset(pid);
+    }
+
+    // --- 6d) RAG devamı (canlı: ilerleme diske, ikinci koşu kaldığı yerden) ---
+    if (wants("ragDevam")) {
+        out << "[RAG devamı — kesintili indeksleme]\n";
+        if (!spec.supportsEmbed) {
+            skip("RAG devamı", "sağlayıcı gömme desteklemiyor");
+        } else {
+            const QString embedModel =
+                pinnedEmbed.isEmpty() ? EmbedBridge::resolveModel(spec.id) : pinnedEmbed;
+            if (embedModel.isEmpty()) {
+                skip("RAG devamı", "gömme modeli çözümlenemedi");
+            } else {
+                RagProgressStore store(QDir::tempPath() + "/verso-probe-rag.json");
+                store.clear();
+                RagProgress p;
+                p.root = QDir::tempPath();
+                p.pending = {"probe-a.txt", "probe-b.txt", "probe-c.txt"};
+                p.total = 3;
+                store.setProgress(p);
+                check(store.matchesRoot(QDir::tempPath()), "aynı kök eşleşiyor");
+                check(!store.matchesRoot("/baska/proje"), "farklı kök eşleşmiyor");
+                // İlk koşu: iki dosya gömülür (ücretsiz katmanda her 30 dk 1
+                // istek; farklı metinler kota harcamadan önce önbelleğe de
+                // bakılır — canlı davranış hız sınırına takılabilir).
+                EmbedBridge eb;
+                eb.setProvider(spec.id);
+                eb.setModel(embedModel);
+                int embedded = 0;
+                for (const QString& f : {"probe-a.txt", "probe-b.txt"}) {
+                    const EmbedBridge::Result r = eb.embedOne(
+                        QString("probe metni %1: Verso editörü").arg(f), 60000);
+                    if (r.ok()) {
+                        ++embedded;
+                        store.advance(f);
+                    } else if (r.error.contains("hız") || r.error.contains("kota") ||
+                               r.error.contains("429") || r.error.contains("bekle")) {
+                        store.markWaiting(QDateTime::currentDateTime()
+                                              .addSecs(60)
+                                              .toMSecsSinceEpoch());
+                        ok("hız sınırı", QString("bekleme yazıldı (%1 sn)").arg(store.waitLeftSec()));
+                        break;
+                    } else {
+                        bad("gömme hatası", r.error);
+                        break;
+                    }
+                }
+                // İkinci koşu: diskten oku, kaldığı yerden sür
+                RagProgressStore store2(QDir::tempPath() + "/verso-probe-rag.json");
+                check(store2.load(), "ilerleme diskten okundu");
+                check(store2.progress().pending.size() == 3 - embedded,
+                      "kalan dosya sayısı doğru",
+                      QString("kalan %1").arg(store2.progress().pending.size()));
+                if (embedded > 0)
+                    ok("devam", QString("%1 gömüldü, %2 sırada: %3")
+                                     .arg(embedded)
+                                     .arg(store2.progress().pending.size())
+                                     .arg(store2.progress().describe()));
+                else
+                    ok("devam", QString("hız sınırı nedeniyle beklemede: %1")
+                                     .arg(store2.progress().describe()));
+                store.clear();
+                check(!QFile::exists(store.filePath()), "temizlik sonrası dosya yok");
             }
         }
     }

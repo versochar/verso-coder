@@ -29,4 +29,10 @@ public:
     // Sağlayıcı için anahtar alma yeri (kullanıcıya gösterilecek metin)
     static QString keyHintFor(const QString& providerId);
     static bool hasKey(const QString& providerId);
+    // --- Stage 39: canlı ağ yoklaması ---
+    // generate_204 uç noktasına kısa zaman aşımlı yoklama. Ağ yoksa bile
+    // 3 sn içinde döner. Gizlilik: istek gövdesi yok, yalnız durum kodu okunur.
+    static bool networkUp(int timeoutMs = 3000);
+    // Ağ durumunu ölçüp ona göre analiz eder (ayarlardan açılabilir)
+    static QList<SetupAction> analyzeWithNetworkCheck(int timeoutMs = 3000);
 };

@@ -67,7 +67,10 @@ public:
     // "Yoğun" hatalar art arda gelirse sağlayıcı soğuma süresince havuzdan
     // çıkarılır; süre dolunca veya başarılı istekte yeniden alınır.
     static int busyThreshold() { return 3; }
-    static int cooldownSec() { return 120; }
+    static int cooldownSec();
+    // Stage 39: canlı ölçüm/test için soğuma süresi geçici değişimi
+    // (üretim varsayılanı 120 sn; 0 = sıfırla)
+    static void setCooldownSecForTests(int sec);
     // Başarılı istek: sigortayı sıfırlar
     void recordBusy(const QString& providerId);
     void clearTripped(const QString& providerId);

@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "2.0.0"; }
+QString AboutInfo::version() { return "2.1.0"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,12 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "2.1.0 (Stage 39)\n"
+        "  • Canlı sigorta doğrulaması: devre açılıyor, yönlendirme ayıklıyor\n"
+        "  • Canlı RAG devamı: bekleme diske, ikinci koşu kaldığı yerden\n"
+        "  • Onayda kabuk metakarakteri uyarısı (ikame/borulama/kök yazma)\n"
+        "  • Yazma kuyruğu eşiği: toplu onayda tek tek gözden geçirme\n"
+        "  • Yönlendirme rehberi gerçek ağ yoklaması yapabiliyor\n"
         "2.0.0 (Stage 38)\n"
         "  • Güvenlik: sembolik bağlantı kaçışı kapatıldı (yol denetimi)\n"
         "  • Ajan komutları: profil yüklenmiyor, anahtarlar komuttan temizleniyor\n"

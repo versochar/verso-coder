@@ -292,6 +292,13 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
                         "\"bash -c\" ve API anahtarları komutun ortamından temizlenir."));
     af->addRow("", m_agentShellSecure);
     m_agentAudit = new QCheckBox("Komut denetim kaydı tut", ai);
+    // Stage 39: toplu onay eşiği
+    auto *queueSpin = new QSpinBox(ai);
+    queueSpin->setRange(1, 50);
+    queueSpin->setValue(QSettings().value("agent/queueReviewThreshold", 5).toInt());
+    queueSpin->setToolTip("Kuyruktaki dosya sayısı bu eşiği aşarsa tek 'evet' ile geçilmez; gözden geçirmede tek tek işaretlenir.");
+    af->addRow("Toplu onay eşiği (dosya):", queueSpin);
+    m_agentQueueThreshold = queueSpin;
     m_agentAudit->setToolTip("Ajanın çalıştırdığı her komut, onay/ret ve çıkış koduyla günlüğe yazılır.");
     af->addRow("", m_agentAudit);
     m_agentSandboxInfo = new QLabel(ai);
@@ -942,6 +949,8 @@ void SettingsDialog::buildProviderTab() {
         if (m_agentShellSecure)
             m_agentShellSecure->setChecked(stg.value("agent/shellSecure", true).toBool());
         if (m_agentAudit) m_agentAudit->setChecked(stg.value("agent/audit", true).toBool());
+        if (m_agentQueueThreshold)
+            m_agentQueueThreshold->setValue(stg.value("agent/queueReviewThreshold", 5).toInt());
     }
     // Stage 38: sandbox durumu bilgisi
     if (m_agentSandboxInfo) {
@@ -1417,6 +1426,8 @@ void SettingsDialog::saveAll() {    AppSettings cur = SettingsManager::instance(
         if (m_agentShellSecure)
             stg.setValue("agent/shellSecure", m_agentShellSecure->isChecked());
         if (m_agentAudit) stg.setValue("agent/audit", m_agentAudit->isChecked());
+        if (m_agentQueueThreshold)
+            stg.setValue("agent/queueReviewThreshold", m_agentQueueThreshold->value());
     }
     s.gpuBackend = m_backend->currentText();
     s.gpuLayers = (s.gpuBackend == "CPU") ? 0 : m_gpu->value();

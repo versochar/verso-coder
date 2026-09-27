@@ -1085,6 +1085,9 @@ bool AiPanel::approveTool(const ToolCall& c) {
 
 void AiPanel::showPatchReview() {
     PatchReviewDialog d(this);
+    QSettings st;
+    const int threshold = st.value("agent/queueReviewThreshold", 5).toInt();
+    d.setBulkWarning(threshold);
     d.setEdits(m_patchQueue.edits());
     const int n = m_patchQueue.count();
     if (d.exec() != QDialog::Accepted) {
@@ -1168,6 +1171,7 @@ void AiPanel::runAgent(const QString& task) {
                                ? AgentTools::ShellMode::Secure
                                : AgentTools::ShellMode::Legacy);
         tools.setAuditEnabled(st.value("agent/audit", true).toBool());
+        tools.setQueueReviewThreshold(st.value("agent/queueReviewThreshold", 5).toInt());
         // Mutlak yol içeren komut varsa kullanıcıya önceden haber ver
         const QString warn = AgentTools::pathWarning(QString());
         Q_UNUSED(warn);

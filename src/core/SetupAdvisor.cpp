@@ -4,6 +4,12 @@
 #include "ai/ProviderPrefs.h"
 #include "ai/SecretStore.h"
 #include "ai/UsageLedger.h"
+#include <QEventLoop>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QTimer>
+#include <QUrl>
 #include <algorithm>
 
 QString SetupAdvisor::keyHintFor(const QString& providerId) {
@@ -147,4 +153,24 @@ QString SetupAdvisor::summary(const QList<SetupAction>& actions) {
     if (info) parts << QStringLiteral("%1 bilgi").arg(info);
     const SetupAction first = actions.first();
     return QStringLiteral("%1 · önce: %2").arg(parts.join(QStringLiteral(", ")), first.title);
+}
+
+bool SetupAdvisor::networkUp(int timeoutMs) {
+    QNetworkAccessManager nam;
+    QEventLoop loop;
+    QTimer timer;
+    timer.setSingleShot(true);
+    QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QNetworkReply* reply = nam.get(QNetworkRequest{QUrl(QStringLiteral(
+        "https://connectivitycheck.gstatic.com/generate_204"))});
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    timer.start(qMax(500, timeoutMs));
+    loop.exec();
+    const bool ok = reply->isFinished() && reply->error() == QNetworkReply::NoError;
+    reply->deleteLater();
+    return ok;
+}
+
+QList<SetupAction> SetupAdvisor::analyzeWithNetworkCheck(int timeoutMs) {
+    return analyze(networkUp(timeoutMs));
 }
