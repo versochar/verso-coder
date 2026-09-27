@@ -1,4 +1,5 @@
 #include "ThemeManager.h"
+#include "VersoPaths.h"
 #include "ColorBlind.h"
 #include "QssBuilder.h"
 #include "ThemeStore.h"
@@ -82,7 +83,8 @@ void ThemeManager::apply(const QString& themeName) {
     }
     QStringList candidates;
     if (themeName == "custom") candidates << customPath();
-    candidates << QString("resources/themes/%1.qss").arg(themeName)
+    candidates << VersoPaths::subDir("themes") + QString("/%1.qss").arg(themeName)
+               << QString("resources/themes/%1.qss").arg(themeName)
                << QCoreApplication::applicationDirPath()
                       + QString("/resources/themes/%1.qss").arg(themeName);
     for (const QString& p : candidates) {

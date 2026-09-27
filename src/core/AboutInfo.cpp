@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "1.0.0"; }
+QString AboutInfo::version() { return "1.0.1"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,9 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "1.0.1\n"
+        "  • Kurulu pakette kaynak dizini çözümü (AUR düzeltmesi)\n"
+        "  • Simge + lisans kurulumu\n"
         "1.0.0 (ilk genel sürüm)\n"
         "  • 50 stage, 521 özellik, 34 test paketi\n"
         "  • Çok sağlayıcılı AI (NIM/UnoRouter/OpenAI/yerel) + ekonomi/kota\n"

@@ -139,6 +139,7 @@
 #include "core/WorkspaceSymbols.h"
 #include "core/PluginEngine.h"
 #include "core/CollabSession.h"
+#include "core/VersoPaths.h"
 #include <QDesktopServices>
 #include "widgets/WelcomeView.h"
 #include "widgets/TodoPanel.h"
@@ -2987,7 +2988,7 @@ void MainWindow::loadPluginsDeferred() {
         const QString dst = pluginDir() + "/" + s;
         if (QFile::exists(dst)) continue;
         const QString src =
-            QCoreApplication::applicationDirPath() + "/resources/plugins/" + s;
+            VersoPaths::subDir("plugins") + "/" + s;
         if (QFile::exists(src)) QFile::copy(src, dst);
     }
     if (!m_plugins) {

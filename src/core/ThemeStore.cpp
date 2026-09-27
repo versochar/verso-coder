@@ -1,4 +1,5 @@
 #include "ThemeStore.h"
+#include "VersoPaths.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -21,11 +22,8 @@ ThemeStore& ThemeStore::instance() {
 }
 
 QString ThemeStore::builtinThemesDir() {
-    // binary yanındaki resources/themes (CMake POST_BUILD kopyası) → cwd fallback
-    const QString beside =
-        QCoreApplication::applicationDirPath() + "/resources/themes";
-    if (QDir(beside).exists()) return beside;
-    return "resources/themes";
+    // Stage 50-debug: kurulu paket (/usr/share) dahil tüm adaylar
+    return VersoPaths::subDir("themes");
 }
 
 QString ThemeStore::customThemesDir() {

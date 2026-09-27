@@ -9,3 +9,4 @@
 *.AppImage
 *.dmg
 *-windows-*.zip
+build-pkg/

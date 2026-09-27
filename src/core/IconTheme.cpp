@@ -1,4 +1,5 @@
 #include "IconTheme.h"
+#include "VersoPaths.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -11,9 +12,7 @@
 static QHash<QString, QPixmap> g_iconCache;
 
 QString IconTheme::iconsDir() {
-    const QString beside = QCoreApplication::applicationDirPath() + "/resources/icons";
-    if (QDir(beside).exists()) return beside;
-    return "resources/icons";
+    return VersoPaths::subDir("icons");
 }
 
 bool IconTheme::hasIcon(const QString& name) {

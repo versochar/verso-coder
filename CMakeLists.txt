@@ -33,6 +33,7 @@ set(SOURCES
     src/core/FileIcons.cpp
     src/core/AgentTools.cpp
     src/core/PathGuard.cpp
+    src/core/VersoPaths.cpp
     src/core/UpdateChecker.cpp
     src/core/PluginEngine.cpp
     src/core/LeakWatch.cpp
@@ -253,6 +254,7 @@ set(HEADERS
     src/core/FileIcons.h
     src/core/AgentTools.h
     src/core/PathGuard.h
+    src/core/VersoPaths.h
     src/core/UpdateChecker.h
     src/core/PluginEngine.h
     src/core/LeakWatch.h
@@ -779,7 +781,15 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/resources
         DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME})
 install(FILES ${CMAKE_SOURCE_DIR}/packaging/verso-coder.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
-install(FILES ${CMAKE_SOURCE_DIR}/packaging/verso-coder.appdata.xml
+# Stage 50-debug: simge kurulumu (desktop dosyası Icon=verso-coder diyordu ama
+# simge hiç kurulmuyordu) + kurulum öneki tanımı (GNUInstallDirs sonrası)
+install(FILES ${CMAKE_SOURCE_DIR}/LICENSE
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/${PROJECT_NAME})
+install(FILES ${CMAKE_SOURCE_DIR}/resources/icon.svg
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
+        RENAME verso-coder.svg)
+target_compile_definitions(${PROJECT_NAME} PRIVATE VERSO_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/${PROJECT_NAME}")
+install(FILES ${CMAKE_SOURCE_DIR}/packaging/io.verso.Coder.appdata.xml
         DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
 
 # --- Stage 37: canlı uçtan uca AI doğrulama aracı (geliştirici aracı; ctest'e girmez) ---
