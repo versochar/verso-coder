@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "1.0.3"; }
+QString AboutInfo::version() { return "1.0.4"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,9 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "1.0.4\n"
+        "  • Meta-test makepkg dizininde çalışıyor\n"
+        "  • AUR PKGBUILD + özel pacman deposu\n"
         "1.0.3\n"
         "  • Meta-test kaynak kökü yukarı arar (makepkg düzeni)\n"
         "1.0.2\n"
