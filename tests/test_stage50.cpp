@@ -35,7 +35,7 @@ static int g_pass = 0, g_fail = 0;
 
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
-    // Kaynak kökü yukarı doğru aranır (build/, makepkg src/ düzeni dahil)
+    // Kaynak kökü yukarı doğru aranır (PKGBUILD ağaç-içi derleme yapar)
     QString src;
     QDir d = QDir::current();
     for (int i = 0; i < 5 && src.isEmpty(); ++i) {

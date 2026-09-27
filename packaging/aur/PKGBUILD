@@ -20,15 +20,20 @@ build() {
   cmake -S "$pkgname-$pkgver" -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr
-  cmake --build build -j"$(nproc)"
+build() {
+  # Ağaç-içi derleme: test_stage50 kaynak kökü yukarı arar (makepkg düzeni)
+  cmake -S "$pkgname-$pkgver" -B "$pkgname-$pkgver/build" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr
+  cmake --build "$pkgname-$pkgver/build" -j"$(nproc)"
 }
 
 check() {
-  cd build
+  cd "$pkgname-$pkgver/build"
   # ui_smoke/stage46 yavaş ve ortama duyarlıdır; hızlı birim paketleri koşar
   QT_QPA_PLATFORM=offscreen ctest --output-on-failure -E 'ui_smoke|stage46'
 }
 
 package() {
-  DESTDIR="$pkgdir" cmake --install build
+  DESTDIR="$pkgdir" cmake --install "$pkgname-$pkgver/build"
 }
