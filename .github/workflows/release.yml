@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Qt kur
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@v3
         with:
           version: "6.7.2"
           modules: "qtwebsockets"
@@ -60,7 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Qt kur
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@v3
         with:
           version: "6.7.2"
           arch: "win64_msvc2019_64"
@@ -93,7 +93,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Qt kur
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@v3
         with:
           version: "6.7.2"
           modules: "qtwebsockets"
