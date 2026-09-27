@@ -310,8 +310,8 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     // Stage 40: zararsız ikame listesi (ayarlara taşındı, gömülü değil)
     auto* benignEdit = new QLineEdit(ai);
     benignEdit->setText(QSettings().value("agent/benignSubst", "nproc,pwd,hostname,uname,date").toString());
-    benignEdit->setToolTip(QStringLiteral("Komut ikamesi \ içinde geçerse uyarı ÜRETMEYEN "
-                                            "sözcükler, virgülle ayrılır."));
+    benignEdit->setToolTip(QStringLiteral("$(...) içinde geçerse uyarı üretmeyen "
+                                            "sözcükler, virgülle ayrılır. Örn: nproc"));
     af->addRow("Zararsız ikameler:", benignEdit);
     m_agentBenign = benignEdit;
     // Stage 40: oturumluk güvenli komut izni (varsayılan KAPALI)

@@ -1312,6 +1312,11 @@ void MainWindow::closeTabIn(QTabWidget* tabs, int i) {
         refreshProblemView();
     }
     QWidget* w = tabs->widget(i);
+    // Stage 46: bekleyen sekme kapanırsa kayıtları da düşer (yetim girdi yok)
+    if (const QString pp = w->property("pendingPath").toString(); !pp.isEmpty()) {
+        m_pendingCursors.remove(pp);
+        m_pendingFolds.remove(pp);
+    }
     tabs->removeTab(i);
     delete w;
     // Stage 10: son sekme kapandıysa karşılama ekranı göster
@@ -2346,6 +2351,16 @@ void MainWindow::openFile(const QString& path) {
 // Stage 24: tek-tık önizleme — varsa önizleme sekmesini dönüştür, yoksa aç
 void MainWindow::openPreview(const QString& path) {
     if (path.isEmpty() || !QFileInfo(path).isFile()) return;
+    // Stage 46: bekleyen sekme varsa kopya önizleme açılmaz, gerçeklenir
+    for (QTabWidget* t : {m_tabs, m_tabs2}) {
+        for (int i = 0; i < t->count(); ++i) {
+            if (t->widget(i)->property("pendingPath").toString() == path
+                && !path.isEmpty()) {
+                materializePending(t->widget(i));
+                return;
+            }
+        }
+    }
     for (QTabWidget* t : {m_tabs, m_tabs2}) {
         for (int i = 0; i < t->count(); ++i) {
             auto* e = qobject_cast<CodeEditor*>(t->widget(i));

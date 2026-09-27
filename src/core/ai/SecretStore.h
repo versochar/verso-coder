@@ -1,7 +1,8 @@
 #pragma once
 #include <QJsonObject>
+#include <QList>
 #include <QString>
-#include <QList>\n#include <QStringList>
+#include <QStringList>
 
 // Stage 35: API anahtarı kasası.
 // Öncelik sırası: OS anahtar deposu (libsecret/secret-tool) → 0600 dosya →

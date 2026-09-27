@@ -359,6 +359,19 @@ void UiSmokeTest::mainWindow_lazyTabsRestoreAndMaterialize() {
     // Oturum turu: bekleyen sekme kaybolmaz
     const DocSession back = m_win->captureSession();
     for (const QString& f : files) QVERIFY(back.files.contains(f));
+    // Bekleyen sekme kapatılınca kayıtlar düşer, çökme olmaz
+    // (gerçek kapatma yolu: tabCloseRequested → closeTabIn)
+    for (int i = 0; i < tabs->count(); ++i) {
+        if (!tabs->widget(i)->property("pendingPath").toString().isEmpty()) {
+            emit tabs->tabCloseRequested(i);
+            break;
+        }
+    }
+    QTest::qWait(50);
+    QCOMPARE(m_win->pendingTabCount(), 0);
+    const DocSession back2 = m_win->captureSession();
+    QVERIFY(back2.files.contains(files[0])); // gerçeklenen durur
+    QVERIFY(!back2.files.contains(files[2])); // kapatılan düşer
     // İmleç korunmuş mu?
     bool sawCursor = false;
     for (const QString& c : back.cursors)
