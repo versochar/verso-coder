@@ -40,17 +40,48 @@ QJsonObject LlmClient::requestHeaders(const ProviderSpec& spec, const QString& a
     return h;
 }
 
-bool LlmClient::isRetryable(int httpStatus) {
-    return httpStatus == 429 || httpStatus == 408 || (httpStatus >= 500 && httpStatus < 600);
+bool LlmClient::isRateLimited(int httpStatus, const QByteArray& body) {
+    if (httpStatus == 429) return true;
+    // 403/503 + "hız sınırı" ipucu → geçici (UnoRouter/NIM gibi ağgeçitlerde görüldü)
+    if (httpStatus != 403 && httpStatus != 502 && httpStatus != 503) return false;
+    const QByteArray low = body.toLower();
+    static const char* needles[] = {"rate limit",   "rate_limit", "per minute", "per-minute",
+                                    "try again",    "too many requests", "quota",
+                                    "sıfır",        "hız sınırı",  "rate-limit"};
+    for (const char* n : needles)
+        if (low.contains(n)) return true;
+    return false;
 }
 
-bool LlmClient::isHardFailure(int httpStatus) {
-    // 401/403: anahtar/ yetki · 404: model yok · 5xx: sağlayıcı bozuk
+bool LlmClient::isRetryable(int httpStatus, const QByteArray& body) {
+    if (isRateLimited(httpStatus, body)) return true;
+    return httpStatus == 408 || (httpStatus >= 500 && httpStatus < 600);
+}
+
+bool LlmClient::isHardFailure(int httpStatus, const QByteArray& body) {
+    if (isRateLimited(httpStatus, body)) return false; // geçici → failover yapma
+    // 401: anahtar · 403: yetki · 404: model yok · 5xx: sağlayıcı bozuk
     return httpStatus == 401 || httpStatus == 403 || httpStatus == 404 ||
            (httpStatus >= 500 && httpStatus < 600);
 }
 
-int LlmClient::retryDelayMs(int attempt, int httpStatus, const QByteArray& retryAfter) {
+bool LlmClient::retryAfterTooLong(const QByteArray& retryAfter) {
+    bool ok = false;
+    const int secs = retryAfter.trimmed().toInt(&ok);
+    if (!ok || secs <= 0) return false;
+    return secs > maxRetryAfterSec();
+}
+
+int LlmClient::rateLimitDelayMs(int attempt) {
+    // Sağlayıcı "bir dakika" diyorsa üstel geri çekilme yetersiz kalır.
+    const int base = 20000 + 5000 * qBound(0, attempt, 3);
+    return qMin(base, 60000);
+}
+
+int LlmClient::retryDelayMs(int attempt, int httpStatus, const QByteArray& retryAfter,
+                            const QByteArray& body) {
+    if (retryAfter.trimmed().isEmpty() && isRateLimited(httpStatus, body))
+        return rateLimitDelayMs(attempt);
     if (isRetryable(httpStatus) && !retryAfter.trimmed().isEmpty()) {
         bool ok = false;
         const int secs = retryAfter.trimmed().toInt(&ok);
@@ -129,14 +160,20 @@ void LlmClient::chatStream(const AiChatRequest& request) {
 void LlmClient::sendChat(const AiChatRequest& req, bool stream) {
     if (m_busy) cancel();
     m_req = req;
+    m_attempt = 0;        // YALNIZ yeni istekte sıfırlanır
+    m_failoverCount = 0;
+    m_failoverFrom.clear();
+    dispatch(req, stream);
+}
+
+// Yeniden deneme döngüsünün iç yolu: sayaçları sıfırlamaz.
+// (sendChat her çağrıda sıfırladığı için sonsuz döngüye giriyordu.)
+void LlmClient::dispatch(const AiChatRequest& req, bool stream) {
     m_wantStream = stream;
-    m_attempt = 0;
     m_sse.clear();
     m_streamCalls.clear();
     m_acc = AiReply();
     m_acc.model = m_spec.resolveModelId(req.model);
-    m_failoverCount = 0;
-    m_failoverFrom.clear();
 
     if (m_spec.requiresKey() && apiKey().isEmpty()) {
         emit error(QString("%1 için API anahtarı gerekli (Ayarlar → Sağlayıcılar).")
@@ -188,19 +225,21 @@ void LlmClient::sendChat(const AiChatRequest& req, bool stream) {
         const int status = rep->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray body = rep->readAll();
 
-        if (isRetryable(status) && m_attempt < maxRetries()) {
+        if (isRetryable(status, body) && m_attempt < maxRetries() &&
+            !retryAfterTooLong(rep->rawHeader("Retry-After"))) {
             const int delay = retryDelayMs(m_attempt, status,
-                                           rep->rawHeader("Retry-After"));
+                                           rep->rawHeader("Retry-After"), body);
             ++m_attempt;
-            emit statusChanged(QString("%1 → %2 sn sonra yeniden deneniyor")
-                                   .arg(status)
-                                   .arg(delay / 1000));
-            QTimer::singleShot(delay, this, [this]() { sendChat(m_req, m_wantStream); });
+            emit statusChanged(
+                delay < 1000
+                    ? QString("%1 → %2 ms sonra yeniden deneniyor").arg(status).arg(delay)
+                    : QString("%1 → %2 sn sonra yeniden deneniyor").arg(status).arg(delay / 1000));
+            QTimer::singleShot(delay, this, [this]() { dispatch(m_req, m_wantStream); });
             return;
         }
 
         // Stage 36: kalıcı sağlayıcı hatasında eşdeğer sağlayıcıya devir
-        if (m_failover && m_failoverCount < 2 && isHardFailure(status)) {
+        if (m_failover && m_failoverCount < 2 && isHardFailure(status, body)) {
             const QString target = ProviderHealth::pickFailover(
                 m_spec.id, ProviderRegistry::all(), m_req.model);
             if (!target.isEmpty()) {
@@ -214,10 +253,9 @@ void LlmClient::sendChat(const AiChatRequest& req, bool stream) {
                 else
                     m_apiKey = SecretStore().effectiveKey(target); // kasasız da çalışır
                 ++m_failoverCount;
-                m_attempt = 0;
                 emit statusChanged(QString("%1 başarısız → %2 sağlayıcısına geçildi")
                                        .arg(from, next.label));
-                QTimer::singleShot(0, this, [this]() { sendChat(m_req, m_wantStream); });
+                QTimer::singleShot(0, this, [this]() { dispatch(m_req, m_wantStream); });
                 return;
             }
         }
@@ -319,13 +357,14 @@ AiReply LlmClient::chatSync(const AiChatRequest& request, int timeoutMs) {
         const bool netErr = rep->error() != QNetworkReply::NoError;
         rep->deleteLater();
         if (netErr || status >= 400) {
-            if (isRetryable(status) && attempt < maxRetries()) {
+            if (isRetryable(status, body) && attempt < maxRetries() &&
+                !retryAfterTooLong(rep->rawHeader("Retry-After"))) {
                 QThread::msleep(static_cast<unsigned long>(
-                    retryDelayMs(attempt, status)));
+                    retryDelayMs(attempt, status, QByteArray(), body)));
                 continue;
             }
             // Stage 36: kalıcı hata → eşdeğer sağlayıcıya devir
-            if (m_failover && failovers < 2 && isHardFailure(status)) {
+            if (m_failover && failovers < 2 && isHardFailure(status, body)) {
                 const QString target = ProviderHealth::pickFailover(
                     m_spec.id, ProviderRegistry::all(), request.model);
                 if (!target.isEmpty()) {

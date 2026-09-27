@@ -92,7 +92,9 @@ QString TaskRouter::defaultEmbedModel(const QString& providerId) {
     if (spec.id == "openai") return "text-embedding-3-small";
     if (spec.id == "gemini") return "text-embedding-004";
     if (spec.id == "ollama") return "nomic-embed-text";
-    if (spec.id == "unorouter") return "openai/text-embedding-3-small";
+    // Ağgeçitlerde katalog değişebilir; doğrulanmış ve ücretsiz bir model seçilir
+    // (openai/text-embedding-3-small UnoRouter'da sunulmuyor).
+    if (spec.id == "unorouter") return "jina-embeddings-v3:free";
     const QStringList samples = ProviderRegistry::sampleModels(spec.id);
     for (const QString& m : samples)
         if (m.contains("embed")) return m;

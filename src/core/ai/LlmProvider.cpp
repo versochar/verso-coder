@@ -409,6 +409,20 @@ QString ProviderRegistry::mapError(const ProviderSpec& spec, int status, const Q
         return s + (serverMsg.isEmpty() ? QString() : " — " + serverMsg);
     };
 
+    // Gerçek sağlayıcılarda hız sınırı 403/5xx ile gelir ve "rate limit /
+    // per minute limit / try again" der. Anahtar hatası gibi göstermek yanıltıcı.
+    {
+        const QByteArray low = body.toLower();
+        static const char* rl[] = {"rate limit", "rate_limit", "per minute", "per-minute",
+                                   "try again",  "too many requests", "quota", "hız sınırı"};
+        for (const char* n : rl) {
+            if (!low.contains(n)) continue;
+            if (status == 403 || status == 429 || (status >= 500 && status < 600))
+                return with(QString("Hız sınırı (%1) — biraz bekleyip tekrar deneyin")
+                                .arg(status));
+        }
+    }
+
     switch (status) {
     case 0: return with("Ağ hatası / zaman aşımı");
     case 400: return with("İstek reddedildi (400) — model adı veya gövde hatalı olabilir");

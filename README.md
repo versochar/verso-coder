@@ -24,6 +24,43 @@ VS Code tarzı, sade ve modern C++ (Qt6) kod editörü.
 > Backend seçimi burada saklanır; `CPU` seçilirse `num_gpu=0` gönderilir.
 > Doğru derlemeyi kullandığını `ollama --version` ve `ollama serve` loglarından doğrula.
 
+## Canlı doğrulama aracı (Stage 37 sonrası)
+
+`tools/ai_probe.cpp` → `build/ai-probe`: gerçek sağlayıcıya **Verso'nun kendi
+kod yolundan** gider (`AiRunner → LlmClient → ProviderCodec → SseParser`), yani
+"ağ çalışıyor mu" değil **"gövdemiz doğru mu, ayrıştırıcımız doğru mu, hata
+eşlemesi doğru mu"** sorusunu yanıtlar. `ctest`'e girmez, elle çalıştırılır.
+
+```bash
+cmake --build build --target ai-probe -j
+VERSO_AI_KEY_UNOROUTER=sk-... ./build/ai-probe unorouter model sohbet akis arac gomme hata kasa
+VERSO_AI_KEY_NVIDIA_NIM=nvapi-... ./build/ai-probe nvidia-nim sohbet
+./build/ai-probe nvidia-nim sohbet model=nvidia/llama-3.1-70b-instruct
+```
+
+Anahtar ekrana asla basılmaz (yalnız maskeli gösterilir).
+
+### UnoRouter `:free` katmanında ölçülen gerçekler
+
+| Gözlem | Sonuç |
+|--------|-------|
+| Katalog | 270 model, 129'u `:free` |
+| Sohbet (`:free`) | **model başına 1 istek / dakika**; upstream doygunsa `403` + "all providers busy" |
+| Gömme (`:free`) | **1 istek / 30 dakika** (`retry-after: 1628`) → proje indekslemesi ücretsiz katmanda pratikte yapılamaz |
+| Hız sınırı bildirimi | çoğunlukla **429 değil 403/503**; gövdede "rate limit / per minute / try again" |
+| SSE akışı | `text/event-stream`, çok ince deltalar (kısa yanıtta 227 parça) |
+| Gömme modeli | `openai/text-embedding-3-small` **sunulmuyor**; `jina-embeddings-v3:free` vb. 18 `:free` gömme modeli var |
+| Fiyat | ücretsiz katman 0.00 USD (doğru raporlandı) |
+
+Bu ölçümler dört ürün hatasını ortaya çıkardı ve düzeltildi:
+1. **Sonsuz retry döngüsü** — `sendChat` her denemede `m_attempt = 0` yapıyordu.
+2. **403 hız sınırı yanlış sınıflandırılıyordu** → "anahtar hatalı" gösterip
+   failover tetikliyordu; artık geçici sayılıp 20-30 sn bekleniyor.
+3. **30 dakikalık `Retry-After` için 60 sn'lik geri çekilme** boşa çalışıyordu;
+   120 sn'yi aşan `Retry-After` artık yeniden denemiyor, mesajı gösteriyor.
+4. **Varsayılan gömme modeli katalogda yoktu** ve **`EmbedBridge` kasa
+   bağlanmazsa sessizce 401** veriyordu.
+
 ## Kurulum
 
 ```bash

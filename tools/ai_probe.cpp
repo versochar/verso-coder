@@ -1,0 +1,371 @@
+// Verso AI uçtan uca canlı doğrulama aracı (geliştirici aracı, ctest'e girmez).
+//
+// Gerçek sağlayıcıya, Verso'nun kendi istek/ayrıştırma yolundan gider:
+//   AiRunner → LlmClient → ProviderCodec → SseParser
+// Böylece sadece "ağ çalışıyor mu" değil, "kodonun gövdesi doğru mu,
+// ayrıştırıcı doğru mu, hata eşlemesi doğru mu" de sorar.
+//
+// Kullanım:
+//   VERSO_AI_KEY_<SAĞLAYICI>=... ./build/ai-probe <sağlayıcı> [görevler]
+//   ./build/ai-probe uno-router sohbet akis gomme hata model liste
+//
+// Anahtar hiçbir zaman ekrana basılmaz; yalnız "var/yok" ve maskeli gösterilir.
+#include <QCoreApplication>
+#include <QEventLoop>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSet>
+#include <QDir>
+#include <QElapsedTimer>
+#include <QRegularExpression>
+#include <QTextStream>
+#include <algorithm>
+#include <QTimer>
+
+#include "../src/core/ai/AiProfiles.h"
+#include "../src/core/ai/AgentLlmAdapter.h"
+#include "../src/core/ai/EmbedBridge.h"
+#include "../src/core/AgentTools.h"
+#include "../src/core/ai/AiRunner.h"
+#include "../src/core/ai/LlmClient.h"
+#include "../src/core/ai/ProviderHealth.h"
+#include "../src/core/ai/ProviderPrefs.h"
+#include "../src/core/ai/ProviderPricing.h"
+#include "../src/core/ai/SecretStore.h"
+#include "../src/core/ai/UsageLedger.h"
+#include "../src/core/ai/providers/ProviderCodec.h"
+
+static QTextStream out(stdout);
+static int g_pass = 0, g_fail = 0;
+static int g_skipped = 0;
+
+static void ok(const QString& what, const QString& detail = QString()) {
+    ++g_pass;
+    out << "  ✓ " << what;
+    if (!detail.isEmpty()) out << "  — " << detail;
+    out << "\n";
+}
+static void bad(const QString& what, const QString& detail = QString()) {
+    ++g_fail;
+    out << "  ✗ " << what;
+    if (!detail.isEmpty()) out << "  — " << detail;
+    out << "\n";
+}
+static void skip(const QString& what, const QString& why) {
+    ++g_skipped;
+    out << "  ○ " << what << "  (atlandı: " << why << ")\n";
+}
+static void check(bool cond, const QString& what, const QString& detail = QString()) {
+    cond ? ok(what, detail) : bad(what, detail);
+}
+static QString ms(qint64 v) { return QString("%1 ms").arg(v); }
+
+int main(int argc, char** argv) {
+    QCoreApplication app(argc, argv);
+    if (argc < 2) {
+        out << "kullanım: ai-probe <sağlayıcı> [görev...]\n";
+        return 2;
+    }
+    const QString providerId = QString::fromLatin1(argv[1]);
+    QStringList want;
+    QString pinnedModel;
+    QString pinnedEmbed;
+    for (int i = 2; i < argc; ++i) {
+        const QString a = QString::fromLatin1(argv[i]);
+        if (a.startsWith("model=")) pinnedModel = a.mid(6);
+        else if (a.startsWith("embedModel=")) pinnedEmbed = a.mid(11);
+        else want << a;
+    }
+    auto wants = [&](const QString& t) { return want.isEmpty() || want.contains(t); };
+
+    const ProviderSpec spec = ProviderRegistry::byId(providerId);
+    if (spec.id.isEmpty()) {
+        out << "bilinmeyen sağlayıcı: " << providerId << "\n";
+        return 2;
+    }
+    SecretStore store;
+    const QString key = store.effectiveKey(spec.id);
+    out << "=== Verso AI canlı doğrulama: " << spec.label << " (" << spec.id << ") ===\n";
+    out << "uç nokta : " << spec.baseUrl << "\n";
+    out << "tür      : " << int(spec.kind) << " · anahtar gerekli: "
+        << (spec.requiresKey() ? "evet" : "hayır") << "\n";
+    out << "yetenek  : görü=" << spec.supportsVision << " araç=" << spec.supportsTools
+        << " gömme=" << spec.supportsEmbed << " akış=evet\n";
+    if (spec.requiresKey()) {
+        if (key.isEmpty()) {
+            out << "SONUÇ: API anahtarı yok → çalıştırılamıyor.\n";
+            return 3;
+        }
+        out << "anahtar  : " << SecretStore::maskKey(key) << " (uzunluk " << key.size() << ")\n";
+    }
+    out << "\n";
+
+    // Her istek sağlık tablosuna yazılsın ki durum çubuğu çipi gerçek veriyle çalışsın
+    AiRunner runner;
+    LlmClient client;
+    client.setProvider(spec);
+    client.setSecretStore(&store);
+    client.loadKeyForProvider();
+
+    // --- 1) model kataloğu ---
+    if (wants("model")) {
+        out << "[model listesi]\n";
+        QStringList models;
+        QEventLoop loop;
+        QTimer t;
+        t.setSingleShot(true);
+        QObject::connect(&t, &QTimer::timeout, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &LlmClient::modelsReady, &loop,
+                         [&models, &loop](const QStringList& m) { models = m; QTimer::singleShot(0, &loop, &QEventLoop::quit); });
+        QObject::connect(&client, &LlmClient::error, &loop, [&loop](const QString&) {
+            QTimer::singleShot(0, &loop, &QEventLoop::quit);
+        });
+        t.start(20000);
+        client.fetchModels();
+        loop.exec();
+        if (models.isEmpty()) {
+            bad("model listesi alınamadı");
+        } else {
+            const int freeCount = int(std::count_if(models.begin(), models.end(),
+                                                    [](const QString& m) { return m.endsWith(":free"); }));
+            ok("model listesi", QString("%1 model (%2 adet :free)").arg(models.size()).arg(freeCount));
+            // Örnek modeller: bilinen birini seç, yoksa ilkini
+            for (const QString& want2 : {"gpt-4o:free", "gpt-oss-120b:free", "deepseek-v4.1-flash:free",
+                                        "gemini-3.6-flash:free", "glm-4.7-flash:free"}) {
+                if (models.contains(want2)) {
+                    ProviderPrefs::setModel(spec.id, want2);
+                    ok("örnek model seçildi", want2);
+                    break;
+                }
+            }
+            if (ProviderPrefs::modelFor(spec.id).isEmpty() && !models.isEmpty()) {
+                ProviderPrefs::setModel(spec.id, models.value(0));
+                ok("ilk model seçildi", models.value(0));
+            }
+        }
+    }
+    QString model = pinnedModel.isEmpty() ? ProviderPrefs::modelFor(spec.id) : pinnedModel;
+    if (model.isEmpty() && !wants("model")) {
+        skip("canlı istekler", "model bilinmiyor (önce 'model' görevini çalıştırın)");
+    }
+    // Ücretsiz katman model başına dakikada 1 istek verir; görevler birbirini
+    // engellemesin diye her göreve farklı bir :free model verilir.
+    const QStringList pool = {"gpt-4o:free",  "gpt-oss-120b:free",   "deepseek-v4.1-flash:free",
+                              "glm-4.7-flash:free", "gemini-3.6-flash:free"};
+    int poolIdx = 0;
+    auto nextModel = [&]() {
+        if (!pinnedModel.isEmpty()) return pinnedModel;
+        for (int i = 0; i < int(pool.size()); ++i) {
+            const QString m = pool.at((poolIdx + i) % pool.size());
+            if (m != model) { poolIdx = (poolIdx + i + 1) % pool.size(); return m; }
+        }
+        return model;
+    };
+
+    // --- 2) sohbet (tek seferlik) ---
+    if (model.isEmpty() && wants("sohbet")) {
+        skip("sohbet", "model yok");
+    } else if (wants("sohbet")) {
+        out << "[sohbet — tek seferlik]\n";
+        AiRunner::Options o = AiRunner::optionsFor(AiTask::Explain, "Türkçe, kısa yanıt ver.");
+        o.providerId = spec.id;
+        o.model = nextModel();
+        o.bypassRouting = true;
+        o.maxTokens = 200;
+        QElapsedTimer timer;
+        timer.start();
+        const AiRunner::Result r = runner.run(o, "2+2 kaçtır? Tek kelimeyle yanıtla.");
+        if (!r.ok) {
+            bad("sohbet", r.error);
+        } else {
+            check(!r.text.trimmed().isEmpty(), "yanıt metni",
+                  QString("\"%1\"").arg(r.text.trimmed().left(60)));
+            check(r.usage.promptTokens > 0, "kullanım (giriş jetonu)",
+                  QString::number(r.usage.promptTokens));
+            check(r.usage.evalTokens > 0, "kullanım (çıkış jetonu)",
+                  QString::number(r.usage.evalTokens));
+            check(r.httpStatus == 200, "HTTP durumu", QString::number(r.httpStatus));
+            ok("gecikme", ms(timer.elapsed()));
+            ok("maliyet", QString("%1 USD (ücretsiz katman: %2)")
+                         .arg(r.usd, 0, 'f', 6)
+                         .arg(ProviderPricing::isFreeTier(spec, model) ? "evet" : "hayır"));
+            const ProviderHealthEntry h = ProviderHealth::instance().entry(spec.id);
+            ok("sağlık kaydı", QString("%1 hata / %2 çağrı").arg(h.errors).arg(h.calls));
+        }
+    }
+
+    // --- 3) akış (SSE) ---
+    if (!model.isEmpty() && wants("akis")) {
+        out << "[akış — SSE parça parça]\n";
+        AiChatRequest req;
+        req.model = nextModel();
+        req.systemPrompt = "Kısa yanıt ver.";
+        req.messages << AiMessage::user("1'den 5'e sayıları yaz.");
+        req.maxTokens = 80;
+        client.setProvider(spec);
+        client.setSecretStore(&store);
+        client.loadKeyForProvider();
+        QString acc;
+        int chunks = 0;
+        AiReply final;
+        QEventLoop loop;
+        QTimer guard;
+        guard.setSingleShot(true);
+        QObject::connect(&guard, &QTimer::timeout, &loop, &QEventLoop::quit);
+        QObject::connect(&client, &LlmClient::chunkReady, &loop,
+                         [&](const AiChunk& c) { acc += c.text; ++chunks; });
+        QObject::connect(&client, &LlmClient::finished, &loop,
+                         [&loop, &final](const AiReply& r) { final = r; QTimer::singleShot(0, &loop, &QEventLoop::quit); });
+        QString lastError;
+        QObject::connect(&client, &LlmClient::error, &loop,
+                         [&lastError](const QString& e) { lastError = e; });
+        QObject::connect(&client, &LlmClient::statusChanged, &loop,
+                         [](const QString& st) { out << "    · " << st << "\n"; });
+        guard.start(200000); // 429 retry + Retry-After için yer
+        QElapsedTimer st;
+        st.start();
+        client.chatStream(req);
+        loop.exec();
+        if (final.text.isEmpty() && acc.isEmpty()) {
+            fprintf(stderr, "  (teşhis: http=%d parça=%d süre=%lld ms hata=%s)\n",
+                    final.httpStatus, chunks, st.elapsed(), qPrintable(lastError));
+            bad("akış yanıtı", lastError.isEmpty()
+                                  ? QString("yanıt gelmedi (model: %1)").arg(req.model)
+                                  : QString("%1 [model: %2]").arg(lastError, req.model));
+        } else {
+            const QString text = final.text.isEmpty() ? acc : final.text;
+            check(!text.trimmed().isEmpty(), "akış metni birleşti",
+                  QString("\"%1\"").arg(text.trimmed().left(50)));
+            check(chunks > 0 || final.text.size() > 0, "parça sayısı", QString::number(chunks));
+            ok("ilk yanıt gecikmesi", ms(st.elapsed()));
+        }
+    }
+
+    // --- 4) araç çağırma (native) ---
+    if (!model.isEmpty() && wants("arac")) {
+        out << "[araç çağırma — native function-calling]\n";
+        if (!spec.supportsTools) {
+            skip("araç çağırma", "sağlayıcı desteklemiyor");
+        } else {
+            AgentLlmAdapter ad;
+            AgentLlmAdapter::Options o;
+            o.providerId = spec.id;
+            o.model = nextModel();
+            o.recordUsage = false;
+            o.recordHealth = false;
+            ad.setOptions(o);
+            ad.setSecretStore(&store);
+            AgentTools tools(QDir::tempPath());
+            const QJsonArray schemas = tools.toolSchemas();
+            const AgentLlmAdapter::Turn t =
+                ad.ask("Sen bir kod asistanısın. Dosya okumak için aracı kullan.",
+                       "src/main.cpp dosyasını oku ve ilk satırını söyle.", schemas);
+            if (!t.ok) {
+                bad("araç çağırma", t.error);
+            } else {
+                if (t.usedNative) {
+                    ok("native araç çağrısı alındı",
+                       QString("%1 çağrı, metin protokolüne de çevrildi: %2")
+                           .arg(t.nativeCallCount)
+                           .arg(t.text.contains("tool_call") ? "evet" : "hayır"));
+                } else {
+                    // Metin protokolü de kabul edilen bir yol
+                    check(t.text.contains("tool_call") || t.text.contains("read_file"),
+                          "araç çağrısı (metin protokolü)", t.text.left(80).replace("\n", " "));
+                }
+            }
+        }
+    }
+
+    // --- 5) gömme ---
+    if (wants("gomme")) {
+        out << "[gömme — RAG vektörü]\n";
+        const QString embedModel =
+            pinnedEmbed.isEmpty() ? EmbedBridge::resolveModel(spec.id) : pinnedEmbed;
+        if (!spec.supportsEmbed) {
+            skip("gömme", "sağlayıcı desteklemiyor");
+        } else if (embedModel.isEmpty()) {
+            skip("gömme", "gömme modeli çözümlenemedi");
+        } else {
+            EmbedBridge eb;
+            eb.setProvider(spec.id);
+            eb.setModel(embedModel);
+            const EmbedBridge::Result r1 = eb.embedOne("kedi bir memelidir", 30000);
+            if (!r1.ok()) {
+                bad("gömme (ilk çağrı)", r1.error);
+            } else if (r1.vectors.first().isEmpty()) {
+                bad("gömme (vektör boyutu 0)");
+            } else {
+                const int dim = r1.vectors.first().size();
+                ok("gömme (ilk çağrı)", QString("%1 · boyut %2").arg(embedModel).arg(dim));
+                // Aynı metin ikinci kez → önbellekten (ağ yok)
+                QElapsedTimer cacheTimer;
+                cacheTimer.start();
+                const EmbedBridge::Result r2 = eb.embedOne("kedi bir memelidir", 30000);
+                check(r2.ok() && r2.cached == 1 && r2.embedded == 0, "önbellek isabeti",
+                      QString("%1 ms, ağ çağrısı %2").arg(cacheTimer.elapsed()).arg(r2.embedded));
+                // Farklı metin → yeni vektör
+                const EmbedBridge::Result r3 = eb.embedOne("köpek de bir memelidir", 30000);
+                if (!r3.ok()) fprintf(stderr, "  (ikinci gömme hatası: %s)\n", qPrintable(r3.error));
+                check(r3.ok() && r3.embedded == 1, "yeni metin gömüldü",
+                      r3.ok() ? QString("boyut %1").arg(r3.vectors.isEmpty() ? 0
+                                                                              : r3.vectors.first().size())
+                              : r3.error);
+            }
+        }
+    }
+
+    // --- 6) hata eşlemesi (gerçek istek) ---
+    if (wants("hata") && !model.isEmpty()) {
+        out << "[hata eşlemesi — gerçek 404]\n";
+        AiRunner::Options o = AiRunner::optionsFor(AiTask::Chat);
+        o.providerId = spec.id;
+        o.model = "bu-model-yok-boyle-bir-model:v9"; // kasıtlı hata
+        o.bypassRouting = true;
+        o.allowFailover = false;
+        const AiRunner::Result r = runner.run(o, "merhaba");
+        check(!r.ok, "geçersiz model reddedildi",
+              r.error.isEmpty() ? "hata yok (sürpriz!)" : r.error);
+        if (!r.error.isEmpty()) {
+            const bool turkish = QString(r.error).contains(QRegularExpression("[ğüşıöç]", QRegularExpression::UseUnicodePropertiesOption));
+            check(turkish, "hata Türkçe", r.error);
+            check(r.error.size() < 260, "hata makul uzunlukta", QString::number(r.error.size()));
+        }
+    }
+
+    // --- 7) kasa + kota + sağlık zinciri ---
+    if (wants("kasa")) {
+        out << "[kasa / kota / sağlık]\n";
+        UsageLedger::instance().setQuota(spec.id, UsageLedger::Quota{});
+        ProviderHealth::instance().reset(spec.id);
+        check(SecretStore::maskKey(key.left(1) + QString(key.size() - 2, 'x') + key.right(1))
+                  .contains("•"),
+              "anahtar maskeleniyor");
+        if (!model.isEmpty() && wants("kota")) {
+            // Önceki testlerin birikmiş kullanımı kotaları bozmasın
+            UsageLedger::instance().clearToday(spec.id);
+            UsageLedger::Quota q;
+            q.maxCalls = 1;
+            UsageLedger::instance().setQuota(spec.id, q);
+            AiRunner::Options o = AiRunner::optionsFor(AiTask::Chat);
+            o.providerId = spec.id;
+            o.model = model;
+            o.bypassRouting = true;
+            const AiRunner::Result first = runner.run(o, "bir");
+            const AiRunner::Result second = runner.run(o, "iki");
+            check(first.ok, "kota dolmadan ilk istek geçti");
+            check(!second.ok && second.error.contains("kota"), "kota dolunca ikinci istek reddedildi",
+                  second.error);
+            UsageLedger::instance().setQuota(spec.id, UsageLedger::Quota{});
+        }
+        const UsageLedger::Day day = UsageLedger::instance().today(spec.id);
+        ok("bugünkü kullanım", QString("%1 çağrı · %2 token · ~$%3")
+                                     .arg(day.calls).arg(day.total()).arg(day.usd, 0, 'f', 6));
+        out << "\n";
+    }
+
+    out << "=== SONUÇ: " << g_pass << " geçti, " << g_fail << " kaldı, " << g_skipped
+        << " atlandı ===\n";
+    return g_fail == 0 ? 0 : 1;
+}

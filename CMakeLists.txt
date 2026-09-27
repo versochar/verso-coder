@@ -761,3 +761,35 @@ install(FILES ${CMAKE_SOURCE_DIR}/packaging/verso-coder.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES ${CMAKE_SOURCE_DIR}/packaging/verso-coder.appdata.xml
         DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
+
+# --- Stage 37: canlı uçtan uca AI doğrulama aracı (geliştirici aracı; ctest'e girmez) ---
+add_executable(ai-probe EXCLUDE_FROM_ALL
+    tools/ai_probe.cpp
+    src/core/ModelCapabilities.cpp
+    src/core/ai/AiRunner.cpp
+    src/core/ai/LlmProvider.cpp
+    src/core/ai/SecretStore.cpp
+    src/core/ai/AiMessage.cpp
+    src/core/ai/AiToolBridge.cpp
+    src/core/ai/ProviderPrefs.cpp
+    src/core/ai/ProviderPricing.cpp
+    src/core/ai/ProviderHealth.cpp
+    src/core/ai/UsageLedger.cpp
+    src/core/ai/TaskRouter.cpp
+    src/core/ai/EmbedCache.cpp
+    src/core/ai/EmbedBridge.cpp
+    src/core/ai/AgentLlmAdapter.cpp
+    src/core/ai/ProviderBench.cpp
+    src/core/ai/LlmClient.cpp
+    src/core/ai/providers/ProviderCodec.cpp
+    src/core/ai/providers/SseParser.cpp
+    src/core/AgentTools.cpp
+    src/core/AgentPolicy.cpp
+    src/core/AgentBudget.cpp
+    src/core/AgentMemory.cpp
+    src/core/AgentReflection.cpp
+    src/core/PatchQueue.cpp
+    src/core/ProjectHealth.cpp
+)
+target_include_directories(ai-probe PRIVATE src)
+target_link_libraries(ai-probe PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)

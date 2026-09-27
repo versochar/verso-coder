@@ -21,6 +21,7 @@
 #include "../src/core/PromptLibrary.h"
 #include "../src/core/ai/AiProfiles.h"
 #include "../src/core/ai/AiRunner.h"
+#include "../src/core/ai/LlmClient.h"
 #include "../src/core/ai/LlmProvider.h"
 #include "../src/core/ai/ProviderHealth.h"
 #include "../src/core/ai/ProviderPrefs.h"
@@ -324,6 +325,76 @@ static void testSummary() {
     CHECK(ConversationSummarizer::merge("özet", turns, 2000).contains("özet"));
 }
 
+static ProviderSpec spec37() { return ProviderRegistry::byId("unorouter"); }
+
+// --- 11: gerçek sağlayıcı davranışından çıkan hata sınıflandırması ---
+// UnoRouter/NIM gibi ağgeçitler hız sınırını 429 değil 403 olarak ve
+// "per minute limit / try again in a minute" diyerek bildirir. Bu GEÇİCİDİR:
+// istek sağlamdır, kaynağın kendisi yoğundur. Yanlışlıkla failover
+// tetiklenmesin ve saniyelik geri çekilme yerine makul beklenmelidir.
+static void testRealProviderErrorShape() {
+    const QByteArray rl =
+        R"({"error":{"message":"This model is at its provider's per minute limit right now. Nothing is used up on your side. Try again in a minute.","type":"bad_response_status_code"}})";
+    // Hız sınırı tanınır (403 + 429 + 5xx ipuçlu)
+    CHECK(LlmClient::isRateLimited(429, QByteArray()));
+    CHECK(LlmClient::isRateLimited(403, rl));
+    CHECK(LlmClient::isRateLimited(503, "quota exceeded"));
+    CHECK(LlmClient::isRateLimited(502, "rate_limit"));
+    // Hız sınırı olmayan 403 hâlâ yetki hatasıdır
+    CHECK(!LlmClient::isRateLimited(403, R"({"error":{"message":"Invalid API key"}})"));
+    CHECK(!LlmClient::isRateLimited(403, QByteArray()));
+    // Yeniden denemeye girer
+    CHECK(LlmClient::isRetryable(429));
+    CHECK(LlmClient::isRetryable(403, rl));
+    CHECK(LlmClient::isRetryable(503, rl));
+    // ...ama failover TETİKLEMEZ (kalıcı hata değil)
+    CHECK(!LlmClient::isHardFailure(403, rl));
+    CHECK(!LlmClient::isHardFailure(429));
+    CHECK(!LlmClient::isHardFailure(503, rl));
+    // Gerçek kalıcı hatalar failover eder
+    CHECK(LlmClient::isHardFailure(401, QByteArray()));
+    CHECK(LlmClient::isHardFailure(403, R"({"error":{"message":"forbidden"}})"));
+    CHECK(LlmClient::isHardFailure(404, QByteArray()));
+    CHECK(LlmClient::isHardFailure(500));
+    // Diğer durumlar
+    CHECK(LlmClient::isRetryable(408));
+    CHECK(!LlmClient::isRetryable(400));
+    CHECK(!LlmClient::isRetryable(401));
+    CHECK(!LlmClient::isRetryable(404));
+    // Hız sınırı mesajı "anahtar hatalı" gibi gösterilmez
+    const QString rlMsg = ProviderRegistry::mapError(spec37(), 403, rl);
+    if (!rlMsg.contains("Hız sınırı")) fprintf(stderr, "  (403 hız sınırı msg=%s)\n", qPrintable(rlMsg));
+    CHECK(rlMsg.contains("Hız sınırı"));
+    CHECK(!rlMsg.contains("anahtar"));
+    CHECK(ProviderRegistry::mapError(spec37(), 429, QByteArray()).contains("429"));
+    // Gerçek yetki hatası yine yetki hatasıdır
+    const QString keyMsg =
+        ProviderRegistry::mapError(spec37(), 403, R"({"error":{"message":"forbidden"}})");
+    CHECK(keyMsg.contains("yetkisiz") || keyMsg.contains("anahtar"));
+
+    // Çok uzun Retry-After (ör. ":free" katmanı 1 istek / 30 dk) → yeniden deneme
+    CHECK(!LlmClient::retryAfterTooLong("44"));
+    CHECK(!LlmClient::retryAfterTooLong("120"));
+    CHECK(LlmClient::retryAfterTooLong("1628"));
+    CHECK(LlmClient::retryAfterTooLong("3600"));
+    CHECK(!LlmClient::retryAfterTooLong(QByteArray()));
+    CHECK(!LlmClient::retryAfterTooLong("abc"));
+    CHECK(LlmClient::maxRetryAfterSec() == 120);
+
+    // Hız sınırında bekleme süresi üstel geri çekilmeyi aşar
+    const int rl0 = LlmClient::retryDelayMs(0, 403, QByteArray(), rl);
+    CHECK(rl0 >= 20000);
+    CHECK(LlmClient::retryDelayMs(1, 403, QByteArray(), rl) > rl0);
+    CHECK(LlmClient::rateLimitDelayMs(9) <= 60000);
+    // Retry-After varsa o baskın (UnoRouter 429'da retry-after: 44 gönderiyor)
+    CHECK(LlmClient::retryDelayMs(0, 429, "44", rl) == 44000);
+    // Retry-After yoksa 429 da hız sınırı sayılır
+    CHECK(LlmClient::retryDelayMs(0, 429, QByteArray()) >= 20000);
+    // Hız sınırı olmayan 5xx kısa üstel geri çekilmeyi korur
+    const int s5 = LlmClient::retryDelayMs(0, 500);
+    CHECK(s5 < 20000);
+}
+
 // --- 15: yerel sahte sunucu — her görev etkin sağlayıcıya gider ---
 namespace {
 
@@ -482,6 +553,7 @@ int main(int argc, char** argv) {
     testPromptHints();
     testArenaTargets();
     testQueue();
+    testRealProviderErrorShape();
     testSummary();
     testAllSurfacesRoute();
     testRegression();

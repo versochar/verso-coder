@@ -43,7 +43,12 @@ QString AgentLlmAdapter::nativeToText(const AiReply& rep) const {
 AgentLlmAdapter::Turn AgentLlmAdapter::ask(const QString& systemPrompt, const QString& userPrompt,
                                           const QJsonArray& toolSchemas) {
     Turn t;
-    if (m_opt.providerId.isEmpty()) resolve();
+    // Sağlayıcı/model önceden verilmiş olsa bile istemci yapılandırılmalı:
+    // aksi halde anahtar hiç yüklenmez ve "API anahtarı eksik" hatası verilir.
+    const bool needConfigure = m_opt.providerId.isEmpty() ||
+                               m_client.provider().id != m_opt.providerId ||
+                               (m_client.provider().requiresKey() && m_client.apiKey().isEmpty());
+    if (needConfigure) resolve();
     t.providerId = m_opt.providerId;
     t.model = m_opt.model;
     m_lastMeta = StepMeta();

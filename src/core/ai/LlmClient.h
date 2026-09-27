@@ -49,10 +49,24 @@ public:
     // --- saf yardımcılar (test edilebilir) ---
     static QJsonObject requestHeaders(const ProviderSpec& spec, const QString& apiKey);
     // Yeniden deneme gecikmesi: 429/5xx için üstel, Retry-After baskın
-    static int retryDelayMs(int attempt, int httpStatus, const QByteArray& retryAfter = QByteArray());
-    static bool isRetryable(int httpStatus);
+    static int retryDelayMs(int attempt, int httpStatus, const QByteArray& retryAfter = QByteArray(),
+                          const QByteArray& body = QByteArray());
+    static bool isRetryable(int httpStatus, const QByteArray& body = QByteArray());
     // Sağlayıcıyı değiştirmeyi gerektiren kalıcı hata mı? (yeniden denemek anlamsız)
-    static bool isHardFailure(int httpStatus);
+    static bool isHardFailure(int httpStatus, const QByteArray& body = QByteArray());
+    // Gerçek sağlayıcılarda hız sınırı 429 değil 403 olarak da gelir ve gövdede
+    // "per minute limit / try again in a minute" yazar. Bu GEÇİCİDİR: istek sağlamdır,
+    // kaynağın kendisi yoğundur. Yanlışlıkla failover tetiklenmesin diye ayrışır.
+    static bool isRateLimited(int httpStatus, const QByteArray& body);
+    // Hız sınırında beklenecek süre (Retry-After yoksa daha uzun beklenir:
+    // sağlayıcının "bir dakika" demesi 0,8 sn'lik üstel geri çekilmeyle kapanmaz)
+    static int rateLimitDelayMs(int attempt);
+    // Retry-After bu eşiği aşarsa yeniden deneme anlamsız (ör. ücretsiz katman
+    // "1 istek / 30 dakika" → 1628 sn). O durumda beklemek yerine mesajı
+    // kullanıcıya gösterip isteği bitiririz.
+    static int maxRetryAfterSec() { return 120; }
+    // Retry-After başlığı verilmişse ve bu eşiği aşıyorsa true
+    static bool retryAfterTooLong(const QByteArray& retryAfter);
     static int maxRetries() { return 3; }
 
 signals:
@@ -66,6 +80,9 @@ signals:
 
 private:
     void sendChat(const AiChatRequest& req, bool stream);
+    // Yeniden deneme döngüsünün kullandığı iç yol: sayaçları SIFIRLAMAZ.
+    // (sendChat her çağrıda sıfırladığı için sonsuz döngüye giriyordu.)
+    void dispatch(const AiChatRequest& req, bool stream);
     QNetworkReply* post(const QJsonObject& body, const QString& url);
     void handleChatFinished();
     void flushStream();

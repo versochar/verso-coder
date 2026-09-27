@@ -352,6 +352,13 @@ static void testRouter() {
 
     // Varsayılan gömme modelleri
     CHECK(TaskRouter::defaultEmbedModel("ollama") == "nomic-embed-text");
+    // Canlı doğrulama bulgusu: ağgeçitlerin katalogu kendi gömme modellerini
+    // sunar; "openai/text-embedding-3-small" UnoRouter'da YOK.
+    // Varsayılan gerçekten var olan ücretsiz bir model olmalı.
+    const QString unoEmbed = TaskRouter::defaultEmbedModel("unorouter");
+    CHECK(!unoEmbed.isEmpty());
+    CHECK(unoEmbed.endsWith(":free"));
+    CHECK(!unoEmbed.startsWith("openai/text-embedding-3-small"));
     CHECK(TaskRouter::defaultEmbedModel("unorouter").contains("embedding"));
     CHECK(TaskRouter::defaultEmbedModel("bilinmeyen").isEmpty());
 

@@ -6,6 +6,9 @@
 #include <QSet>
 
 EmbedBridge::EmbedBridge(QObject* parent) {
+    // Kasa bağlanmasa da anahtar bulunabilsin (aksi halde istek 401 alır ve
+    // "anahtar eksik" yerine sunucu hatası görünür)
+    if (!m_secrets) m_secrets = new SecretStore();
     m_provider = resolveProvider();
     m_model = resolveModel(m_provider);
 }
@@ -90,7 +93,7 @@ EmbedBridge::Result EmbedBridge::embed(const QStringList& texts, int timeoutMs) 
     if (!missingIdx.isEmpty()) {
         LlmClient* c = &client();
         c->setProvider(spec);
-        if (m_secrets) c->setSecretStore(m_secrets);
+        if (!c->secretStore()) c->setSecretStore(m_secrets);
         c->loadKeyForProvider();
         const int bs = batchSize(spec);
         for (int start = 0; start < missingIdx.size(); start += bs) {
