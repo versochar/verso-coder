@@ -22,7 +22,7 @@ QList<FindHit> SearchMarks::findAll(const QString& text, const QString& needle,
             if (!leftOk || !rightOk) { from = idx + 1; continue; }
         }
         while (lineIdx + 1 < lineStarts.size() && lineStarts[lineIdx + 1] <= idx) ++lineIdx;
-        out.append({idx, idx + needle.size(), lineIdx});
+        out.append({idx, int(idx + needle.size()), lineIdx});
         from = idx + qMax(1, needle.size());
     }
     return out;
