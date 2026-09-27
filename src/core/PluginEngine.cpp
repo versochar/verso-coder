@@ -1,4 +1,5 @@
 #include "PluginEngine.h"
+#include "PathGuard.h"
 #include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
@@ -31,7 +32,11 @@ QStringList PluginEngine::scanPermissions(const QString& source) {
         for (const QString& tok :
              it.next().captured(1).split(QRegularExpression(R"([\s,]+)"),
                                          Qt::SkipEmptyParts)) {
-            if (known.contains(tok) && !out.contains(tok)) out << tok;
+            if (known.contains(tok) && !out.contains(tok)) {
+            out << tok;
+        } else if (!known.contains(tok)) {
+            out << QString("?") + tok; // bilinmeyen: yükleyici uyarır
+        }
         }
     }
     return out;
@@ -66,19 +71,56 @@ void VersoApi::registerCommand(const QString& cmdId, const QString& title,
     emit apiRegister(m_id, cmdId.trimmed(), title, fn);
 }
 
+// Stage 41: eklenti dosya erişimi PathGuard ile çalışma alanına kapsanır.
+// İzin olsa bile kök dışı okuma/yazma reddedilir (ajanla aynı kural).
+static QString scopedPath(const PluginEngine* eng, const QString& in, QString* why) {
+    if (!eng) {
+        if (why) *why = QStringLiteral("motor yok");
+        return {};
+    }
+    const QString root = eng->workspaceRoot();
+    if (root.isEmpty()) {
+        if (why) *why = QStringLiteral("çalışma alanı açık değil");
+        return {};
+    }
+    QString abs, reason;
+    PathGuard g(root);
+    if (!g.resolve(in, abs, &reason)) {
+        if (why) *why = reason;
+        return {};
+    }
+    return abs;
+}
+
 QString VersoApi::readFile(const QString& path) {
     if (!need("fs.read")) return {};
-    QFile f(path);
+    QString why;
+    const QString abs = scopedPath(engine(), path, &why);
+    if (abs.isEmpty()) {
+        emit apiLog(m_id, QString("okuma reddedildi (%1): %2").arg(why, path.left(120)));
+        return {};
+    }
+    QFile f(abs);
     if (!f.open(QIODevice::ReadOnly)) return {};
     return QString::fromUtf8(f.read(1 << 20));
 }
 
 bool VersoApi::writeFile(const QString& path, const QString& text) {
     if (!need("fs.write")) return false;
-    QFile f(path);
+    QString why;
+    const QString abs = scopedPath(engine(), path, &why);
+    if (abs.isEmpty()) {
+        emit apiLog(m_id, QString("yazma reddedildi (%1): %2").arg(why, path.left(120)));
+        return false;
+    }
+    QFile f(abs);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
     f.write(text.toUtf8());
     return true;
+}
+
+const PluginEngine* VersoApi::engine() const {
+    return qobject_cast<const PluginEngine*>(parent());
 }
 
 bool VersoApi::need(const QString& perm) {
@@ -368,6 +410,13 @@ QList<PluginEngine::Plugin> PluginEngine::loadAll(const QString& dir) {
         if (p.name.isEmpty()) p.name = p.id;
         p.version = scanHeader(src, "version");
         QStringList perms = scanPermissions(src);
+        // Stage 41: bilinmeyen izin bildirimi (sessiz yutma yok)
+        QStringList unknown;
+        for (const QString& tok : perms)
+            if (tok.startsWith('?')) unknown << tok.mid(1);
+        for (const QString& tok : unknown) perms.removeOne(QString("?") + tok);
+        if (!unknown.isEmpty())
+            addLog(p.id, QString("bilinmeyen izinler yoksayıldı: %1").arg(unknown.join(", ")));
         // Yönetici geçersiz kılma: listede yoksa reddet
         const QString okey = "plugin/perms/" + p.id;
         if (q.contains(okey)) perms = q.value(okey).toStringList();
@@ -480,4 +529,9 @@ void PluginEngine::clearQuarantine(const QString& id) {
     ql.removeAll(id);
     q.setValue("plugin/quarantine", ql);
     m_errors.remove(id);
+}
+
+QString VersoApi::currentFile() {
+    const PluginEngine* eng = engine();
+    return eng ? eng->currentFilePath() : QString();
 }

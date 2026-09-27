@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "2.2.0"; }
+QString AboutInfo::version() { return "2.3.0"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,10 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "2.3.0 (Stage 41)\n"
+        "  • Eklenti dosya erişimi çalışma alanına kapsandı (açık kapatıldı)\n"
+        "  • verso.currentFile() + kelime sayacı örnek eklentisi\n"
+        "  • Bilinmeyen izinler günlüğe bildiriliyor\n"
         "2.2.0 (Stage 40)\n"
         "  • Kasa tek-yazıcı + doctor/repair tutarlılık denetimi\n"
         "  • Oturumluk güvenli komut izni (varsayılan kapalı)\n"

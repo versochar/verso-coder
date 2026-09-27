@@ -83,7 +83,7 @@ cmake --build build -j
 ./build/verso-coder
 ```
 
-## Yol haritası (20 + 456 özellik, 40 stage — tamamlandı)
+## Yol haritası (20 + 464 özellik, 41 stage — tamamlandı)
 
 - **Stage 1 — Editör temeli ✅ (yapıldı):** oturum geri yükleme (açık dosyalar + aktif sekme + imleç), otomatik kaydetme (2 sn) + crash yedekleme, harici değişiklik uyarısı, hızlı açma (Ctrl+P fuzzy), font boyutu + sekme genişliği ayarı, status bar'da Ln/Col + LF/CRLF + UTF-8, otomatik parantez kapatma.
 - **Stage 5 — Editör gücü ✅ (yapıldı):** çoklu imleç (Alt+tık, Ctrl+D, Esc), kod katlama (gutter ▸/▾, Ctrl+Shift+[/], oturumda kalıcı), akıllı girinti + `}` geri-girinti + blok Tab, bracket eşleşme (derinlik renkli) + girinti kılavuzları, aramada ±3 satır önizleme, split editör (2 grup + taşı/böl + grup oturumu), satır işlemleri (taşı/çoğalt/sırala/trim), .editorconfig, büyük-dosya önizleme modu, hunspell yazım denetimi (TR+EN, F7, sağ-tık öneri).
@@ -290,6 +290,10 @@ src/core/ai/ProviderBench.*             → sağlayıcı mikro-karşılaştırma
 src/core/ai/AiRunner.* + AiProfiles.h   → tek AI cephesi (12 görev) + görev profilleri
 src/widgets/ModelArenaDialog.*         → çok sağlayıcı arena (gerçek maliyet, kazananı al)
 src/core/PerfTools.*                  → ikili sez, boyut süzgeci, LRU önbellek, ters indeks
+- **Stage 41 — Eklenti Güvenliği ✅ (yapıldı):** Stage 22/29 motoru zaten vardı; denetimde **gerçek açık** bulundu: `fs.read`/`fs.write` izni olan eklenti **herhangi bir yolu** okuyup yazabiliyordu (`/etc/passwd`, `~/.ssh/id_rsa` — `m_wsRoot` kuruluyor ama hiç kullanılmıyordu). Artık eklenti dosya erişimi `PathGuard` ile çalışma alanına kapsanır (ajanla aynı kural), kök yoksa erişim yok, ret `pluginLog`'a yazılır. Bilinmeyen `@permission` satırları sessizce yutulurken artık günlüğe bildirilir. Yeni API: `verso.currentFile()` (yol verir, okuma ayrı izin ister). Referans eklenti `kelime.js` (kelime sayacı, yalnız read+ui). `test_stage41` (27 kontrol: kapsam kaçışı, sembolik bağlantı, köksüz erişim, izin reddi, karantina, olay, `file://` reddi) + ctest **25/25**. Sürüm 2.3.0.
+
+**Eklenti güvenlik modeli:** izinler `// @permission` başlığında (`fs.read`, `fs.write`, `events`, `ui`, `net`); bilinmeyen izin yüklenmez + bildirilir. İzin olsa bile dosya erişimi çalışma alanı köküne kapsanır; ağ yalnız http(s), 1 MB kapaklı, 1–60 sn zaman aşımlı. 3 JS hatasında karantina (kalıcı). Yazma onayı istenmez — eklentiye `fs.write` verildiğinde kök içi yazma serbesttir, bu yüzden izin verirken dikkat.
+
 - **Stage 40 — Kapanış: Borçlar + Pürüzler ✅ (yapıldı):** kasa tek-yazıcı kuralı (depoya yazılınca dosya kopyası silinir; `doctor()` çift/sahipsiz kayıtları bildirir, `repair()` düzeltir) + `ai-probe doctor` tek raporu (kasa/ağ/kota/sigorta/eylem) + sessiz animasyon atlama artık `qDebug` ile görünür + soak eşiği ve zararsız-ikame listesi Ayarlar'a taşındı (gömülü sabit yok) + yoğunluk sayacı sağlık satırında ("yoğunluk 2/3", "DEVREDE (X sn)") + oturumluk güvenli komut izni (**varsayılan kapalı**; yazma/ağ asla listeye giremez, denetim yine tutulur) + "Son Komutlar" dosya izleyiciyle canlı + `fetchModels` 15 sn zaman aşımı (kara delik ağda `m_busy` kilidi gerçek hataydı) + tembel katalog (açılışta yoklama yok, ilk kullanımda var) + RAG rozeti + kota %80 uyarısı (günde 1 bildirim). `test_stage40` (46 kontrol) + ctest **24/24**. Sürüm 2.2.0.
 
 ## Bilinen sınırlamalar (dürüst liste)

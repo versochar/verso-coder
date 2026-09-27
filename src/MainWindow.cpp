@@ -2944,6 +2944,11 @@ void MainWindow::loadPluginsDeferred() {
     if (ok > 0) toast(1, QString("%1 eklenti yüklendi").arg(ok));
     if (m_plugins) {
         m_plugins->setWorkspaceRoot(m_root);
+        // Stage 41: eklentilere açık dosya yolu (okuma yine izin+kapsam ister)
+        m_plugins->setCurrentFileProvider([this]() -> QString {
+            CodeEditor* e = currentEditor();
+            return e ? e->filePath() : QString();
+        });
         m_plugins->fireEvent("startup"); // Stage 29
     }
 }

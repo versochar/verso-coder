@@ -2,17 +2,23 @@
 #include <QJSEngine>
 #include <QMap>
 #include <QObject>
+#include <functional>
 #include <QString>
 
 // Stage 18: eklenti API v1 (JS betikleri, QJSEngine).
 // Stage 29 v2: durum çubuğu, quickPick/inputBox, olaylar, depolama,
 //   terminal, tanılama, görünüm, tema, tuş, ayar, exec katkıları.
 // İzinler: "fs.read" "fs.write" "events" "ui" — izinsiz erişim engellenir.
+class PluginEngine; // aşağıda
+
 class VersoApi : public QObject {
     Q_OBJECT
 public:
     VersoApi(const QString& pluginId, const QStringList& perms, QObject* parent = nullptr)
         : QObject(parent), m_id(pluginId), m_perms(perms) {}
+    // Stage 41: dosya erişimi çalışma alanı köküne kapsanır. Motor canlı
+    // kökü verir (proje değişince eski kök kullanılmaz).
+    const PluginEngine* engine() const;
 
     // v1
     Q_INVOKABLE void log(const QString& msg);
@@ -34,6 +40,7 @@ public:
     Q_INVOKABLE bool registerTheme(const QString& name, const QString& json);
     Q_INVOKABLE void registerKeybinding(const QString& cmdId, const QString& keys);
     Q_INVOKABLE void execCommand(const QString& cmdId);
+    Q_INVOKABLE QString currentFile(); // Stage 41: açık dosya yolu (okuma ayrı izin)
     // v2: depolama (izin gerekmez, eklentiye özel alan)
     Q_INVOKABLE QString getGlobalState(const QString& key);
     Q_INVOKABLE void setGlobalState(const QString& key, const QString& value);
@@ -90,6 +97,9 @@ public:
     QString pluginDir() const { return m_dir; }
     void setWorkspaceRoot(const QString& root) { m_wsRoot = root; }
     QString workspaceRoot() const { return m_wsRoot; }
+    // Stage 41: açık dosya sağlayıcısı (MainWindow kurar)
+    void setCurrentFileProvider(std::function<QString()> fn) { m_currentFile = fn; }
+    QString currentFilePath() const { return m_currentFile ? m_currentFile() : QString(); }
 
     // Kayıtlı betik komutunu çalıştır (hata sayaçlı — 3 hatada karantina)
     QJSValue callCommand(const QString& cmdId, const QString& arg = QString());
@@ -138,6 +148,7 @@ private:
     QMap<QString, QJSValue> m_views;    // view cmdId → fn
     QMap<QString, QString> m_viewOwner;
     QMap<QString, int> m_errors;        // plugin → hata sayacı
+    std::function<QString()> m_currentFile; // Stage 41
     QStringList m_log;                  // son 200 günlük satırı
     void addLog(const QString& id, const QString& msg);
 };
