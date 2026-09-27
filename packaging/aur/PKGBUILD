@@ -1,6 +1,6 @@
 # Maintainer: versochar
 pkgname=verso-coder
-pkgver=1.0.0
+pkgver=1.0.1
 pkgrel=1
 pkgdesc="Yerel öncelikli Qt6 kod editörü — çok sağlayıcılı AI, ajan, LSP, Git"
 arch=('x86_64')
@@ -14,7 +14,7 @@ optdepends=('clangd: C/C++ dil sunucusu'
             'gopls: Go dil sunucusu'
             'bwrap: ajan salt-okunur kipi')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/versochar/verso-coder/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('c802d2b03d444321a8f5c945f985f2a70344086dc38a4d03256ef664e1d67578')
 
 build() {
   cmake -S "$pkgname-$pkgver" -B build \
