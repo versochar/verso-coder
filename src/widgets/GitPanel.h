@@ -1,6 +1,7 @@
 #pragma once
 #include <QCheckBox>
 #include <QComboBox>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QProcess>
@@ -30,6 +31,10 @@ private slots:
     void showHunkDiff(bool cached); // DiffDialog: hunk stage/discard
     void commit();
     void openSelected();
+    void stashSave();   // Stage 43
+    void stashApply();
+    void stashDrop();
+    void refreshStash();
 
 private:
     struct Cmd { int exit = -1; QString out; QString err; };
@@ -39,6 +44,8 @@ private:
 
     QString m_dir;
     QComboBox* m_branches;
+    QComboBox* m_stash = nullptr; // Stage 43
+    QLabel* m_ahead = nullptr;    // Stage 43: önde/geride
     QLineEdit* m_newBranch;
     QListWidget* m_files;
     QTextEdit* m_out;

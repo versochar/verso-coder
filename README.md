@@ -83,7 +83,7 @@ cmake --build build -j
 ./build/verso-coder
 ```
 
-## Yol haritası (20 + 471 özellik, 42 stage — tamamlandı)
+## Yol haritası (20 + 477 özellik, 43 stage — tamamlandı)
 
 - **Stage 1 — Editör temeli ✅ (yapıldı):** oturum geri yükleme (açık dosyalar + aktif sekme + imleç), otomatik kaydetme (2 sn) + crash yedekleme, harici değişiklik uyarısı, hızlı açma (Ctrl+P fuzzy), font boyutu + sekme genişliği ayarı, status bar'da Ln/Col + LF/CRLF + UTF-8, otomatik parantez kapatma.
 - **Stage 5 — Editör gücü ✅ (yapıldı):** çoklu imleç (Alt+tık, Ctrl+D, Esc), kod katlama (gutter ▸/▾, Ctrl+Shift+[/], oturumda kalıcı), akıllı girinti + `}` geri-girinti + blok Tab, bracket eşleşme (derinlik renkli) + girinti kılavuzları, aramada ±3 satır önizleme, split editör (2 grup + taşı/böl + grup oturumu), satır işlemleri (taşı/çoğalt/sırala/trim), .editorconfig, büyük-dosya önizleme modu, hunspell yazım denetimi (TR+EN, F7, sağ-tık öneri).
@@ -290,6 +290,8 @@ src/core/ai/ProviderBench.*             → sağlayıcı mikro-karşılaştırma
 src/core/ai/AiRunner.* + AiProfiles.h   → tek AI cephesi (12 görev) + görev profilleri
 src/widgets/ModelArenaDialog.*         → çok sağlayıcı arena (gerçek maliyet, kazananı al)
 src/core/PerfTools.*                  → ikili sez, boyut süzgeci, LRU önbellek, ters indeks
+- **Stage 43 — Git İş Akışı ✅ (yapıldı):** panel zaten vardı (stage/unstage/hunk/commit/amend/push/branch/log); eksikler kapatıldı: **stash** satırı (kaydet/uygula/bırak + liste) ve **önde/geride sayacı** (`↑N ↓M`, yukarı akış yoksa sessiz). `test_stage43` (38 kontrol: gerçek depoda init→commit→stash→branch→log zinciri, rename ayrıştırma, uzak komut kaçışları, zaman aşımı, deposuz davranış) + ctest **27/27**. Sürüm 2.5.0.
+
 - **Stage 42 — LSP Dayanıklılık ✅ (yapıldı, canlı clangd):** `LspClient::request`'te **zaman aşımı yoktu**: yanıtsız sunucuda handler'lar sonsuza dek birikiyor, geç yanıtlar kapanmış düzenleyicilere hayalet çağrı yapıyordu. Artık her istekte 30 sn zaman aşımı (ayarlanabilir, 0 = kapalı), aşımda handler düşer + `requestTimedOut` sinyali + sunucuya `$/cancelRequest`; `stop()` bekleyenleri temizler. `test_stage42` (40 kontrol: sahte JSON-RPC sunucusuna karşı initialize/hover/zaman aşımı/çökme-temizliği + **gerçek clangd hover** — `toplanan` değişkeni bulundu) + ctest **26/26**. Sürüm 2.4.0.
 
 **LSP matriksi (kablolu → doğrulandı):** clangd (hover/tanım/tamamlama/imza/semantik, canlı ✅) · pylsp (aynı yol, canlı ❌ — makinede yok) · rust-analyzer/gopls (kayıt + yeniden başlatma, canlı ❌). Yeniden başlatma fırtına koruması (60 sn'de 3 çökme → 5 dk bekleme) + çökme sonrası belge geri-açma mevcut. `pyright` bu makinede yok; kurulu makinede `ai-probe` benzeri canlı doğrulama Stage 43'e not düşüldü.

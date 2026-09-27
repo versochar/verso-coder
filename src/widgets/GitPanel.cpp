@@ -22,6 +22,11 @@ GitPanel::GitPanel(QWidget* parent) : QWidget(parent), m_dir(QDir::homePath()) {
     bRow->addWidget(m_branches, 1);
     bRow->addWidget(bRefresh);
 
+    m_ahead = new QLabel(this);
+    m_ahead->setStyleSheet("color:#858585;font-size:11px;");
+    m_ahead->setToolTip("Yukarı akışa göre önde/geride (yoksa boş)");
+    bRow->addWidget(m_ahead);
+
     auto* nbRow = new QHBoxLayout();
     m_newBranch = new QLineEdit(this);
     m_newBranch->setPlaceholderText("yeni-branch-adı");
@@ -63,6 +68,26 @@ GitPanel::GitPanel(QWidget* parent) : QWidget(parent), m_dir(QDir::homePath()) {
     fRow2->addWidget(bStageAll, 1);
     fRow2->addWidget(bLog, 1);
     lay->addLayout(fRow2);
+
+    // Stage 43: stash (kaydet/uygula/bırak)
+    lay->addWidget(new QLabel("STASH", this));
+    auto* sRow = new QHBoxLayout();
+    m_stash = new QComboBox(this);
+    m_stash->setToolTip("Stash listesi (seç = uygula)");
+    auto* bStashSave = new QPushButton("Kaydet", this);
+    bStashSave->setToolTip("Çalışmayı stash'e al (git stash push)");
+    auto* bStashApply = new QPushButton("Uygula", this);
+    bStashApply->setToolTip("Seçili stash'i uygula (listede kalır)");
+    auto* bStashDrop = new QPushButton("Bırak", this);
+    bStashDrop->setToolTip("Seçili stash'i sil");
+    sRow->addWidget(m_stash, 1);
+    sRow->addWidget(bStashSave);
+    sRow->addWidget(bStashApply);
+    sRow->addWidget(bStashDrop);
+    lay->addLayout(sRow);
+    connect(bStashSave, &QPushButton::clicked, this, &GitPanel::stashSave);
+    connect(bStashApply, &QPushButton::clicked, this, &GitPanel::stashApply);
+    connect(bStashDrop, &QPushButton::clicked, this, &GitPanel::stashDrop);
 
     // Commit
     m_msg = new QLineEdit(this);
@@ -195,12 +220,61 @@ void GitPanel::refresh() {
     if (m_files->count() == 0)
         m_files->addItem("(temiz — değişiklik yok)");
     refreshBranches();
+    refreshStash();
+}
+
+void GitPanel::refreshStash() {
+    if (!m_stash) return;
+    Cmd l = runGit({"stash", "list", "--format=%gd: %gs"});
+    m_stash->blockSignals(true);
+    m_stash->clear();
+    for (const QString& ln : l.out.split('\n', Qt::SkipEmptyParts))
+        m_stash->addItem(ln.trimmed());
+    if (m_stash->count() == 0) m_stash->addItem("(stash yok)");
+    m_stash->blockSignals(false);
+}
+
+void GitPanel::stashSave() {
+    Cmd r = runGit({"stash", "push", "-m", "verso-stash"});
+    log("stash push", r.out + r.err);
+    refresh();
+}
+
+void GitPanel::stashApply() {
+    if (!m_stash || m_stash->count() == 0) return;
+    const QString entry = m_stash->currentText().split(':').first().trimmed();
+    if (entry == "(stash yok)") return;
+    Cmd r = runGit({"stash", "apply", entry});
+    log("stash apply " + entry, r.out + r.err);
+    refresh();
+}
+
+void GitPanel::stashDrop() {
+    if (!m_stash || m_stash->count() == 0) return;
+    const QString entry = m_stash->currentText().split(':').first().trimmed();
+    if (entry == "(stash yok)") return;
+    Cmd r = runGit({"stash", "drop", entry});
+    log("stash drop " + entry, r.out + r.err);
+    refresh();
 }
 
 void GitPanel::refreshBranches() {
     QString cur;
     Cmd head = runGit({"rev-parse", "--abbrev-ref", "HEAD"});
     if (head.exit == 0) cur = head.out.trimmed();
+    // Stage 43: önde/geride (yukarı akış yoksa sessiz)
+    if (m_ahead) {
+        m_ahead->clear();
+        Cmd ab = runGit({"rev-list", "--left-right", "--count", "HEAD...@{upstream}"});
+        if (ab.exit == 0) {
+            const QStringList parts = ab.out.trimmed().split(QRegularExpression("\\s+"));
+            if (parts.size() == 2) {
+                const int ahead = parts[0].toInt(), behind = parts[1].toInt();
+                if (ahead > 0 || behind > 0)
+                    m_ahead->setText(QString("↑%1 ↓%2").arg(ahead).arg(behind));
+            }
+        }
+    }
     Cmd b = runGit({"branch", "--format=%(refname:short)"});
     m_branches->blockSignals(true);
     m_branches->clear();
