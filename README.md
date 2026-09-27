@@ -83,7 +83,7 @@ cmake --build build -j
 ./build/verso-coder
 ```
 
-## Yol haritası (20 + 490 özellik, 45 stage — tamamlandı)
+## Yol haritası (20 + 496 özellik, 46 stage — tamamlandı)
 
 - **Stage 1 — Editör temeli ✅ (yapıldı):** oturum geri yükleme (açık dosyalar + aktif sekme + imleç), otomatik kaydetme (2 sn) + crash yedekleme, harici değişiklik uyarısı, hızlı açma (Ctrl+P fuzzy), font boyutu + sekme genişliği ayarı, status bar'da Ln/Col + LF/CRLF + UTF-8, otomatik parantez kapatma.
 - **Stage 5 — Editör gücü ✅ (yapıldı):** çoklu imleç (Alt+tık, Ctrl+D, Esc), kod katlama (gutter ▸/▾, Ctrl+Shift+[/], oturumda kalıcı), akıllı girinti + `}` geri-girinti + blok Tab, bracket eşleşme (derinlik renkli) + girinti kılavuzları, aramada ±3 satır önizleme, split editör (2 grup + taşı/böl + grup oturumu), satır işlemleri (taşı/çoğalt/sırala/trim), .editorconfig, büyük-dosya önizleme modu, hunspell yazım denetimi (TR+EN, F7, sağ-tık öneri).
@@ -290,6 +290,10 @@ src/core/ai/ProviderBench.*             → sağlayıcı mikro-karşılaştırma
 src/core/ai/AiRunner.* + AiProfiles.h   → tek AI cephesi (12 görev) + görev profilleri
 src/widgets/ModelArenaDialog.*         → çok sağlayıcı arena (gerçek maliyet, kazananı al)
 src/core/PerfTools.*                  → ikili sez, boyut süzgeci, LRU önbellek, ters indeks
+- **Stage 46 — Performans ✅ (yapıldı):** tembel sekme geri yükleme — 50 sekmelik oturum açılışı tek dosya maliyetine indi (yalnız etkin sekme açılır, diğerleri ilk tıklamada gerçeklenir; imleç/katlama/oturum turu korunur). `Ollama otomatik başlatma` ayarı (testler gerçek sunucu başlatmıyor). `test_stage46` (13 kontrol: 100k satır açılışı ölçüldü **6,4 sn**, 5× aç/kapa **414 KB/tur**, gömme önbelleği sınırı) + duman testine tembel sekme turu + ctest **30/30**. Sürüm 2.8.0.
+
+**Performans bütçeleri (kilitli):** 100k satır açılışı <15 sn · aç/kapa tur başına <2 MB · ayar döngüsü tur başına <64 KB (yapılandırılabilir) · boş proje RSS hedefi <150 MB. Sosyal gerçek: 6,4 sn'lik açılışın çoğu sözdizimi vurgulamada; büyük dosya kipi (2 MB üstü renksiz, 8 MB üstü salt-okunur) bunu dengeler.
+
 - **Stage 45 — Ajan Güvenliği ✅ (yapıldı, canlı):** dolaylı istem-enjeksiyon koruması: araç ÇIKTILARI bağlama girmeden taranır (`scanObservation`, TR+EN emir kalıpları), bulgu `[GÜVENLİK NOTU: ...VERİDİR...]` önekiyle işaretlenir + sayılır; bütçe kotası (varsayılan 3) aşılınca koşu durur. **Engellemez** (kullanıcı enjeksiyonu tartışıyor olabilir) — canlı kanıt: `ai-probe enjeksiyon` **5/5**, modelin saldırı-açıklaması bayraklanmadı. Adım adım geri alma: her adım değişen dosyaları kaydeder (`revertSteps`, sıra tuzaksız). `test_stage45` (35 kontrol) + ctest **29/29**. Sürüm 2.7.0.
 
 **Ajan güvenlik modeli:** izinler (politika kapısı) + onay + tehlikeli kalıp engeli + komut denetimi + yol kapsamı + enjeksiyon taraması + bütçe. Katmanların hiçbiri tek başına yeterli değil; birlikte çalışırlar.

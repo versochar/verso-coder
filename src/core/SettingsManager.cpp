@@ -14,6 +14,7 @@ AppSettings SettingsManager::load() const {
     s.language      = q.value("language", "tr").toString();
     s.theme         = q.value("theme", "dark").toString();
     s.ollamaHost    = q.value("ollama/host", "http://localhost:11434").toString();
+    s.ollamaAutoStart = q.value("ollama/autostart", true).toBool();
     s.ollamaModel   = q.value("ollama/model", "llama3.1").toString();
     s.contextWindow = q.value("ollama/num_ctx", 4096).toInt();
     s.temperature   = q.value("ollama/temperature", 0.7).toDouble();
@@ -134,6 +135,7 @@ void SettingsManager::save(const AppSettings& s) const {
     q.setValue("language", s.language);
     q.setValue("theme", s.theme);
     q.setValue("ollama/host", s.ollamaHost);
+    q.setValue("ollama/autostart", s.ollamaAutoStart);
     q.setValue("ollama/model", s.ollamaModel);
     q.setValue("ollama/num_ctx", s.contextWindow);
     q.setValue("ollama/temperature", s.temperature);

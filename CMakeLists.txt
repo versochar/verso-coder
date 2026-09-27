@@ -1279,3 +1279,72 @@ add_executable(test_stage45
 target_include_directories(test_stage45 PRIVATE src)
 target_link_libraries(test_stage45 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml)
 add_test(NAME stage45 COMMAND test_stage45)
+
+add_executable(test_stage46
+    tests/test_stage46.cpp
+    src/widgets/CodeEditor.cpp
+    src/core/PathGuard.cpp
+    src/core/CommandAudit.cpp
+    src/core/LeakWatch.cpp
+    src/core/SettingsManager.cpp
+    src/core/SettingsIO.cpp
+    src/core/AutoPairs.cpp
+    src/core/BlockSelect.cpp
+    src/core/BracketDepth.cpp
+    src/core/EditorConfig.cpp
+    src/core/ScopeChain.cpp
+    src/core/SelectionGrow.cpp
+    src/core/SemanticTokens.cpp
+    src/core/SnippetEngine.cpp
+    src/core/SpellChecker.cpp
+    src/core/Spelling.cpp
+    src/core/Typography.cpp
+    src/core/ThemeTokens.cpp
+    src/core/ThemeManager.cpp
+    src/core/ThemeStore.cpp
+    src/core/GitBlame.cpp
+    src/core/GitIgnore.cpp
+    src/core/ColorBlind.cpp
+    src/core/QssBuilder.cpp
+    src/core/AccentColor.cpp
+    src/core/Density.cpp
+    src/core/UiMetrics.cpp
+    src/core/RagProgress.cpp
+    src/core/SetupAdvisor.cpp
+    src/core/CacheCleaner.cpp
+    src/core/AgentTools.cpp
+    src/core/AgentPolicy.cpp
+    src/core/AgentBudget.cpp
+    src/core/AgentMemory.cpp
+    src/core/AgentReflection.cpp
+    src/core/SkillRegistry.cpp
+    src/core/SkillChain.cpp
+    src/core/AgentRunStore.cpp
+    src/core/PatchQueue.cpp
+    src/core/ProjectHealth.cpp
+    src/core/ModelCapabilities.cpp
+    src/core/TokenStats.cpp
+    src/core/ContextBudget.cpp
+    src/core/ai/LlmProvider.cpp
+    src/core/ai/SecretStore.cpp
+    src/core/ai/AiMessage.cpp
+    src/core/ai/AiToolBridge.cpp
+    src/core/ai/ProviderPrefs.cpp
+    src/core/ai/ProviderPricing.cpp
+    src/core/ai/ProviderHealth.cpp
+    src/core/ai/UsageLedger.cpp
+    src/core/ai/TaskRouter.cpp
+    src/core/ai/ModelPool.cpp
+    src/core/ai/EmbedCache.cpp
+    src/core/ai/EmbedBridge.cpp
+    src/core/ai/AgentLlmAdapter.cpp
+    src/core/ai/ProviderBench.cpp
+    src/core/ai/AiRunner.cpp
+    src/core/ai/LlmClient.cpp
+    src/core/ai/providers/ProviderCodec.cpp
+    src/core/ai/providers/SseParser.cpp
+)
+target_include_directories(test_stage46 PRIVATE src)
+target_link_libraries(test_stage46 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml Qt6::Test ${HUNSPELL_LIBRARIES})
+target_include_directories(test_stage46 PRIVATE ${HUNSPELL_INCLUDE_DIRS})
+add_test(NAME stage46 COMMAND test_stage46)

@@ -1109,9 +1109,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     PerfMonitor::instance().mark("UI hazır");
     // Stage 22: eklentiler ilk kareden sonra (başlangıcı yavaşlatmaz)
     QTimer::singleShot(800, this, &MainWindow::loadPluginsDeferred);
-    // Ollama kapalıysa bir kez sessizce başlatmayı dene (sonuç toast)
+    // Ollama kapalıysa bir kez sessizce başlatmayı dene (sonuç toast).
+    // Stage 46: ayarlanabilir (testler ve elle yönetenler kapatabilir).
     QTimer::singleShot(2500, this, [this]() {
         AppSettings s = SettingsManager::instance().load();
+        if (!s.ollamaAutoStart) return;
         const QString host = s.ollamaHost;
         QFutureWatcher<bool>* w = new QFutureWatcher<bool>(this);
         connect(w, &QFutureWatcher<bool>::finished, this, [this, w]() {
@@ -1337,6 +1339,8 @@ void MainWindow::refreshProblemView() {
 
 void MainWindow::onGroupCurrentChanged(int group) {
     m_activeGroup = group;
+    // Stage 46: tembel sekme — bekleyen yer tutucu ilk aktivasyonda gerçeklenir
+    if (QWidget* w = activeTabs()->currentWidget()) materializePending(w);
     updateCursorStatus();
     updateBreadcrumb();
     if (auto* e = qobject_cast<CodeEditor*>(activeTabs()->currentWidget())) {
@@ -1387,6 +1391,14 @@ CodeEditor* MainWindow::openEditorFor(const QString& path, int group) {
                     }
                     return e;
                 }
+    // Stage 46: aynı yolun bekleyen yer tutucusu varsa onu gerçekle
+    for (QTabWidget* t : {m_tabs, m_tabs2})
+        for (int i = 0; i < t->count(); ++i)
+            if (t->widget(i)->property("pendingPath").toString() == path
+                && !path.isEmpty()) {
+                materializePending(t->widget(i));
+                if (auto* done = qobject_cast<CodeEditor*>(t->widget(i))) return done;
+            }
     auto* e = new CodeEditor(this);
     applyEditorSettingsTo(e);
     // Stage 16: ssh:// belgelerde içerik çağrıcı tarafından konur (setContent)
@@ -2740,13 +2752,24 @@ void MainWindow::saveSession() {
 DocSession MainWindow::captureSession() const {
     DocSession d;
     d.root = m_root;
-    auto collect = [](QTabWidget* t, QStringList& files, QStringList& curs) {
-        for (int i = 0; i < t->count(); ++i)
-            if (auto* e = qobject_cast<CodeEditor*>(t->widget(i)))
+    // Stage 46: bekleyen (henüz gerçeklenmemiş) sekmeler de oturuma yazılır;
+    // imleçleri m_pendingCursors'tan alınır. Yoksa oturum her kayıtta erirdi.
+    auto collect = [this](QTabWidget* t, QStringList& files, QStringList& curs) {
+        for (int i = 0; i < t->count(); ++i) {
+            if (auto* e = qobject_cast<CodeEditor*>(t->widget(i))) {
                 if (!e->filePath().isEmpty()) {
                     files << e->filePath();
                     curs << (e->filePath() + "\x1F" + QString::number(e->cursorOffset()));
                 }
+                continue;
+            }
+            const QString pending = t->widget(i)->property("pendingPath").toString();
+            if (!pending.isEmpty()) {
+                files << pending;
+                const int off = m_pendingCursors.value(pending, 0);
+                curs << (pending + "\x1F" + QString::number(off));
+            }
+        }
     };
     collect(m_tabs, d.files, d.cursors);
     collect(m_tabs2, d.files2, d.cursors2);
@@ -2757,6 +2780,13 @@ DocSession MainWindow::captureSession() const {
             for (int l : fl) ns << QString::number(l);
             d.folds << (e->filePath() + "\x1F" + ns.join(','));
         }
+    }
+    // Stage 46: bekleyen sekmelerin katlamaları da korunur
+    for (auto it = m_pendingFolds.constBegin(); it != m_pendingFolds.constEnd(); ++it) {
+        if (it.value().isEmpty()) continue;
+        QStringList ns;
+        for (int l : it.value()) ns << QString::number(l);
+        d.folds << (it.key() + "\x1F" + ns.join(','));
     }
     d.active = m_tabs->currentIndex();
     d.active2 = m_tabs2->currentIndex();
@@ -2781,16 +2811,33 @@ void MainWindow::applyDocSession(const DocSession& s) {
             ls << n.toInt();
         folds[f.left(k)] = ls;
     }
+    // Stage 46: tembel geri yükleme — yalnız etkin sekme gerçekten açılır,
+    // diğerleri hafif yer tutucudur (ilk tıklamada gerçeklenir). 50 sekmelik
+    // oturum açılışı böylece tek dosya maliyetine iner.
     auto openGroup = [&](const QStringList& files, const QStringList& curs, int group, int active) {
         QMap<QString, int> cm = parseCursors(curs);
-        for (const QString& f : files) {
-            if (!QFileInfo::exists(f)) continue;
-            if (auto* e = openEditorFor(f, group)) {
-                if (cm.contains(f)) e->setCursorOffset(cm[f]);
-                if (folds.contains(f)) e->setFoldedLines(folds[f]);
-            }
-        }
         QTabWidget* t = group == 0 ? m_tabs : m_tabs2;
+        const QString activePath =
+            (active >= 0 && active < files.size()) ? files.at(active) : QString();
+        for (int i = 0; i < files.size(); ++i) {
+            const QString& f = files.at(i);
+            if (!QFileInfo::exists(f)) continue;
+            if (f == activePath) {
+                if (auto* e = openEditorFor(f, group)) {
+                    if (cm.contains(f)) e->setCursorOffset(cm[f]);
+                    if (folds.contains(f)) e->setFoldedLines(folds[f]);
+                }
+                continue;
+            }
+            // Yer tutucu: imleç/katlama gerçeklenince uygulanır
+            if (cm.contains(f)) m_pendingCursors[f] = cm[f];
+            if (folds.contains(f)) m_pendingFolds[f] = folds[f];
+            auto* ph = new QLabel("Yükleniyor…", t);
+            ph->setAlignment(Qt::AlignCenter);
+            ph->setProperty("pendingPath", f);
+            t->addTab(ph, QFileInfo(f).fileName());
+            t->setTabToolTip(t->count() - 1, f);
+        }
         if (active >= 0 && active < t->count()) t->setCurrentIndex(active);
     };
     openGroup(s.files, s.cursors, 0, s.active);
@@ -3266,9 +3313,13 @@ void MainWindow::refreshGitBranch() {
     if (!m_chipGit) return;
     auto* p = new QProcess(this);
     p->setWorkingDirectory(m_root);
-    connect(p, &QProcess::finished, this, [this, p](int code, QProcess::ExitStatus) {
+    // Stage 46: QPointer koruması — yıkım sırasında biten süreç asılı
+    // etikete yazıyordu (m_chipGit ham gösterge, null değil dangling olur).
+    QPointer<QLabel> chip = m_chipGit;
+    connect(p, &QProcess::finished, this, [this, p, chip](int code, QProcess::ExitStatus) {
         p->deleteLater();
-        if (!m_chipGit) return;
+        if (!chip) return;
+        QLabel* m_chipGit = chip;
         if (code != 0) {
             m_chipGit->setText("—");
             m_chipGit->setToolTip("Git deposu değil");
@@ -7282,4 +7333,73 @@ void MainWindow::hunkMenuAtCursor() {
         toast(1, "Hunk stage'lendi.");
     });
     m.exec(QCursor::pos());
+}
+
+// Stage 46: bekleyen yer tutucuyu gerçek düzenleyiciyle değiştir
+void MainWindow::materializePending(QWidget* w) {
+    if (!w) return;
+    const QString path = w->property("pendingPath").toString();
+    if (path.isEmpty()) return;
+    QTabWidget* owner = nullptr;
+    int idx = -1;
+    for (QTabWidget* t : {m_tabs, m_tabs2}) {
+        const int i = t->indexOf(w);
+        if (i >= 0) {
+            owner = t;
+            idx = i;
+            break;
+        }
+    }
+    if (!owner) return;
+    auto* e = new CodeEditor(this);
+    applyEditorSettingsTo(e);
+    if (!e->loadFile(path)) {
+        delete e;
+        owner->setTabText(idx, QFileInfo(path).fileName() + " (açılamadı)");
+        w->setProperty("pendingPath", QString());
+        return;
+    }
+    if (m_pendingCursors.contains(path)) {
+        e->setCursorOffset(m_pendingCursors.take(path));
+    }
+    if (m_pendingFolds.contains(path)) {
+        e->setFoldedLines(m_pendingFolds.take(path));
+    }
+    // Stage 32: büyük dosya kipi
+    AppSettings cfg = SettingsManager::instance().load();
+    const int mode = PerfTools::largeFileMode(QFileInfo(path).size(), cfg.largeFileMb, 8);
+    if (mode == 2 && !e->isReadOnly()) {
+        e->setReadOnly(true);
+        toast(2, "Büyük dosya salt-okunur açıldı (8 MB+)");
+    }
+    // Stage 46: removeTab komşuyu otomatik seçip currentChanged ateşler;
+    // araya giren gerçekleme zincirini engelle (tek sekme ilkesi).
+    const bool blocked = owner->blockSignals(true);
+    owner->removeTab(idx);
+    owner->blockSignals(blocked);
+    w->deleteLater();
+    const int group = (owner == m_tabs) ? 0 : 1;
+    addEditorTab(e, QFileInfo(path).fileName(), path, group);
+    owner->setCurrentWidget(e);
+    setupLspFor(path, e->toPlainText());
+}
+
+bool MainWindow::isPendingTab(QWidget* w) const {
+    return w && !w->property("pendingPath").toString().isEmpty();
+}
+
+int MainWindow::pendingTabCount() const {
+    int n = 0;
+    for (QTabWidget* t : {m_tabs, m_tabs2})
+        for (int i = 0; i < t->count(); ++i)
+            if (!t->widget(i)->property("pendingPath").toString().isEmpty()) ++n;
+    return n;
+}
+
+int MainWindow::editorTabCount() const {
+    int n = 0;
+    for (QTabWidget* t : {m_tabs, m_tabs2})
+        for (int i = 0; i < t->count(); ++i)
+            if (qobject_cast<CodeEditor*>(t->widget(i))) ++n;
+    return n;
 }

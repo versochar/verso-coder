@@ -23,6 +23,7 @@
 
 #include "../src/MainWindow.h"
 #include "../src/core/LeakWatch.h"
+#include "../src/core/ProjectSessions.h"
 #include "../src/core/SettingsManager.h"
 #include "../src/core/ai/ProviderPrefs.h"
 #include "../src/core/ai/SecretStore.h"
@@ -43,6 +44,7 @@ private slots:
     void mainWindow_switchesProviderPersists();
     void mainWindow_survivesRepeatedProviderSwitching();
     void mainWindow_settingsSoakDoesNotLeak();
+    void mainWindow_lazyTabsRestoreAndMaterialize();
 
 private:
     QTemporaryDir m_home;
@@ -73,6 +75,7 @@ void UiSmokeTest::initTestCase() {
     // ölçüyoruz.
     {
         AppSettings fs = SettingsManager::instance().load();
+        fs.ollamaAutoStart = false; // testler gerçek sunucu başlatmasın
         fs.m_firstRun = false;
         SettingsManager::instance().save(fs);
     }
@@ -303,6 +306,53 @@ void UiSmokeTest::mainWindow_settingsSoakDoesNotLeak() {
     }
     ProviderPrefs::reset();
     Q_UNUSED(worst);
+}
+
+void UiSmokeTest::mainWindow_lazyTabsRestoreAndMaterialize() {
+    QVERIFY(m_win);
+    // 3 dosyalı oturum: yalnız etkin sekme gerçekten açılır
+    QStringList files;
+    for (int i = 0; i < 3; ++i) {
+        const QString p = m_project.path() + QString("/sekme%1.txt").arg(i);
+        QFile f(p);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(QString("satir %1\\n").arg(i).toUtf8().repeated(50));
+        f.close();
+        files << p;
+    }
+    DocSession d;
+    d.files = files;
+    d.cursors = {files[0] + "\x1F10", files[1] + "\x1F20", files[2] + "\x1F30"};
+    d.active = 0;
+    const int editorsBefore = m_win->editorTabCount();
+    m_win->applyDocSession(d);
+    QTest::qWait(100);
+    // 1 gerçek + 2 bekleyen
+    QCOMPARE(m_win->editorTabCount(), editorsBefore + 1);
+    QCOMPARE(m_win->pendingTabCount(), 2);
+    // Bekleyen sekmeye geç → gerçeklenir, imleç korunur
+    QTabWidget* tabs = nullptr;
+    for (auto* t : m_win->findChildren<QTabWidget*>()) {
+        for (int i = 0; i < t->count(); ++i)
+            if (!t->widget(i)->property("pendingPath").toString().isEmpty()) tabs = t;
+    }
+    QVERIFY(tabs);
+    for (int i = 0; i < tabs->count(); ++i) {
+        if (!tabs->widget(i)->property("pendingPath").toString().isEmpty()) {
+            tabs->setCurrentIndex(i);
+            break;
+        }
+    }
+    QTest::qWait(150);
+    QCOMPARE(m_win->pendingTabCount(), 1);
+    // Oturum turu: bekleyen sekme kaybolmaz
+    const DocSession back = m_win->captureSession();
+    for (const QString& f : files) QVERIFY(back.files.contains(f));
+    // İmleç korunmuş mu?
+    bool sawCursor = false;
+    for (const QString& c : back.cursors)
+        if (c.startsWith(files[1]) || c.startsWith(files[2])) sawCursor = true;
+    QVERIFY(sawCursor);
 }
 
 QTEST_MAIN(UiSmokeTest)

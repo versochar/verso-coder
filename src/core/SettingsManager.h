@@ -10,6 +10,7 @@ struct AppSettings {
 
     QString ollamaHost = "http://localhost:11434";
     QString ollamaModel = "llama3.1";
+    bool ollamaAutoStart = true; // Stage 46: açılışta sessizce başlatmayı dene
     int     contextWindow = 4096;     // num_ctx
     double  temperature = 0.7;
     int     cpuThreads = 4;           // num_thread

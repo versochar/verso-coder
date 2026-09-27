@@ -68,6 +68,11 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     void applyStartupOptions(const StartupOptions& opts); // Stage 8: CLI / tek örnek
     void checkStartupBudget(int budgetMs); // Stage 32: başlangıç bütçesi bildirimi
+    // Stage 46: test edilebilirlik (tembel sekme sayımı)
+    int pendingTabCount() const;
+    int editorTabCount() const;
+    DocSession captureSession() const;
+    void applyDocSession(const DocSession& s);
 
 protected:
     void closeEvent(QCloseEvent* e) override;
@@ -251,6 +256,11 @@ private:
     void closeTabIn(QTabWidget* tabs, int i);
     void onGroupCurrentChanged(int group);
     CodeEditor* openEditorFor(const QString& path, int group = -1);
+    // Stage 46: tembel sekme geri yükleme
+    void materializePending(QWidget* w);
+    bool isPendingTab(QWidget* w) const;
+    QMap<QString, int> m_pendingCursors;
+    QMap<QString, QList<int>> m_pendingFolds;
     CodeEditor* addEditorTab(CodeEditor* e, const QString& title, const QString& tip,
                              int group = -1);
     void newUntitledFile(); // dil sorar + iskelet koyar (Kaydet'te ad önerir)
@@ -396,8 +406,6 @@ private:
     void applyShortcuts();
     void saveSession();
     void restoreSession();
-    DocSession captureSession() const;
-    void applyDocSession(const DocSession& s);
     void refreshProjectViews(); // gitignore + tüm proje panelleri yeni köke
     QStringList collectProjectFiles() const;
     void openFolderDialog();
