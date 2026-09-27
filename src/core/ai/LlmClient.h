@@ -118,6 +118,7 @@ private:
     bool m_busy = false;
     bool m_wantStream = false;
     int m_attempt = 0;
+    int m_gen = 0; // Stage 50-debug: iptal sonrası zamanlanmış işler çalışmaz
 
     bool m_failover = true;
     int m_failoverCount = 0;

@@ -58,6 +58,7 @@ class RemoteTab;
 class GitIgnore;
 class TrashManager;
 class ProjectSessions;
+#include "core/ProjectSessions.h"
 class TaskPanel;
 class BackupManager;
 struct DocSession;
@@ -525,6 +526,7 @@ private:
     class AiRunner* m_aiRunner = nullptr;       // Stage 37: tek AI cephesi
     class QLabel* m_chipProvider = nullptr;    // Stage 37: sağlayıcı + sağlık noktası
     class QLabel* m_chipRag = nullptr;         // Stage 40: RAG rozeti
+    DocSession m_lastSavedSession; // Stage 50-debug: gereksiz disk yazmayı atla
     class AiRunner* m_ghostRunner = nullptr;    // Stage 37: hayalet tamamlama koşucusu
     class SecretStore* m_secrets = nullptr;     // Stage 37: anahtar kasası
     // Stage 49: birlikte çalışma

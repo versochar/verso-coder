@@ -2779,6 +2779,15 @@ void MainWindow::saveSession() {
     AppSettings s = SettingsManager::instance().load();
     s.lastRoot = m_root;
     DocSession d = captureSession();
+    // Stage 50-debug: sekme değişiminde disk yazma atlanır (aynıysa).
+    // QSettings eşitleme her seferinde dosya yazar; imleç oynamadan
+    // sekme değiştirmek diske dokunmamalı.
+    if (d.root == m_lastSavedSession.root && d.files == m_lastSavedSession.files &&
+        d.cursors == m_lastSavedSession.cursors && d.files2 == m_lastSavedSession.files2 &&
+        d.cursors2 == m_lastSavedSession.cursors2 && d.folds == m_lastSavedSession.folds &&
+        d.active == m_lastSavedSession.active && d.active2 == m_lastSavedSession.active2)
+        return;
+    m_lastSavedSession = d;
     s.sessionFiles = d.files;
     s.sessionCursors = d.cursors;
     s.sessionFiles2 = d.files2;

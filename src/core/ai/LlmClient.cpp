@@ -275,7 +275,10 @@ void LlmClient::dispatch(const AiChatRequest& req, bool stream) {
                 ++m_modelFailoverCount;
                 emit statusChanged(QString("%1 yoğun → %2 modeline geçildi")
                                        .arg(busy, next));
-                QTimer::singleShot(0, this, [this]() { dispatch(m_req, m_wantStream); });
+                const int gen = m_gen;
+                QTimer::singleShot(0, this, [this, gen]() {
+                    if (gen == m_gen) dispatch(m_req, m_wantStream);
+                });
                 return;
             }
         }
@@ -289,7 +292,10 @@ void LlmClient::dispatch(const AiChatRequest& req, bool stream) {
                 delay < 1000
                     ? QString("%1 → %2 ms sonra yeniden deneniyor").arg(status).arg(delay)
                     : QString("%1 → %2 sn sonra yeniden deneniyor").arg(status).arg(delay / 1000));
-            QTimer::singleShot(delay, this, [this]() { dispatch(m_req, m_wantStream); });
+            const int gen = m_gen;
+            QTimer::singleShot(delay, this, [this, gen]() {
+                if (gen == m_gen) dispatch(m_req, m_wantStream);
+            });
             return;
         }
 
@@ -310,7 +316,10 @@ void LlmClient::dispatch(const AiChatRequest& req, bool stream) {
                 ++m_failoverCount;
                 emit statusChanged(QString("%1 başarısız → %2 sağlayıcısına geçildi")
                                        .arg(from, next.label));
-                QTimer::singleShot(0, this, [this]() { dispatch(m_req, m_wantStream); });
+                const int gen = m_gen;
+                QTimer::singleShot(0, this, [this, gen]() {
+                    if (gen == m_gen) dispatch(m_req, m_wantStream);
+                });
                 return;
             }
         }
@@ -368,6 +377,7 @@ void LlmClient::handleChatFinished() { flushStream(); }
 void LlmClient::scheduleRetry() { ++m_attempt; }
 
 void LlmClient::cancel() {
+    ++m_gen; // bekleyen yeniden deneme/devir çalışmasın
     if (m_reply) {
         m_reply->disconnect(this);
         m_reply->abort();
