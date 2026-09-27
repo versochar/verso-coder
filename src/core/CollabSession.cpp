@@ -75,6 +75,7 @@ void CollabSession::leave() {
         s->deleteLater();
     }
     m_socks.clear();
+    m_sockUser.clear();
     if (m_server) {
         m_server->close();
         m_server->deleteLater();
@@ -157,7 +158,15 @@ void CollabSession::onClosed() {
         emit sessionError("Oturum kapandı.");
         return;
     }
-    if (s && m_socks.removeOne(s)) s->deleteLater();
+    // Stage 49: ani kopuş (bye gelmeden) hayalet bırakmasın
+    if (s && m_socks.removeOne(s)) {
+        const QString u = m_sockUser.take(s);
+        if (!u.isEmpty()) {
+            if (m_cursors.remove(u)) emit cursorsChanged();
+            emit peerLeft(u);
+        }
+        s->deleteLater();
+    }
 }
 
 void CollabSession::handleMessage(QWebSocket* from, const QJsonObject& msg) {
@@ -166,6 +175,7 @@ void CollabSession::handleMessage(QWebSocket* from, const QJsonObject& msg) {
     const QString user = msg.value("user").toString().left(40);
     if (t == "hello") {
         if (!user.isEmpty() && user != m_user) {
+            if (from) m_sockUser[from] = user;
             emit peerJoined(user);
             // Host: diğer eşlere de duyur
             if (m_role == "host") broadcast(msg, from);
@@ -174,6 +184,7 @@ void CollabSession::handleMessage(QWebSocket* from, const QJsonObject& msg) {
     }
     if (t == "cursor") {
         if (!user.isEmpty()) {
+            if (from) m_sockUser[from] = user;
             m_cursors[user] = qMakePair(msg.value("line").toInt(),
                                         msg.value("col").toInt());
             emit cursorsChanged();

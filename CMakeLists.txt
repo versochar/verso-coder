@@ -1373,3 +1373,13 @@ target_include_directories(test_stage48 PRIVATE src)
 target_link_libraries(test_stage48 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml Qt6::Test ${HUNSPELL_LIBRARIES})
 target_include_directories(test_stage48 PRIVATE ${HUNSPELL_INCLUDE_DIRS})
 add_test(NAME stage48 COMMAND test_stage48)
+
+add_executable(test_stage49
+    tests/test_stage49.cpp
+    src/core/CollabSession.cpp
+    src/core/CollabMerge.cpp
+)
+target_include_directories(test_stage49 PRIVATE src)
+target_link_libraries(test_stage49 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml Qt6::Test Qt6::WebSockets ${HUNSPELL_LIBRARIES})
+target_include_directories(test_stage49 PRIVATE ${HUNSPELL_INCLUDE_DIRS})
+add_test(NAME stage49 COMMAND test_stage49)

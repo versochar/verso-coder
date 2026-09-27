@@ -19,6 +19,7 @@
 #include "core/TestParser.h"
 #include <QLabel>
 #include <QMainWindow>
+class CollabSession;
 #include <QMap>
 #include <QFileSystemWatcher>
 #include <QPointer>
@@ -526,6 +527,19 @@ private:
     class QLabel* m_chipRag = nullptr;         // Stage 40: RAG rozeti
     class AiRunner* m_ghostRunner = nullptr;    // Stage 37: hayalet tamamlama koşucusu
     class SecretStore* m_secrets = nullptr;     // Stage 37: anahtar kasası
+    // Stage 49: birlikte çalışma
+    class CollabSession* m_collab = nullptr;
+    bool m_collabApplying = false;
+    QTimer* m_collabCursorTimer = nullptr;
+    CollabSession* collab();
+    QStringList collabPeers() const;
+    void collabHost();
+    void collabJoin();
+    void collabLeave();
+    void renderPeerCursors();
+    void applyCollabText(const QString& text, const QString& from);
+    void publishCollabEdit();
+    void publishCollabCursor();
     QTimer* m_ghostTimer = nullptr;
     int m_ghostReq = 0;
     QString m_ghostPrefix;

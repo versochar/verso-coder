@@ -62,6 +62,7 @@ private:
     QMap<QString, QPair<int, int>> m_cursors;
     QWebSocketServer* m_server = nullptr;
     QList<QWebSocket*> m_socks;
+    QMap<QWebSocket*, QString> m_sockUser; // Stage 49: ani kopuşta hayalet temizliği
     QWebSocket* m_client = nullptr; // peer/guest tarafı tek soket
     QString m_pendingUser;
 };

@@ -128,6 +128,10 @@ void UiSmokeTest::mainWindow_constructsAndExposes() {
             ++namedChips;
     }
     QVERIFY2(namedChips >= 8, "erisilebilir cip bulunamadi");
+    // Stage 49: birlikte çalışma komutları kayıtlı (modal açılmaz, yalnız varlık)
+    QVERIFY(m_win->findChild<QAction*>("collab.host"));
+    QVERIFY(m_win->findChild<QAction*>("collab.join"));
+    QVERIFY(m_win->findChild<QAction*>("collab.leave"));
     QVERIFY(m_win->findChild<QTabWidget*>());      // alt panel sekmeleri
     QVERIFY(m_win->findChild<QStatusBar*>());      // durum çubuğu
     // Sekme sayısı makul

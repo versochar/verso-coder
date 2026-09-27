@@ -83,7 +83,7 @@ cmake --build build -j
 ./build/verso-coder
 ```
 
-## Yol haritası (20 + 508 özellik, 48 stage — tamamlandı)
+## Yol haritası (20 + 515 özellik, 49 stage — tamamlandı)
 
 - **Stage 1 — Editör temeli ✅ (yapıldı):** oturum geri yükleme (açık dosyalar + aktif sekme + imleç), otomatik kaydetme (2 sn) + crash yedekleme, harici değişiklik uyarısı, hızlı açma (Ctrl+P fuzzy), font boyutu + sekme genişliği ayarı, status bar'da Ln/Col + LF/CRLF + UTF-8, otomatik parantez kapatma.
 - **Stage 5 — Editör gücü ✅ (yapıldı):** çoklu imleç (Alt+tık, Ctrl+D, Esc), kod katlama (gutter ▸/▾, Ctrl+Shift+[/], oturumda kalıcı), akıllı girinti + `}` geri-girinti + blok Tab, bracket eşleşme (derinlik renkli) + girinti kılavuzları, aramada ±3 satır önizleme, split editör (2 grup + taşı/böl + grup oturumu), satır işlemleri (taşı/çoğalt/sırala/trim), .editorconfig, büyük-dosya önizleme modu, hunspell yazım denetimi (TR+EN, F7, sağ-tık öneri).
@@ -290,6 +290,10 @@ src/core/ai/ProviderBench.*             → sağlayıcı mikro-karşılaştırma
 src/core/ai/AiRunner.* + AiProfiles.h   → tek AI cephesi (12 görev) + görev profilleri
 src/widgets/ModelArenaDialog.*         → çok sağlayıcı arena (gerçek maliyet, kazananı al)
 src/core/PerfTools.*                  → ikili sez, boyut süzgeci, LRU önbellek, ters indeks
+- **Stage 49 — İşbirliği ✅ (yapıldı):** `CollabSession` vardı ama **hiçbir yere bağlı değildi** (ölü kod); denetimde ayrıca **hayalet imleç** hatası bulundu (ani kopuşta `peerLeft` bildirilmiyor, imleç kalıyordu — soket→kullanıcı eşleşmesi eklendi). Asgari gerçek bağlantı: `collab.host/join/leave` komutları, eş imleçleri renkli seçim olarak, metin eşitleme (yankı korumalı), imleç yayını (500 ms kısık). `test_stage49` (24 kontrol: gerçek localhost WebSocket — iki yönlü metin/imleç, ayrılma, bozuk ileti, rev) + ctest **33/33**. Sürüm 3.1.0.
+
+**İşbirliği güvenlik modeli:** LAN güveni varsayılır — kimlik doğrulama ve şifreleme YOK (dürüst sınır); `ws://` düz metin, davet bağlantısı bilen katılır. İnternet üzerinden kullanmayın.
+
 - **Stage 48 — Dağıtım ✅ (yapıldı):** kurulum kuralları + AppImage betiği vardı (Stage 8); eksikler kapatıldı: `--portable` kipi (ayarlar uygulama yanında, ilk QSettings kullanımından önce), `UpdateChecker` (GitHub releases, haftada 1, kapatılabilir, sessiz başarısızlık; `file://` ile test edilir), Tanı diyaloğuna "Çökmeler" sekmesi (bekleyen dökümler + temizleme; gönderim yok — onamlı yerel günlük). `test_stage48` (32 kontrol) + ctest **32/32**. Sürüm **3.0.0**.
 
 **Kurulum matriksi:** kaynak derleme (cmake) · `cmake --install` (desktop girdisi + simge + metainfo) · AppImage (`packaging/build-appimage.sh`) · taşınabilir (`--portable`). İmza doğrulama yok (dürüst sınır — GitHub releases toplamı elle denetlenir).

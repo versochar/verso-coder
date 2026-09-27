@@ -138,6 +138,7 @@
 #include "core/PromptVars.h"
 #include "core/WorkspaceSymbols.h"
 #include "core/PluginEngine.h"
+#include "core/CollabSession.h"
 #include <QDesktopServices>
 #include "widgets/WelcomeView.h"
 #include "widgets/TodoPanel.h"
@@ -283,6 +284,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     mkAct("file.copyFileName", "Dosya Adını Kopyala", [this]() { runCommand("file.copyFileName"); });
     mkAct("edit.organizeImports", "Importları Düzenle", [this]() { runCommand("edit.organizeImports"); });
     mkAct("git.history", "Dosya Geçmişi", [this]() { runCommand("git.history"); });
+    // Stage 49: birlikte çalışma (yerel ağ, salt-davet; LAN güveni varsayılır)
+    mkAct("collab.host", "Birlikte Çalış: Oturum Barındır", [this]() { collabHost(); });
+    mkAct("collab.join", "Birlikte Çalış: Oturuma Katıl", [this]() { collabJoin(); });
+    mkAct("collab.leave", "Birlikte Çalış: Ayrıl", [this]() { collabLeave(); });
     mkAct("git.tags", "Etiketler", [this]() { runCommand("git.tags"); });
     mkAct("term.find", "Terminalde Bul", [this]() { runCommand("term.find"); });
     mkAct("term.findNext", "Sonraki Eşleşme (terminal)", [this]() { runCommand("term.findNext"); });
@@ -1474,6 +1479,19 @@ CodeEditor* MainWindow::addEditorTab(CodeEditor* e, const QString& title,
     if (group == 1) m_tabs2->setVisible(true);
     removeWelcome(target); // Stage 10: dosya açılınca karşılama ekranı kalkar
     connect(e, &QPlainTextEdit::cursorPositionChanged, this, &MainWindow::updateCursorStatus);
+    // Stage 49: birlikte çalışma yayını (imleç kısık, metin anında)
+    connect(e, &QPlainTextEdit::textChanged, this, &MainWindow::publishCollabEdit);
+    connect(e, &QPlainTextEdit::cursorPositionChanged, this, [this]() {
+        if (!m_collabCursorTimer) {
+            m_collabCursorTimer = new QTimer(this);
+            m_collabCursorTimer->setSingleShot(true);
+            m_collabCursorTimer->setInterval(500);
+            connect(m_collabCursorTimer, &QTimer::timeout, this,
+                    &MainWindow::publishCollabCursor);
+        }
+        if (m_collab && m_collab->isActive() && !m_collabCursorTimer->isActive())
+            m_collabCursorTimer->start();
+    });
     connect(e, &QPlainTextEdit::textChanged, this, &MainWindow::updateCursorStatus);
     connect(e, &QPlainTextEdit::textChanged, this, &MainWindow::updateBreadcrumb);
     connect(e, &QPlainTextEdit::textChanged, this, [this, e]() { pushDocToLsp(e, false); });
@@ -7422,4 +7440,142 @@ int MainWindow::editorTabCount() const {
         for (int i = 0; i < t->count(); ++i)
             if (qobject_cast<CodeEditor*>(t->widget(i))) ++n;
     return n;
+}
+
+// --- Stage 49: birlikte çalışma (asgari bağlantı) ---
+CollabSession* MainWindow::collab() {
+    if (!m_collab) {
+        m_collab = new CollabSession(this);
+        connect(m_collab, &CollabSession::peerJoined, this, [this](const QString& u) {
+            toast(0, QString("%1 katıldı").arg(u));
+            m_status->setText(QString("Birlikte: %1").arg(collabPeers().join(", ")));
+        });
+        connect(m_collab, &CollabSession::peerLeft, this, [this](const QString& u) {
+            toast(0, QString("%1 ayrıldı").arg(u));
+            renderPeerCursors();
+        });
+        connect(m_collab, &CollabSession::cursorsChanged, this,
+                &MainWindow::renderPeerCursors);
+        connect(m_collab, &CollabSession::textMerged, this,
+                &MainWindow::applyCollabText);
+        connect(m_collab, &CollabSession::sessionError, this, [this](const QString& m) {
+            toast(2, m);
+        });
+        connect(m_collab, &CollabSession::activeChanged, this, [this](bool on) {
+            if (!on) renderPeerCursors();
+        });
+    }
+    return m_collab;
+}
+
+QStringList MainWindow::collabPeers() const {
+    if (!m_collab || !m_collab->isActive()) return {};
+    return m_collab->peers();
+}
+
+void MainWindow::collabHost() {
+    CollabSession* c = collab();
+    if (c->isActive()) {
+        toast(1, "Zaten bir oturumdasın (önce ayrıl).");
+        return;
+    }
+    const QString user = QInputDialog::getText(this, "Oturum Barındır", "Adın:");
+    if (user.trimmed().isEmpty()) return;
+    const int port = c->host(user.trimmed());
+    if (port <= 0) {
+        toast(3, "Oturum açılamadı.");
+        return;
+    }
+    CodeEditor* e = currentEditor();
+    if (e) c->setBaseText(e->toPlainText());
+    const QString url = QString("ws://<bu-bilgisayar>:%1").arg(port);
+    QApplication::clipboard()->setText(url);
+    toast(0, QString("Oturum açık (port %1) — adres panoda, davetlilerle paylaş.").arg(port));
+    m_status->setText(QString("Birlikte (evsahibi, port %1)").arg(port));
+}
+
+void MainWindow::collabJoin() {
+    CollabSession* c = collab();
+    if (c->isActive()) {
+        toast(1, "Zaten bir oturumdasın (önce ayrıl).");
+        return;
+    }
+    const QString url =
+        QInputDialog::getText(this, "Oturuma Katıl", "Adres (ws://bilgisayar:port):");
+    if (url.trimmed().isEmpty()) return;
+    const QString user = QInputDialog::getText(this, "Oturuma Katıl", "Adın:");
+    if (user.trimmed().isEmpty()) return;
+    if (!c->join(url.trimmed(), user.trimmed()))
+        toast(3, "Katılınamadı.");
+    else
+        m_status->setText("Birlikte: bağlanıyor...");
+}
+
+void MainWindow::collabLeave() {
+    if (!m_collab || !m_collab->isActive()) return;
+    m_collab->leave();
+    renderPeerCursors();
+    m_status->setText("Birlikte: kapalı");
+    toast(1, "Oturumdan ayrıldın.");
+}
+
+void MainWindow::renderPeerCursors() {
+    CodeEditor* e = currentEditor();
+    if (!e) return;
+    QList<QTextEdit::ExtraSelection> sel = e->extraSelections();
+    // Eski eş imleçlerini temizle (kullanıcı seçimleri korunur)
+    sel.erase(std::remove_if(sel.begin(), sel.end(),
+                             [](const QTextEdit::ExtraSelection& s) {
+                                 return s.format.property(QTextFormat::UserProperty + 41).isValid();
+                             }),
+              sel.end());
+    if (m_collab && m_collab->isActive()) {
+        static const QStringList colors = {"#ff6b6b", "#4ec9b0", "#cca700",
+                                           "#9d7bff", "#4aa8ff"};
+        int i = 0;
+        const auto curs = m_collab->cursors();
+        for (auto it = curs.constBegin(); it != curs.constEnd(); ++it, ++i) {
+            QTextCursor c(e->document());
+            const int block = qBound(0, it.value().first - 1, e->blockCount() - 1);
+            c.movePosition(QTextCursor::NextBlock, QTextCursor::MoveAnchor, block);
+            c.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor,
+                           qMax(0, it.value().second - 1));
+            QTextEdit::ExtraSelection xs;
+            xs.cursor = c;
+            xs.format.setBackground(QColor(colors.at(i % colors.size())));
+            xs.format.setProperty(QTextFormat::UserProperty + 41, it.key());
+            xs.format.setToolTip(it.key());
+            sel << xs;
+        }
+    }
+    e->setExtraSelections(sel);
+}
+
+void MainWindow::applyCollabText(const QString& text, const QString& from) {
+    Q_UNUSED(from);
+    CodeEditor* e = currentEditor();
+    if (!e || m_collabApplying) return;
+    // İmleci korumaya çalışarak uygula
+    QTextCursor c = e->textCursor();
+    const int pos = c.position();
+    m_collabApplying = true;
+    e->setPlainText(text);
+    c = e->textCursor();
+    c.setPosition(qBound(0, pos, e->document()->characterCount() - 1));
+    e->setTextCursor(c);
+    m_collabApplying = false;
+    if (m_collab) m_collab->setBaseText(text);
+}
+
+void MainWindow::publishCollabEdit() {
+    if (!m_collab || !m_collab->isActive() || m_collabApplying) return;
+    if (CodeEditor* e = currentEditor()) m_collab->publishText(e->toPlainText());
+}
+
+void MainWindow::publishCollabCursor() {
+    if (!m_collab || !m_collab->isActive()) return;
+    if (CodeEditor* e = currentEditor()) {
+        const QTextCursor c = e->textCursor();
+        m_collab->publishCursor(c.blockNumber() + 1, c.columnNumber() + 1);
+    }
 }
