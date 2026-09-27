@@ -35,9 +35,20 @@ static int g_pass = 0, g_fail = 0;
 
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
-    // Çalışma dizini build/ varsayımıyla kaynak kökü bulunur
-    QString src = QDir::currentPath() + "/../CMakeLists.txt";
-    if (!QFile::exists(src)) src = QDir::currentPath() + "/CMakeLists.txt";
+    // Kaynak kökü yukarı doğru aranır (build/, makepkg src/ düzeni dahil)
+    QString src;
+    QDir d = QDir::current();
+    for (int i = 0; i < 5 && src.isEmpty(); ++i) {
+        const QString cand = d.filePath("CMakeLists.txt");
+        if (QFile::exists(cand)) {
+            QFile probe(cand);
+            if (probe.open(QIODevice::ReadOnly)) {
+                const QString head = QString::fromUtf8(probe.read(4096));
+                if (head.contains("verso-coder")) src = cand;
+            }
+        }
+        d.cdUp();
+    }
     QFile f(src);
     CHECK2(f.open(QIODevice::ReadOnly), "CMakeLists.txt bulunamadı");
     if (!f.isOpen()) {
