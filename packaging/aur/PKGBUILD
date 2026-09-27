@@ -17,10 +17,6 @@ source=("$pkgname-$pkgver.tar.gz::https://github.com/versochar/verso-coder/archi
 sha256sums=('646ebd58787f5a2e8cb8a4fdd72a0bd8f763eb071b6a54c43dcfe446d3a445dc')
 
 build() {
-  cmake -S "$pkgname-$pkgver" -B build \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr
-build() {
   # Ağaç-içi derleme: test_stage50 kaynak kökü yukarı arar (makepkg düzeni)
   cmake -S "$pkgname-$pkgver" -B "$pkgname-$pkgver/build" \
     -DCMAKE_BUILD_TYPE=Release \
