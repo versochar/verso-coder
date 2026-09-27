@@ -8,20 +8,36 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network Concurrent Svg Qml WebSockets)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(HUNSPELL REQUIRED hunspell)
-pkg_check_modules(LIBSSH2 libssh2)
+if(WIN32)
+    # Windows: pkg-config yok; vcpkg config paketleri kullanılır
+    find_package(unofficial-hunspell CONFIG REQUIRED)
+    set(HUNSPELL_LIBRARIES unofficial::hunspell::hunspell)
+    set(HUNSPELL_INCLUDE_DIRS "")
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(HUNSPELL REQUIRED hunspell)
+    pkg_check_modules(LIBSSH2 libssh2)
+endif()
 # Bazı .pc dosyaları Cflags vermez (örn. brew hunspell) → başlık dizini
 # boş kalır ve derleme düşer. Bilinen yerlere yedek arama.
+# NOT: find_path doğrudan aynı değişkene yazılamaz (boş normal değişken
+# önbellek girdisini gölgeler) — ayrı değişken + set kullanılır.
 if(NOT HUNSPELL_INCLUDE_DIRS)
-    find_path(HUNSPELL_INCLUDE_DIRS hunspell/hunspell.hxx
+    find_path(HUNSPELL_FALLBACK hunspell/hunspell.hxx
         PATHS /opt/homebrew/include /usr/local/include /usr/include
         NO_DEFAULT_PATH)
+    if(HUNSPELL_FALLBACK)
+        set(HUNSPELL_INCLUDE_DIRS ${HUNSPELL_FALLBACK})
+    endif()
 endif()
+message(STATUS "HUNSPELL_INCLUDE_DIRS=${HUNSPELL_INCLUDE_DIRS}")
 if(LIBSSH2_FOUND AND NOT LIBSSH2_INCLUDE_DIRS)
-    find_path(LIBSSH2_INCLUDE_DIRS libssh2.h
+    find_path(LIBSSH2_FALLBACK libssh2.h
         PATHS /opt/homebrew/include /usr/local/include /usr/include
         NO_DEFAULT_PATH)
+    if(LIBSSH2_FALLBACK)
+        set(LIBSSH2_INCLUDE_DIRS ${LIBSSH2_FALLBACK})
+    endif()
 endif()
 if(LIBSSH2_FOUND)
     add_compile_definitions(VERSO_HAVE_LIBSSH2)
