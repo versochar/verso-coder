@@ -11,12 +11,14 @@ struct AgentBudget {
     int maxWrites = 3;    // dosya yazma
     int maxTokens = 0;    // 0 = sınırsız
     qint64 maxMs = 0;     // 0 = sınırsız
+    int maxInjections = 3; // Stage 45: enjeksiyon bulgusu (0 = sınırsız)
 
     // --- tüketim ---
     int steps = 0;
     int toolCalls = 0;
     int writes = 0;
     int tokens = 0;
+    int injections = 0; // Stage 45
     qint64 startedMs = 0;
     qint64 endedMs = 0;
 

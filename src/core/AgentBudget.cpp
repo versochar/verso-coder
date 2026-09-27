@@ -39,6 +39,15 @@ bool AgentBudget::exceeded(qint64 nowMs, QString* reason) const {
         if (reason) *reason = QString("token bütçesi aşıldı (%1/%2)").arg(tokens).arg(maxTokens);
         return true;
     }
+    // Stage 45: enjeksiyon kotası
+    if (maxInjections > 0 && injections >= maxInjections) {
+        if (reason)
+            *reason = QString("enjeksiyon bulgusu kotası aşıldı (%1/%2) — araç çıktıları "
+                              "talimat içeriyor, koşu durduruldu")
+                          .arg(injections)
+                          .arg(maxInjections);
+        return true;
+    }
     if (timeExceeded(nowMs)) {
         if (reason)
             *reason = QString("süre bütçesi aşıldı (%1 sn / %2 sn)")

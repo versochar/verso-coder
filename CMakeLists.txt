@@ -803,6 +803,7 @@ add_executable(ai-probe EXCLUDE_FROM_ALL
     src/core/ai/providers/ProviderCodec.cpp
     src/core/ai/providers/SseParser.cpp
     src/core/AgentTools.cpp
+    src/core/AgentLoop.cpp
     src/core/AgentPolicy.cpp
     src/core/AgentBudget.cpp
     src/core/AgentMemory.cpp
@@ -1232,3 +1233,49 @@ add_executable(test_stage44
 target_include_directories(test_stage44 PRIVATE src)
 target_link_libraries(test_stage44 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml)
 add_test(NAME stage44 COMMAND test_stage44)
+
+add_executable(test_stage45
+    tests/test_stage45.cpp
+    src/core/PluginEngine.cpp
+    src/core/AgentLoop.cpp
+    src/core/PathGuard.cpp
+    src/core/CommandAudit.cpp
+    src/core/LeakWatch.cpp
+    src/core/RagProgress.cpp
+    src/core/SetupAdvisor.cpp
+    src/core/CacheCleaner.cpp
+    src/core/AgentTools.cpp
+    src/core/AgentPolicy.cpp
+    src/core/AgentBudget.cpp
+    src/core/AgentMemory.cpp
+    src/core/AgentReflection.cpp
+    src/core/SkillRegistry.cpp
+    src/core/SkillChain.cpp
+    src/core/AgentRunStore.cpp
+    src/core/PatchQueue.cpp
+    src/core/ProjectHealth.cpp
+    src/core/ModelCapabilities.cpp
+    src/core/TokenStats.cpp
+    src/core/ContextBudget.cpp
+    src/core/ai/LlmProvider.cpp
+    src/core/ai/SecretStore.cpp
+    src/core/ai/AiMessage.cpp
+    src/core/ai/AiToolBridge.cpp
+    src/core/ai/ProviderPrefs.cpp
+    src/core/ai/ProviderPricing.cpp
+    src/core/ai/ProviderHealth.cpp
+    src/core/ai/UsageLedger.cpp
+    src/core/ai/TaskRouter.cpp
+    src/core/ai/ModelPool.cpp
+    src/core/ai/EmbedCache.cpp
+    src/core/ai/EmbedBridge.cpp
+    src/core/ai/AgentLlmAdapter.cpp
+    src/core/ai/ProviderBench.cpp
+    src/core/ai/AiRunner.cpp
+    src/core/ai/LlmClient.cpp
+    src/core/ai/providers/ProviderCodec.cpp
+    src/core/ai/providers/SseParser.cpp
+)
+target_include_directories(test_stage45 PRIVATE src)
+target_link_libraries(test_stage45 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml)
+add_test(NAME stage45 COMMAND test_stage45)

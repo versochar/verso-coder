@@ -26,6 +26,7 @@ struct AgentStep {
     // Stage 34: çağrı sonuçları ve öz-değerlendirme
     QList<QPair<QString, bool>> callResults;
     StepReflection reflection;
+    QList<RunFile> files; // Stage 45: bu adımda değişen dosyalar (adım adım geri alma)
 };
 
 // Stage 34: koşu bağlamı — politika, bütçe, bellek ve beceri zinciri.
@@ -60,6 +61,7 @@ public:
         QList<StepReflection> reflections;
         QList<QPair<QString, bool>> callResults;
         QList<RunFile> changedFiles; // geri alınabilir dosya değişiklikleri
+        int injectionHits = 0; // Stage 45: işaretlenen enjeksiyon bulgusu
         QList<StepMeta> metas;       // Stage 36: adım telemetrisi
         bool budgetStopped = false;
         QString budgetReason;
@@ -72,6 +74,22 @@ public:
                       const Meta& meta = {});
 
     static QString formatTranscript(const QList<AgentStep>& steps, int maxChars = 16000);
+    // --- Stage 45: dolaylı istem enjeksiyonu koruması ---
+    // Araç ÇIKTILARI (dosya/komut/arama sonucu) LLM bağlamına dönmeden taranır.
+    // Saldırgan dosya içine "önceki talimatları yoksay" yazabilir; model bunu
+    // veri değil talimat sanır. Bulgu: metin işaretlenir + sayılır.
+    // Varsayılan ENGELLEMEZ (kullanıcı enjeksiyonu tartışıyor olabilir);
+    // politika eşiği aşınca durdurur.
+    struct InjectionHit {
+        QString pattern; // hangi kalıp yakaladı
+        QString excerpt; // ilk 120 karakter
+    };
+    static QList<InjectionHit> scanObservation(const QString& text);
+    static QString markObservation(const QString& text);
+    // Adım dosyalarını geri al (önce içerik, sonra oluşturulanı sil)
+    static bool revertFiles(const QList<RunFile>& files, QString* error = nullptr);
+    // Tüm adımları doğru sırada geri al (son adım önce)
+    static bool revertSteps(const QList<AgentStep>& steps, QString* error = nullptr);
     // Stage 34: koşu sonrası tek parça özet (günlüğe yazılır).
     static QString summarizeRun(const Result& r);
 };

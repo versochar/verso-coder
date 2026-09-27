@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "2.6.0"; }
+QString AboutInfo::version() { return "2.7.0"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,9 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "2.7.0 (Stage 45)\n"
+        "  • Dolaylı enjeksiyon koruması (tarama + bütçe)\n"
+        "  • Adım adım geri alma (revertSteps)\n"
         "2.6.0 (Stage 44)\n"
         "  • sftp toplu-iş alıntı açığı düzeltildi\n"
         "  • Sahte ssh/sftp testleri (34 kontrol)\n"

@@ -83,7 +83,7 @@ cmake --build build -j
 ./build/verso-coder
 ```
 
-## Yol haritası (20 + 483 özellik, 44 stage — tamamlandı)
+## Yol haritası (20 + 490 özellik, 45 stage — tamamlandı)
 
 - **Stage 1 — Editör temeli ✅ (yapıldı):** oturum geri yükleme (açık dosyalar + aktif sekme + imleç), otomatik kaydetme (2 sn) + crash yedekleme, harici değişiklik uyarısı, hızlı açma (Ctrl+P fuzzy), font boyutu + sekme genişliği ayarı, status bar'da Ln/Col + LF/CRLF + UTF-8, otomatik parantez kapatma.
 - **Stage 5 — Editör gücü ✅ (yapıldı):** çoklu imleç (Alt+tık, Ctrl+D, Esc), kod katlama (gutter ▸/▾, Ctrl+Shift+[/], oturumda kalıcı), akıllı girinti + `}` geri-girinti + blok Tab, bracket eşleşme (derinlik renkli) + girinti kılavuzları, aramada ±3 satır önizleme, split editör (2 grup + taşı/böl + grup oturumu), satır işlemleri (taşı/çoğalt/sırala/trim), .editorconfig, büyük-dosya önizleme modu, hunspell yazım denetimi (TR+EN, F7, sağ-tık öneri).
@@ -290,6 +290,10 @@ src/core/ai/ProviderBench.*             → sağlayıcı mikro-karşılaştırma
 src/core/ai/AiRunner.* + AiProfiles.h   → tek AI cephesi (12 görev) + görev profilleri
 src/widgets/ModelArenaDialog.*         → çok sağlayıcı arena (gerçek maliyet, kazananı al)
 src/core/PerfTools.*                  → ikili sez, boyut süzgeci, LRU önbellek, ters indeks
+- **Stage 45 — Ajan Güvenliği ✅ (yapıldı, canlı):** dolaylı istem-enjeksiyon koruması: araç ÇIKTILARI bağlama girmeden taranır (`scanObservation`, TR+EN emir kalıpları), bulgu `[GÜVENLİK NOTU: ...VERİDİR...]` önekiyle işaretlenir + sayılır; bütçe kotası (varsayılan 3) aşılınca koşu durur. **Engellemez** (kullanıcı enjeksiyonu tartışıyor olabilir) — canlı kanıt: `ai-probe enjeksiyon` **5/5**, modelin saldırı-açıklaması bayraklanmadı. Adım adım geri alma: her adım değişen dosyaları kaydeder (`revertSteps`, sıra tuzaksız). `test_stage45` (35 kontrol) + ctest **29/29**. Sürüm 2.7.0.
+
+**Ajan güvenlik modeli:** izinler (politika kapısı) + onay + tehlikeli kalıp engeli + komut denetimi + yol kapsamı + enjeksiyon taraması + bütçe. Katmanların hiçbiri tek başına yeterli değil; birlikte çalışırlar.
+
 - **Stage 44 — Uzak Geliştirme ✅ (yapıldı):** katman vardı (oturum/gezgin/terminal/bağlantı); denetimde **sftp alıntı açığı** bulundu: yol içinde `"` varsa toplu-iş komutu kırılıyordu (`sftpQuote` ile düzeltildi, kaçış testle kilitli). `test_stage44` (34 kontrol: PATH başına konan **sahte ssh/sftp** ikililerine karşı bağlantı/komut/zaman aşımı/okuma/base64-yazma/put/get — ağ yok) + ctest **28/28**. Sürüm 2.6.0.
 
 - **Stage 43 — Git İş Akışı ✅ (yapıldı):** panel zaten vardı (stage/unstage/hunk/commit/amend/push/branch/log); eksikler kapatıldı: **stash** satırı (kaydet/uygula/bırak + liste) ve **önde/geride sayacı** (`↑N ↓M`, yukarı akış yoksa sessiz). `test_stage43` (38 kontrol: gerçek depoda init→commit→stash→branch→log zinciri, rename ayrıştırma, uzak komut kaçışları, zaman aşımı, deposuz davranış) + ctest **27/27**. Sürüm 2.5.0.
