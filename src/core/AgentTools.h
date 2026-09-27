@@ -107,6 +107,14 @@ public:
     void setQueueReviewThreshold(int n) { m_queueThreshold = qMax(1, n); }
     int queueReviewThreshold() const { return m_queueThreshold; }
     bool queueNeedsReview() const;
+    // Stage 40: oturumluk güvenli komut izni. Yalnız listedeki İLK sözcük
+    // eşleşirse ve komut uyarısızsa onay atlanır (denetim kaydı yine tutulur).
+    // Yazma/ağ komutları listeye alınmaz — setSessionAllowed reddeder.
+    void setSessionAllowed(const QStringList& commands) { m_sessionAllowed = commands; }
+    QStringList sessionAllowed() const { return m_sessionAllowed; }
+    static QStringList defaultSessionAllowed();
+    static bool isSessionAllowable(const QString& command);
+    bool sessionAllows(const QString& command) const;
     ShellMode shellMode() const { return m_shellMode; }
     // Ortam değişkeni temizliği: anahtar/token/AI sırlarını komuta taşıma
     static QProcessEnvironment sanitizedEnvironment();
@@ -118,6 +126,8 @@ public:
     void setAuditEnabled(bool on) { m_auditOn = on; }
     // Onay diyaloğunda gösterilecek yol uyarısı (mutlak yol içeren komutlar)
     static QString pathWarning(const QString& command);
+    // Stage 40: zararsız ikame listesi (ayar + gömülü varsayılan)
+    static QStringList benignSubstitutions();
     QString absoluteInRoot(const QString& rel) const;
 
 private:
@@ -129,6 +139,7 @@ private:
     PathGuard m_guard; // Stage 38: yol güvenliği
     ShellMode m_shellMode = ShellMode::Secure; // Stage 38
     int m_queueThreshold = 5; // Stage 39: toplu onay eşiği
+    QStringList m_sessionAllowed; // Stage 40: oturumluk izin (boş = kapalı)
     bool m_auditOn = true;
     CommandAudit m_audit; // Stage 38: komut denetimi
     bool m_readOnlyWrap = false; // varsa salt-okunur kip kullan

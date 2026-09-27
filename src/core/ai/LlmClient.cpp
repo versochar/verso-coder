@@ -143,6 +143,15 @@ void LlmClient::fetchModels() {
     QNetworkReply* rep = m_net.get(r);
     m_reply = rep;
     m_busy = true;
+    // Stage 40: katalog yoklaması kısa zaman aşımlı (15 sn). Zaman aşımı yoktu:
+    // kara delik ağda m_busy dakikalarca kilitli kalıp tüm istekleri
+    // blokluyordu. Hata yolu örnek modellere düşer (aşağıda).
+    auto* kto = new QTimer(rep);
+    kto->setSingleShot(true);
+    QObject::connect(kto, &QTimer::timeout, rep, [rep]() {
+        if (rep->isRunning()) rep->abort();
+    });
+    kto->start(15000);
     connect(rep, &QNetworkReply::finished, this, [this, rep]() {
         rep->deleteLater();
         m_reply = nullptr;

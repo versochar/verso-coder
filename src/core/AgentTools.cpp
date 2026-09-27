@@ -1,6 +1,7 @@
 #include "AgentTools.h"
 #include "PathGuard.h"
 #include <QElapsedTimer>
+#include <QSettings>
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include "PatchQueue.h"
@@ -344,8 +345,9 @@ QString AgentTools::pathWarning(const QString& command) {
     // $(...) için zararsız izin listesi vardır (derleme komutlarında standart).
     static const QRegularExpression reBacktick(QStringLiteral("`[^`]*`"));
     static const QRegularExpression reDollar(QStringLiteral("\\$\\(([^)]*)\\)"));
-    static const QStringList benignSubst = {"nproc", "pwd", "hostname", "uname", "date",
-                                            "dirname $0", "basename $0"};
+    // Stage 40: izin listesi ayarlardan gelir. static ÖNBELLEK YOK: ilk
+    // çağrıda donsaydı kullanıcının ayar değişikliği hiç okunmazdı.
+    const QStringList benignSubst = benignSubstitutions();
     bool riskySubst = command.contains(reBacktick);
     if (!riskySubst) {
         auto subIt = reDollar.globalMatch(command);
@@ -416,7 +418,7 @@ ToolResult AgentTools::runShell(const QString& command, int timeoutMs, const QSt
         if (m_auditOn) m_audit.record(label, command, false, true, -1, 0, why);
         return r;
     }
-    if (needsApproval) {
+    if (needsApproval && !sessionAllows(command)) {
         ToolCall c;
         c.name = label;
         // Stage 38: onay diyaloğunda mutlak yol uyarısı görünür
@@ -639,4 +641,40 @@ ToolResult AgentTools::execute(const ToolCall& call) {
 
 bool AgentTools::queueNeedsReview() const {
     return m_queue && m_queue->count() > m_queueThreshold;
+}
+
+QStringList AgentTools::benignSubstitutions() {
+    QStringList out = {"nproc", "pwd", "hostname", "uname", "date", "dirname $0", "basename $0"};
+    const QString saved =
+        QSettings().value("agent/benignSubst", QString()).toString().trimmed().toLower();
+    if (!saved.isEmpty()) {
+        out.clear();
+        for (const QString& w : saved.split(',', Qt::SkipEmptyParts)) {
+            const QString t = w.trimmed();
+            if (!t.isEmpty() && !out.contains(t)) out << t;
+        }
+    }
+    return out;
+}
+
+QStringList AgentTools::defaultSessionAllowed() {
+    return {"cmake", "ctest", "make", "ninja", "git", "ls", "cat", "grep", "find", "echo",
+            "pwd", "head", "tail", "wc", "diff", "python3", "pytest", "npm", "node", "go",
+            "cargo", "qmake"};
+}
+
+bool AgentTools::isSessionAllowable(const QString& command) {
+    const QString first = command.trimmed().split(QRegularExpression("\\s+")).value(0);
+    if (first.isEmpty() || !defaultSessionAllowed().contains(first)) return false;
+    // Yazma/ağ komutları asla oturum iznine giremez
+    if (isCommandBlocked(command)) return false;
+    if (!pathWarning(command).isEmpty()) return false;
+    return true;
+}
+
+bool AgentTools::sessionAllows(const QString& command) const {
+    if (m_sessionAllowed.isEmpty()) return false;
+    const QString first = command.trimmed().split(QRegularExpression("\\s+")).value(0);
+    if (!m_sessionAllowed.contains(first)) return false;
+    return isSessionAllowable(command);
 }

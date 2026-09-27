@@ -608,7 +608,13 @@ void AiPanel::configureProvider() {
         m_client.setHost(local ? ProviderPrefs::urlFor(spec.id) : s.ollamaHost);
         refreshModels();
     } else {
-        if (m_models->count() <= 1) m_llm.fetchModels();
+        // Stage 40: tembel katalog (varsayılan açık). Açılışta ağ yoklaması
+        // yapılmaz; örnek modeller gösterilir, gerçek katalog ilk AI
+        // kullanımında veya "yenile" düğmesinde çekilir.
+        const bool lazy = QSettings().value("ai/lazyModels", true).toBool();
+        if (m_models->count() <= 1 && !lazy) m_llm.fetchModels();
+        if (m_models->count() <= 1 && lazy && m_models->findText("yenile") < 0)
+            m_models->setToolTip("Örnek modeller — gerçek katalog ilk kullanımda çekilir");
     }
     // Stage 36: gömme rotası ayrı olabilir (ör. sohbet Ollama, gömme NIM)
     refreshEmbedRoute();
@@ -771,6 +777,11 @@ void AiPanel::beginAnswer(const QString& model, const AppSettings& s, const QStr
                 m_view->append(QString("<i style='color:#cca700'>%1</i>")
                                    .arg(AiRunner::imageBlockReason(spec.id, imgs.size())));
             r.messages << AiMessage::user(prompt);
+        }
+        // Stage 40: tembel katalog — ilk gerçek kullanımda çek
+        if (!m_catalogFetched && spec.kind != ProviderKind::Ollama) {
+            m_catalogFetched = true;
+            if (m_models->count() <= 1) m_llm.fetchModels();
         }
         if (m_stream->isChecked()) {
             m_view->append("<hr><b>AI:</b><br>");
@@ -1172,6 +1183,19 @@ void AiPanel::runAgent(const QString& task) {
                                : AgentTools::ShellMode::Legacy);
         tools.setAuditEnabled(st.value("agent/audit", true).toBool());
         tools.setQueueReviewThreshold(st.value("agent/queueReviewThreshold", 5).toInt());
+        // Stage 40: oturumluk güvenli komut izni (varsayılan kapalı)
+        if (st.value("agent/sessionAllow", false).toBool()) {
+            QStringList list =
+                st.value("agent/sessionAllowList", AgentTools::defaultSessionAllowed().join(','))
+                    .toString()
+                    .split(',', Qt::SkipEmptyParts);
+            for (QString& w : list) w = w.trimmed();
+            list.erase(std::remove_if(list.begin(), list.end(), [](const QString& w) {
+                           return w.isEmpty();
+                       }),
+                       list.end());
+            tools.setSessionAllowed(list);
+        }
         // Mutlak yol içeren komut varsa kullanıcıya önceden haber ver
         const QString warn = AgentTools::pathWarning(QString());
         Q_UNUSED(warn);
@@ -1575,4 +1599,16 @@ void AiPanel::applyLastCodeBlock() {
     d.setTexts(QString("%1 (%2)").arg(path, wholeFile ? "tüm dosya" : "seçim"), oldText, code);
     if (d.exec() == QDialog::Accepted)
         emit applyToEditorRequested(d.newText(), wholeFile, st, ln);
+}
+
+QString AiPanel::ragBadge() const {
+    if (!m_ragProgress) return {};
+    const RagProgress p = m_ragProgress->progress();
+    if (p.root.isEmpty()) return {};
+    if (!p.valid() && !p.waiting) return {};
+    if (p.waiting)
+        return QString("RAG beklemede (%1 sn)").arg(m_ragProgress->waitLeftSec());
+    if (!p.pending.isEmpty())
+        return QString("RAG %1/%2").arg(p.indexed).arg(p.total);
+    return {};
 }

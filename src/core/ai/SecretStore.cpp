@@ -112,7 +112,14 @@ bool SecretStore::set(const QString& providerId, const QString& key) {
     if (providerId.isEmpty()) return false;
     const QString v = key.trimmed();
     if (v.isEmpty()) return remove(providerId);
-    if (m_useKeyring && keyringStore(providerId, v)) return true;
+    if (m_useKeyring && keyringStore(providerId, v)) {
+        // Tek-yazıcı: depoya yazıldıysa dosyadaki eski kopya silinir
+        if (m_keys.contains(providerId)) {
+            m_keys.remove(providerId);
+            saveFile();
+        }
+        return true;
+    }
     m_useKeyring = false; // kasa dosyaya düşer
     loadFile();
     m_keys[providerId] = v;
@@ -169,4 +176,53 @@ bool SecretStore::saveFile() const {
     // 0600: yalnız sahibi okur
     QFile::setPermissions(m_file, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     return true;
+}
+
+QList<SecretStore::Issue> SecretStore::doctor() const {
+    QList<Issue> out;
+    if (m_useKeyring && !m_keys.isEmpty()) {
+        // Dosyada kayıt var ama depo etkin: hangisi güncel?
+        for (auto it = m_keys.constBegin(); it != m_keys.constEnd(); ++it) {
+            QString kv;
+            const bool inKeyring = keyringLookup(it.key(), kv);
+            if (inKeyring && kv != it.value().toString()) {
+                out << Issue{it.key(), QStringLiteral("çift kayıt (depo + dosya farklı)"),
+                             QStringLiteral("Depodaki ve dosyadaki anahtar farklı. "
+                                            "Etkin olan depodaki kullanılır; onarım dosya "
+                                            "kopyasını siler."),
+                             true};
+            } else if (!inKeyring) {
+                out << Issue{it.key(), QStringLiteral("sahipsiz dosya kopyası"),
+                             QStringLiteral("Depoda yok, dosyada var. Depo kilitliyken "
+                                            "yazılmış olabilir; onarım depoya taşır."),
+                             true};
+            }
+        }
+    }
+    if (!m_useKeyring && keyringAvailable()) {
+        out << Issue{QString(), QStringLiteral("depo mevcut ama dosya kullanılıyor"),
+                     QStringLiteral("secret-tool kurulu ama kasa dosyaya düşmüş "
+                                    "(daha önce depo yazılamamış). Anahtarlar dosyada "
+                                    "duruyor; isterseniz ayarladan depoyu yeniden açın."),
+                     false};
+    }
+    return out;
+}
+
+int SecretStore::repair() {
+    int fixed = 0;
+    if (!m_useKeyring) return 0; // dosya kipi tek kaynak, onarılacak şey yok
+    loadFile();
+    for (const QString& id : m_keys.keys()) {
+        const QString fileVal = m_keys.value(id).toString();
+        QString kv;
+        if (keyringLookup(id, kv) || keyringStore(id, fileVal)) {
+            // Depo kazanır (varsa) ya da dosya depoya taşınır;
+            // her iki durumda da dosya kopyası silinir.
+            m_keys.remove(id);
+            ++fixed;
+        }
+    }
+    saveFile();
+    return fixed;
 }

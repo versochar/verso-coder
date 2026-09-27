@@ -55,6 +55,10 @@ private:
     QCheckBox* m_agentShellSecure = nullptr;
     QCheckBox* m_agentAudit = nullptr;
     class QSpinBox* m_agentQueueThreshold = nullptr; // Stage 39
+    class QLineEdit* m_agentBenign = nullptr;     // Stage 40: zararsız ikameler
+    class QSpinBox* m_leakThreshold = nullptr;    // Stage 40: soak eşiği
+    class QCheckBox* m_agentSessionAllow = nullptr; // Stage 40: oturum izni
+    class QLineEdit* m_agentSessionList = nullptr;  // Stage 40: izinli komutlar
     QLabel* m_agentSandboxInfo = nullptr;
     // Stage 35: sağlayıcılar
     void buildProviderTab();

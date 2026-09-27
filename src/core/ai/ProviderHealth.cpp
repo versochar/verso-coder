@@ -204,11 +204,17 @@ QString ProviderHealth::verdict(const ProviderHealthEntry& e) {
 QString ProviderHealth::statusLine(const QString& providerId) const {
     const ProviderHealthEntry e = entry(providerId);
     if (e.calls == 0) return "henüz istek yok";
-    return QString("%1 · %2/%3 hata · ~%4 ms")
-        .arg(verdict(e))
-        .arg(e.errors)
-        .arg(e.calls)
-        .arg(e.avgLatencyMs());
+    QString s = QString("%1 · %2/%3 hata · ~%4 ms")
+                    .arg(verdict(e))
+                    .arg(e.errors)
+                    .arg(e.calls)
+                    .arg(e.avgLatencyMs());
+    // Stage 40: yoğunluk sayacı görünür — devre "durup dururken" açılmasın
+    if (e.tripped())
+        s += QString(" · DEVREDE (%1 sn)").arg(cooldownLeft(providerId));
+    else if (e.busyFails > 0)
+        s += QString(" · yoğunluk %1/%2").arg(e.busyFails).arg(busyThreshold());
+    return s;
 }
 
 void ProviderHealth::recordBusy(const QString& providerId) {

@@ -960,6 +960,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Stage 37: etkin sağlayıcı + sağlık noktası (tıklayınca hızlı değiştir)
     m_chipProvider = makeChip("Etkin AI sağlayıcısı (tıklayınca değiştir)", QString());
     m_chipProvider->setText("AI: —");
+    m_chipRag = makeChip("RAG indeksleme durumu", QString()); // Stage 40
+    m_chipRag->setVisible(false);
     m_chipProvider->setProperty("cmd", QStringLiteral("ai.provider"));
     statusBar()->addWidget(m_status, 1);
     statusBar()->addPermanentWidget(m_chipGit);
@@ -972,6 +974,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     statusBar()->addPermanentWidget(m_chipProfile);
     statusBar()->addPermanentWidget(m_chipAi); // Stage 25
     statusBar()->addPermanentWidget(m_chipProvider); // Stage 37
+    statusBar()->addPermanentWidget(m_chipRag); // Stage 40
     m_chipEol->setText("LF");
     m_chipEnc->setText("UTF-8");
 
@@ -6279,8 +6282,37 @@ void MainWindow::updateProviderChip() {
                                  : QString("%1 token").arg(d.total());
         text += QStringLiteral(" · %1").arg(used);
     }
+    // Stage 40 B10: kota %80'de sararır + günde bir kez bildirilir
+    double ratio = 0.0;
+    if (q.limited()) {
+        const UsageLedger::Day dd = UsageLedger::instance().today(id);
+        ratio = q.maxCalls > 0 ? double(dd.calls) / double(qMax(1, q.maxCalls))
+                               : double(dd.total()) / double(qMax(1, q.maxTokens));
+    }
+    QString chipColor = color;
+    if (ratio >= 0.8 && ratio < 1.0) {
+        chipColor = QStringLiteral("#cca700");
+        text += QStringLiteral(" · kota %1%2 dolu").arg(int(ratio * 100));
+        const QString warnKey =
+            QString("quota/warned_%1_%2").arg(id, QDate::currentDate().toString(Qt::ISODate));
+        if (!QSettings().value(warnKey, false).toBool()) {
+            QSettings().setValue(warnKey, true);
+            toast(1, QString("%1 kotası %2%3 doldu — yakında istekler reddedilir.")
+                           .arg(spec.label)
+                           .arg(int(ratio * 100)));
+        }
+    }
     m_chipProvider->setText(text);
-    m_chipProvider->setStyleSheet(QStringLiteral("color:%1;").arg(color));
+    m_chipProvider->setStyleSheet(QStringLiteral("color:%1;").arg(chipColor));
+    // Stage 40 B9: RAG rozeti (yalnız ilerleme/bekleme varken görünür)
+    if (m_chipRag && m_ai) {
+        const QString rag = m_ai->ragBadge();
+        m_chipRag->setVisible(!rag.isEmpty());
+        if (!rag.isEmpty()) {
+            m_chipRag->setText(rag);
+            m_chipRag->setStyleSheet(QStringLiteral("color:#cca700;"));
+        }
+    }
     m_chipProvider->setToolTip(
         QStringLiteral("%1 · %2\nSağlık: %3\nTıkla: sağlayıcı değiştir")
             .arg(spec.id, ProviderHealth::instance().statusLine(id))

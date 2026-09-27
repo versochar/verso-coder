@@ -515,6 +515,7 @@ private:
     class OllamaClient* m_flowAi = nullptr;  // tek seferlik AI akışları
     class AiRunner* m_aiRunner = nullptr;       // Stage 37: tek AI cephesi
     class QLabel* m_chipProvider = nullptr;    // Stage 37: sağlayıcı + sağlık noktası
+    class QLabel* m_chipRag = nullptr;         // Stage 40: RAG rozeti
     class AiRunner* m_ghostRunner = nullptr;    // Stage 37: hayalet tamamlama koşucusu
     class SecretStore* m_secrets = nullptr;     // Stage 37: anahtar kasası
     QTimer* m_ghostTimer = nullptr;

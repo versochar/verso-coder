@@ -301,6 +301,27 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_agentQueueThreshold = queueSpin;
     m_agentAudit->setToolTip("Ajanın çalıştırdığı her komut, onay/ret ve çıkış koduyla günlüğe yazılır.");
     af->addRow("", m_agentAudit);
+    // Stage 40: zararsız ikame listesi (ayarlara taşındı, gömülü değil)
+    auto* benignEdit = new QLineEdit(ai);
+    benignEdit->setText(QSettings().value("agent/benignSubst", "nproc,pwd,hostname,uname,date").toString());
+    benignEdit->setToolTip(QStringLiteral("Komut ikamesi \ içinde geçerse uyarı ÜRETMEYEN "
+                                            "sözcükler, virgülle ayrılır."));
+    af->addRow("Zararsız ikameler:", benignEdit);
+    m_agentBenign = benignEdit;
+    // Stage 40: oturumluk güvenli komut izni (varsayılan KAPALI)
+    auto* sessAllow = new QCheckBox("Oturumluk güvenli komut izni (onaysız: cmake, ctest…)", ai);
+    sessAllow->setToolTip("Açıkken listedeki güvenli komutlar bu oturumda onay sorulmadan çalışır.\n"
+                          "Yazma/ağ komutları asla listeye giremez; her komut yine denetlenir.");
+    sessAllow->setChecked(QSettings().value("agent/sessionAllow", false).toBool());
+    af->addRow("", sessAllow);
+    m_agentSessionAllow = sessAllow;
+    auto* sessList = new QLineEdit(ai);
+    sessList->setText(QSettings()
+                          .value("agent/sessionAllowList", AgentTools::defaultSessionAllowed().join(','))
+                          .toString());
+    sessList->setToolTip("Virgülle ayrılmış komut listesi. Yalnız ilk sözcük eşleşir.");
+    af->addRow("İzinli komutlar:", sessList);
+    m_agentSessionList = sessList;
     m_agentSandboxInfo = new QLabel(ai);
     m_agentSandboxInfo->setWordWrap(true);
     m_agentSandboxInfo->setStyleSheet("color:#858585;font-size:11px;");
@@ -951,6 +972,16 @@ void SettingsDialog::buildProviderTab() {
         if (m_agentAudit) m_agentAudit->setChecked(stg.value("agent/audit", true).toBool());
         if (m_agentQueueThreshold)
             m_agentQueueThreshold->setValue(stg.value("agent/queueReviewThreshold", 5).toInt());
+        if (m_agentBenign)
+            m_agentBenign->setText(stg.value("agent/benignSubst", "nproc,pwd,hostname,uname,date").toString());
+        if (m_agentSessionAllow)
+            m_agentSessionAllow->setChecked(stg.value("agent/sessionAllow", false).toBool());
+        if (m_agentSessionList)
+            m_agentSessionList->setText(
+                stg.value("agent/sessionAllowList", AgentTools::defaultSessionAllowed().join(','))
+                    .toString());
+        if (m_leakThreshold)
+            m_leakThreshold->setValue(stg.value("diag/leakThresholdKb", 64).toInt());
     }
     // Stage 38: sandbox durumu bilgisi
     if (m_agentSandboxInfo) {
@@ -1263,6 +1294,22 @@ void SettingsDialog::buildUsageTab() {
     m_advisorLabel->setStyleSheet("color:#c9c9c9;font-size:11px;");
     root->addWidget(m_advisorLabel);
 
+    // Stage 40: soak eşiği (neden 64 KB? bkz. tooltip)
+    auto* soakRow = new QHBoxLayout;
+    auto* soakLabel = new QLabel("Bellek artış eşiği (KB/tur):", m_usagePage);
+    auto* soakSpin = new QSpinBox(m_usagePage);
+    soakSpin->setRange(1, 4096);
+    soakSpin->setValue(QSettings().value("diag/leakThresholdKb", 64).toInt());
+    soakSpin->setToolTip(QStringLiteral("Tur başına kabul edilen en büyük RSS artışı. "
+                                            "64 KB varsayılanı: meşru büyümeler birkaç KB, "
+                                            "gerçek sızıntılar yüzlerce KB üretir."));
+    soakRow->addWidget(soakLabel);
+    soakRow->addWidget(soakSpin);
+    soakRow->addStretch(1);
+    root->addLayout(soakRow);
+    m_leakThreshold = soakSpin;
+    const int leakSaved = soakSpin->value();
+    Q_UNUSED(leakSaved);
     m_cacheLabel = new QLabel(m_usagePage);
     m_cacheLabel->setStyleSheet("color:#858585;font-size:11px;");
     root->addWidget(m_cacheLabel);
@@ -1428,6 +1475,15 @@ void SettingsDialog::saveAll() {    AppSettings cur = SettingsManager::instance(
         if (m_agentAudit) stg.setValue("agent/audit", m_agentAudit->isChecked());
         if (m_agentQueueThreshold)
             stg.setValue("agent/queueReviewThreshold", m_agentQueueThreshold->value());
+        if (m_agentBenign)
+            stg.setValue("agent/benignSubst",
+                         m_agentBenign->text().trimmed().toLower());
+        if (m_agentSessionAllow)
+            stg.setValue("agent/sessionAllow", m_agentSessionAllow->isChecked());
+        if (m_agentSessionList)
+            stg.setValue("agent/sessionAllowList", m_agentSessionList->text().trimmed());
+        if (m_leakThreshold)
+            stg.setValue("diag/leakThresholdKb", m_leakThreshold->value());
     }
     s.gpuBackend = m_backend->currentText();
     s.gpuLayers = (s.gpuBackend == "CPU") ? 0 : m_gpu->value();

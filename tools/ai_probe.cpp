@@ -39,6 +39,7 @@
 #include "../src/core/ai/SecretStore.h"
 #include "../src/core/ai/UsageLedger.h"
 #include "../src/core/RagProgress.h"
+#include "../src/core/SetupAdvisor.h"
 #include "../src/core/ai/providers/ProviderCodec.h"
 
 static QTextStream out(stdout);
@@ -533,6 +534,29 @@ int main(int argc, char** argv) {
         const UsageLedger::Day day = UsageLedger::instance().today(spec.id);
         ok("bugünkü kullanım", QString("%1 çağrı · %2 token · ~$%3")
                                      .arg(day.calls).arg(day.total()).arg(day.usd, 0, 'f', 6));
+        out << "\n";
+    }
+
+    // --- 8) doctor: kasa + ağ + kota + sigorta tek raporu ---
+    if (wants("doctor")) {
+        out << "[doctor — ortam sağlık raporu]\n";
+        const QList<SecretStore::Issue> issues = store.doctor();
+        if (issues.isEmpty()) {
+            ok("kasa tutarlı", store.usesKeyring() ? "depo kipi" : "dosya kipi");
+        } else {
+            for (const SecretStore::Issue& i : issues)
+                out << "  ! " << i.issue << " — " << i.detail << "\n";
+            check(false, "kasa tutarlı", QString("%1 bulgu").arg(issues.size()));
+        }
+        const bool net = SetupAdvisor::networkUp(3000);
+        check(net, "ağ yoklaması (3 sn)", net ? "çevrimiçi" : "çevrimdışı");
+        QString why;
+        const bool over = UsageLedger::instance().quotaExceeded(spec.id, why);
+        check(!over, "kota dolmamış", over ? why : "kota uygun");
+        check(!ProviderHealth::instance().isTripped(spec.id), "sağlayıcı devrede değil",
+              ProviderHealth::instance().statusLine(spec.id));
+        const auto actions = SetupAdvisor::analyze(net);
+        ok("eylem listesi", SetupAdvisor::summary(actions));
         out << "\n";
     }
 

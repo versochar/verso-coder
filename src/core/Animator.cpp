@@ -1,4 +1,5 @@
 #include "Animator.h"
+#include <QDebug>
 #include <QGraphicsOpacityEffect>
 #include <QPointer>
 #include <QPropertyAnimation>
@@ -45,7 +46,10 @@ void Animator::runProperty(QWidget* w, const QByteArray& prop, const QVariant& f
             return;
         }
     } else if (w->metaObject()->indexOfProperty(prop.constData()) < 0) {
-        // Var olmayan özellik: sessizce atla, Qt uyarısı üretme
+        // Stage 40: TAM sessizlik yok — qDebug testte görünür, kullanıcıda
+        // görünmez. Gerçek bir yazım hatası da böyle yakalanır.
+        qDebug("Animator: '%s' özelliği %s sınıfında yok, atlandı",
+               prop.constData(), w->metaObject()->className());
         if (finished) finished();
         return;
     }

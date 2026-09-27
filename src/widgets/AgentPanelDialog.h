@@ -43,4 +43,5 @@ private:
     class QTextBrowser* m_auditView = nullptr;
     class QLineEdit* m_auditSearch = nullptr;
     class QLabel* m_auditSummary = nullptr;
+    class QFileSystemWatcher* m_auditWatcher = nullptr; // Stage 40: canlı yenileme
 };

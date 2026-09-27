@@ -1,4 +1,7 @@
 #include "AgentPanelDialog.h"
+#include <QFileSystemWatcher>
+#include <QFileInfo>
+#include <QFile>
 #include "../core/CommandAudit.h"
 #include <QApplication>
 #include <QClipboard>
@@ -154,6 +157,22 @@ AgentPanelDialog::AgentPanelDialog(const QString& projectRoot, QWidget* parent)
     connect(m_auditSearch, &QLineEdit::textChanged, this,
             [this](const QString&) { refreshAudit(); });
     m_tabs->addTab(au, "Son Komutlar");
+    // Stage 40: ajan çalışırken sekme canlı yenilenir (dosya izleyici)
+    m_auditWatcher = new QFileSystemWatcher(this);
+    const QString auditFile = CommandAudit().filePath();
+    if (!auditFile.isEmpty()) {
+        QDir().mkpath(QFileInfo(auditFile).absolutePath());
+        if (!QFile::exists(auditFile)) {
+            QFile f(auditFile);
+            if (f.open(QIODevice::WriteOnly)) {
+                f.write("[]");
+                f.close();
+            }
+        }
+        m_auditWatcher->addPath(auditFile);
+        connect(m_auditWatcher, &QFileSystemWatcher::fileChanged, this,
+                [this]() { refreshAudit(); });
+    }
     refreshAudit();
 
     auto* lay = new QVBoxLayout(this);

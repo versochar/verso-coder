@@ -1,7 +1,7 @@
 #pragma once
 #include <QJsonObject>
 #include <QString>
-#include <QStringList>
+#include <QList>\n#include <QStringList>
 
 // Stage 35: API anahtarı kasası.
 // Öncelik sırası: OS anahtar deposu (libsecret/secret-tool) → 0600 dosya →
@@ -36,6 +36,19 @@ public:
     // Kasa dosyasını oku/yaz (anahtar deposu kullanılmıyorsa)
     bool loadFile();
     bool saveFile() const;
+
+    // --- Stage 40: tutarlılık denetimi ---
+    // Tek-yazıcı kuralı: set() etkin arka uca yazar ve diğerindeki eski
+    // kopyayı siler. doctor() kalan tutarsızlıkları listeler.
+    struct Issue {
+        QString providerId;
+        QString issue;   // kısa başlık
+        QString detail;  // açıklama + öneri
+        bool fixable = true;
+    };
+    QList<Issue> doctor() const;
+    // doctor() bulgularını tek hamlede düzelt (etkin arka uç kazanır)
+    int repair();
 
 private:
     QString filePathFor(const QString& providerId) const;
