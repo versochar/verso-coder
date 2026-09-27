@@ -83,7 +83,7 @@ cmake --build build -j
 ./build/verso-coder
 ```
 
-## Yol haritası (20 + 496 özellik, 46 stage — tamamlandı)
+## Yol haritası (20 + 501 özellik, 47 stage — tamamlandı)
 
 - **Stage 1 — Editör temeli ✅ (yapıldı):** oturum geri yükleme (açık dosyalar + aktif sekme + imleç), otomatik kaydetme (2 sn) + crash yedekleme, harici değişiklik uyarısı, hızlı açma (Ctrl+P fuzzy), font boyutu + sekme genişliği ayarı, status bar'da Ln/Col + LF/CRLF + UTF-8, otomatik parantez kapatma.
 - **Stage 5 — Editör gücü ✅ (yapıldı):** çoklu imleç (Alt+tık, Ctrl+D, Esc), kod katlama (gutter ▸/▾, Ctrl+Shift+[/], oturumda kalıcı), akıllı girinti + `}` geri-girinti + blok Tab, bracket eşleşme (derinlik renkli) + girinti kılavuzları, aramada ±3 satır önizleme, split editör (2 grup + taşı/böl + grup oturumu), satır işlemleri (taşı/çoğalt/sırala/trim), .editorconfig, büyük-dosya önizleme modu, hunspell yazım denetimi (TR+EN, F7, sağ-tık öneri).
@@ -290,6 +290,10 @@ src/core/ai/ProviderBench.*             → sağlayıcı mikro-karşılaştırma
 src/core/ai/AiRunner.* + AiProfiles.h   → tek AI cephesi (12 görev) + görev profilleri
 src/widgets/ModelArenaDialog.*         → çok sağlayıcı arena (gerçek maliyet, kazananı al)
 src/core/PerfTools.*                  → ikili sez, boyut süzgeci, LRU önbellek, ters indeks
+- **Stage 47 — Erişilebilirlik ✅ (yapıldı):** tıklanabilir durum çipleri + düzenleyici sekmeleri + `CodeEditor` ekran okuyucu adları aldı (dosya adı açılışta güncellenir). `test_stage47` (29 kontrol: WCAG matematiği, **high-contrast.json 6 renk çifti kilidi** — hepsi ≥4.5, TR+EN çeviri kapsama eksiksiz, 3 renk körü modu) + ctest **31/31**. Sürüm 2.9.0.
+
+**Erişilebilirlik beyanı:** WCAG AA (4.5 normal / 3.0 büyük metin) yüksek kontrast temasında testle kilitli; deuteranopia/protanopia/tritanopia desteklenir. Gerçek ekran okuyucu ile uçtan uca test yapılmadı (kullanıcı testi notu Stage 50'ye taşındı); sağdan-sola diller kapsam dışı.
+
 - **Stage 46 — Performans ✅ (yapıldı):** tembel sekme geri yükleme — 50 sekmelik oturum açılışı tek dosya maliyetine indi (yalnız etkin sekme açılır, diğerleri ilk tıklamada gerçeklenir; imleç/katlama/oturum turu korunur). `Ollama otomatik başlatma` ayarı (testler gerçek sunucu başlatmıyor). `test_stage46` (13 kontrol: 100k satır açılışı ölçüldü **6,4 sn**, 5× aç/kapa **414 KB/tur**, gömme önbelleği sınırı) + duman testine tembel sekme turu + ctest **30/30**. Sürüm 2.8.0.
 
 **Performans bütçeleri (kilitli):** 100k satır açılışı <15 sn · aç/kapa tur başına <2 MB · ayar döngüsü tur başına <64 KB (yapılandırılabilir) · boş proje RSS hedefi <150 MB. Sosyal gerçek: 6,4 sn'lik açılışın çoğu sözdizimi vurgulamada; büyük dosya kipi (2 MB üstü renksiz, 8 MB üstü salt-okunur) bunu dengeler.

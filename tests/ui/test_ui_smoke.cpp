@@ -121,6 +121,13 @@ void UiSmokeTest::mainWindow_constructsAndExposes() {
     QVERIFY(m_win);
     // Temel parçalar gerçekten kuruldu mu?
     QVERIFY(m_win->findChild<QTabWidget*>());
+    // Stage 47: tıklanabilir çipler + sekmeler ekran okuyucuya adlandırılmış
+    int namedChips = 0;
+    for (auto* l : m_win->findChildren<QLabel*>()) {
+        if (l->objectName() == QString("chip") && !l->accessibleName().isEmpty())
+            ++namedChips;
+    }
+    QVERIFY2(namedChips >= 8, "erisilebilir cip bulunamadi");
     QVERIFY(m_win->findChild<QTabWidget*>());      // alt panel sekmeleri
     QVERIFY(m_win->findChild<QStatusBar*>());      // durum çubuğu
     // Sekme sayısı makul

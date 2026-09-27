@@ -1348,3 +1348,15 @@ target_include_directories(test_stage46 PRIVATE src)
 target_link_libraries(test_stage46 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml Qt6::Test ${HUNSPELL_LIBRARIES})
 target_include_directories(test_stage46 PRIVATE ${HUNSPELL_INCLUDE_DIRS})
 add_test(NAME stage46 COMMAND test_stage46)
+
+add_executable(test_stage47
+    tests/test_stage47.cpp
+    src/core/A11yCheck.cpp
+    src/core/ColorBlind.cpp
+    src/core/LanguageManager.cpp
+    src/core/ThemeTokens.cpp
+)
+target_include_directories(test_stage47 PRIVATE src)
+target_link_libraries(test_stage47 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml Qt6::Test ${HUNSPELL_LIBRARIES})
+target_include_directories(test_stage47 PRIVATE ${HUNSPELL_INCLUDE_DIRS})
+add_test(NAME stage47 COMMAND test_stage47)

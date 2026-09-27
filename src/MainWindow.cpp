@@ -1159,6 +1159,8 @@ void MainWindow::closeEvent(QCloseEvent* e) {
 QTabWidget* MainWindow::makeTabWidget(int group) {
     Q_UNUSED(group);
     auto* t = new QTabWidget(this);
+    // Stage 47: ekran okuyucu sekme kümelerini ayırt eder
+    t->setAccessibleName(group == 0 ? "Düzenleyici sekmeleri" : "İkinci grup sekmeleri");
     t->setTabsClosable(true);
     t->setMovable(true);
     t->setDocumentMode(true);
@@ -3218,6 +3220,10 @@ QLabel* MainWindow::makeChip(const QString& toolTip, const QString& cmd) {
     l->setObjectName("chip");
     l->setToolTip(toolTip);
     l->setProperty("cmd", cmd);
+    // Stage 47: tıklanabilir çipler ekran okuyucuya adını söyler
+    l->setAccessibleName(toolTip);
+    l->setAccessibleDescription(cmd.isEmpty() ? QString("durum göstergesi")
+                                              : QString("etkinleştir: ") + cmd);
     l->installEventFilter(this);
     return l;
 }

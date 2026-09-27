@@ -104,6 +104,9 @@ int Gutter::lineAt(int y) const {
 
 // --- Editör ---
 CodeEditor::CodeEditor(QWidget* parent) : QPlainTextEdit(parent) {
+    // Stage 47: ekran okuyucu adı (dosya yolu açılışta güncellenir)
+    setAccessibleName("Kod düzenleyici");
+    setAccessibleDescription("satır numaralı kod metni");
     QFont f("JetBrains Mono, Consolas, monospace", 11);
     setFont(f);
     setTabStopDistance(4 * fontMetrics().horizontalAdvance(' '));
@@ -170,6 +173,8 @@ bool CodeEditor::loadFile(const QString& path) {
     setReadOnly(false);
     m_large = fi.size() > (qint64)qMax(1, cfg.largeFileMb) * 1024 * 1024;
     m_highlighter->setDocument(m_large ? nullptr : document());
+    // Stage 47: ekran okuyucu dosya adını söyler
+    setAccessibleName(QString("Kod düzenleyici: ") + fi.fileName());
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) return false;
     QByteArray raw = f.readAll();
