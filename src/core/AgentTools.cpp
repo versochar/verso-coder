@@ -1,6 +1,7 @@
 #include "AgentTools.h"
 #include "PathGuard.h"
 #include <QElapsedTimer>
+#include <QJsonDocument>
 #include <QSettings>
 #include <QRegularExpression>
 #include <QStandardPaths>

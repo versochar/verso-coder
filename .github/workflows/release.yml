@@ -98,7 +98,9 @@ jobs:
           version: "6.7.2"
           modules: "qtwebsockets"
       - name: Bağımlılıklar
-        run: brew install hunspell
+        run: |
+          brew install hunspell pkg-config
+          echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - name: Derle
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
