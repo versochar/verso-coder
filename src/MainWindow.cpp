@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include <QJsonObject>
 #include "core/AboutInfo.h"
 #include "core/BackupManager.h"
 #include "core/Commands.h"

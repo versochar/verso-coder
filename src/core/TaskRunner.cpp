@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonValue>
 
 TaskRunner::TaskRunner(QObject* parent) : QObject(parent) {
     connect(&m_proc, &QProcess::readyReadStandardOutput, this, [this]() {

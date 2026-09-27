@@ -11,6 +11,18 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Network Concurrent Svg Qml WebSocke
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(HUNSPELL REQUIRED hunspell)
 pkg_check_modules(LIBSSH2 libssh2)
+# Bazı .pc dosyaları Cflags vermez (örn. brew hunspell) → başlık dizini
+# boş kalır ve derleme düşer. Bilinen yerlere yedek arama.
+if(NOT HUNSPELL_INCLUDE_DIRS)
+    find_path(HUNSPELL_INCLUDE_DIRS hunspell/hunspell.hxx
+        PATHS /opt/homebrew/include /usr/local/include /usr/include
+        NO_DEFAULT_PATH)
+endif()
+if(LIBSSH2_FOUND AND NOT LIBSSH2_INCLUDE_DIRS)
+    find_path(LIBSSH2_INCLUDE_DIRS libssh2.h
+        PATHS /opt/homebrew/include /usr/local/include /usr/include
+        NO_DEFAULT_PATH)
+endif()
 if(LIBSSH2_FOUND)
     add_compile_definitions(VERSO_HAVE_LIBSSH2)
 endif()

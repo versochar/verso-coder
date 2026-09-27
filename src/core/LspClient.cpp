@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QUrl>
+#include <QJsonValue>
 
 LspClient::LspClient(QObject* parent) : QObject(parent) {
     connect(&m_proc, &QProcess::readyReadStandardOutput, this, &LspClient::onReadyRead);

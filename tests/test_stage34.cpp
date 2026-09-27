@@ -8,6 +8,7 @@
 #include <cstdio>
 
 #include "../src/core/AgentBudget.h"
+#include <QJsonObject>
 #include "../src/core/AgentLoop.h"
 #include "../src/core/AgentMemory.h"
 #include "../src/core/AgentPolicy.h"

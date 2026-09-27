@@ -18,6 +18,7 @@
 #include <QTextBrowser>
 
 #include "../src/core/AgentTools.h"
+#include <QJsonObject>
 #include "../src/core/CommandAudit.h"
 #include "../src/core/PathGuard.h"
 #include "../src/core/ai/ProviderPrefs.h"

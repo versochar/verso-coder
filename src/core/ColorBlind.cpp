@@ -1,4 +1,5 @@
 #include "ColorBlind.h"
+#include <QJsonValue>
 #include "ThemeTokens.h"
 #include <QJsonDocument>
 #include <QJsonObject>

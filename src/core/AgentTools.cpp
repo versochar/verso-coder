@@ -1,4 +1,5 @@
 #include "AgentTools.h"
+#include <QJsonValue>
 #include "PathGuard.h"
 #include <QElapsedTimer>
 #include <QJsonDocument>

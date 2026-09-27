@@ -1,4 +1,5 @@
 #include "AgentLlmAdapter.h"
+#include <QJsonObject>
 #include "ProviderHealth.h"
 #include "ProviderPrefs.h"
 #include "ProviderPricing.h"

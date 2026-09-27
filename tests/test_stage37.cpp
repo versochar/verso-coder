@@ -15,6 +15,8 @@
 #include <cstdio>
 
 #include "../src/core/AgentTools.h"
+#include <QJsonDocument>
+#include <QJsonArray>
 #include "../src/core/ConversationSummarizer.h"
 #include "../src/core/GhostCompletion.h"
 #include "../src/core/ModelCapabilities.h"

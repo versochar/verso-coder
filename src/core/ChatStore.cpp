@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
+#include <QJsonValue>
 #include <algorithm>
 
 ChatStore::ChatStore(const QString& dir) : m_dir(dir) {

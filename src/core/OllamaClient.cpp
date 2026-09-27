@@ -10,6 +10,7 @@
 #include <QStandardPaths>
 #include <QThread>
 #include <QTimer>
+#include <QJsonValue>
 
 OllamaClient::OllamaClient(QObject* parent) : QObject(parent) {}
 

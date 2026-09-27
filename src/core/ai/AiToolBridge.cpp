@@ -1,4 +1,5 @@
 #include "AiToolBridge.h"
+#include <QJsonObject>
 #include "../AgentTools.h"
 
 QList<AiToolDef> AiToolBridge::fromOpenAiSchemas(const QJsonArray& schemas) {

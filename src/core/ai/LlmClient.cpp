@@ -1,4 +1,5 @@
 #include "LlmClient.h"
+#include <QJsonObject>
 #include "ModelPool.h"
 #include "ProviderHealth.h"
 #include "ProviderPrefs.h"

@@ -5,6 +5,7 @@
 #include <QUrl>
 #include <QtWebSockets/QWebSocket>
 #include <QtWebSockets/QWebSocketServer>
+#include <QJsonObject>
 
 CollabSession::CollabSession(QObject* parent) : QObject(parent) {}
 

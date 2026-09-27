@@ -1,4 +1,5 @@
 #include "AiPanel.h"
+#include <QJsonValue>
 #include "../core/EmbeddingClient.h"
 #include "../core/TokenStats.h"
 #include "../core/ai/AiRunner.h"
