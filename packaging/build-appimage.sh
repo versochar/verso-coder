@@ -20,7 +20,7 @@ mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" \
 install -m755 "$ROOT/$BUILD_DIR/verso-coder" "$APPDIR/usr/bin/"
 cp -r "$ROOT/resources" "$APPDIR/usr/bin/resources" 2>/dev/null || true
 cp "$ROOT/packaging/verso-coder.desktop" "$APPDIR/usr/share/applications/"
-cp "$ROOT/packaging/verso-coder.appdata.xml" "$APPDIR/usr/share/metainfo/"
+cp "$ROOT/packaging/io.verso.Coder.appdata.xml" "$APPDIR/usr/share/metainfo/"
 cp "$ROOT/packaging/verso-coder.desktop" "$APPDIR/verso-coder.desktop"
 # ikon: önce PNG, yoksa SVG'den üret (rsvg-convert / ImageMagick), o da yoksa uyar
 if [ -f "$ROOT/resources/icon.png" ]; then
@@ -45,6 +45,12 @@ HERE="$(dirname "$(readlink -f "$0")")"
 exec "$HERE/usr/bin/verso-coder" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
+# qt.conf: eklenti/çeviri yolları (linuxdeploy atlarsa elle)
+printf '[Paths]\nPlugins = ../plugins\nTranslations = ../translations\n' > "$APPDIR/usr/bin/qt.conf"
+# linuxdeploy-plugin-qt yalnız libqxcb dağıtır; headless/kiosk için gerekli
+for plat in libqoffscreen.so libqminimal.so libqlinuxfb.so libqeglfs.so; do
+  [ -f "/usr/lib/qt6/plugins/platforms/$plat" ] && cp -n "/usr/lib/qt6/plugins/platforms/$plat" "$APPDIR/usr/plugins/platforms/" || true
+done
 
 echo "==> appimagetool aranıyor"
 if command -v appimagetool >/dev/null 2>&1; then

@@ -5,3 +5,7 @@
 *.user
 *~
 .DS_Store
+# Sürüm dosyaları (GitHub Release'e yüklenir, repoya girmez)
+*.AppImage
+*.dmg
+*-windows-*.zip

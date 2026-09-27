@@ -1,0 +1,116 @@
+# Verso Coder — 3 platform sürüm derlemesi.
+# v* etiketi push'lanınca çalışır, dosyaları GitHub Release'e yükler.
+# Linux: AppImage · Windows: zip (windeployqt) · macOS: dmg (macdeployqt).
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Qt kur
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.7.2"
+          modules: "qtwebsockets"
+      - name: Bağımlılıklar
+        run: sudo apt-get update -q && sudo apt-get install -qy libhunspell-dev libgl1-mesa-dev rsvg-convert
+      - name: Derle
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
+      - name: AppDir hazırla
+        run: |
+          APPDIR="$PWD/build/AppDir"
+          rm -rf "$APPDIR"
+          mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/metainfo"
+          install -m755 build/verso-coder "$APPDIR/usr/bin/"
+          cp -r resources "$APPDIR/usr/bin/resources"
+          cp packaging/verso-coder.desktop "$APPDIR/usr/share/applications/"
+          cp packaging/verso-coder.desktop "$APPDIR/verso-coder.desktop"
+          cp packaging/verso-coder.appdata.xml "$APPDIR/usr/share/metainfo/"
+          rsvg-convert -w 256 -h 256 resources/icon.svg -o "$APPDIR/verso-coder.png"
+          cat > "$APPDIR/AppRun" <<'EOF'
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/verso-coder" "$@"
+          EOF
+          chmod +x "$APPDIR/AppRun"
+      - name: linuxdeploy
+        run: |
+          curl -sL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -sL -o linuxdeploy-plugin-qt https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy linuxdeploy-plugin-qt
+          ./linuxdeploy --appimage-extract-and-run --appdir "$PWD/build/AppDir" --plugin qt --output appimage
+      - name: Yükle
+        uses: softprops/action-gh-release@v2
+        with:
+          files: VersoCoder-*.AppImage
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Qt kur
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.7.2"
+          arch: "win64_msvc2019_64"
+          modules: "qtwebsockets"
+      - name: MSVC ortamı
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Bağımlılıklar (hunspell)
+        run: vcpkg install hunspell:x64-windows --clean-after-build
+        env:
+          VCPKG_ROOT: C:\vcpkg
+      - name: Derle
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
+          cmake --build build --config Release -j 4
+      - name: Paketle
+        run: |
+          mkdir dist
+          copy build\Release\verso-coder.exe dist\
+          xcopy resources dist\resources\ /E /I /Q
+          windeployqt --release --no-translations --no-opengl-sw dist\verso-coder.exe
+          Compress-Archive -Path dist\* -DestinationPath VersoCoder-${{ github.ref_name }}-windows-x86_64.zip
+        shell: pwsh
+      - name: Yükle
+        uses: softprops/action-gh-release@v2
+        with:
+          files: VersoCoder-*.zip
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Qt kur
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.7.2"
+          modules: "qtwebsockets"
+      - name: Bağımlılıklar
+        run: brew install hunspell
+      - name: Derle
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          cmake --build build -j"$(sysctl -n hw.ncpu)"
+      - name: Paketle
+        run: |
+          mkdir -p dist/VersoCoder.app/Contents/MacOS
+          cp build/verso-coder dist/VersoCoder.app/Contents/MacOS/
+          cp -r resources dist/VersoCoder.app/Contents/MacOS/resources
+          macdeployqt dist/VersoCoder.app -dmg
+          mv dist/VersoCoder.dmg "VersoCoder-${{ github.ref_name }}-macos-universal.dmg"
+      - name: Yükle
+        uses: softprops/action-gh-release@v2
+        with:
+          files: VersoCoder-*.dmg
