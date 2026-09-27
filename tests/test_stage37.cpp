@@ -22,6 +22,7 @@
 #include "../src/core/ai/AiProfiles.h"
 #include "../src/core/ai/AiRunner.h"
 #include "../src/core/ai/LlmClient.h"
+#include "../src/core/ai/ModelPool.h"
 #include "../src/core/ai/LlmProvider.h"
 #include "../src/core/ai/ProviderHealth.h"
 #include "../src/core/ai/ProviderPrefs.h"
@@ -327,6 +328,138 @@ static void testSummary() {
 
 static ProviderSpec spec37() { return ProviderRegistry::byId("unorouter"); }
 
+// --- 13: model havuzu — yoğun modele aynı sağlayıcıda yedek ---
+static void testModelPool() {
+    ModelPool::clear();
+    const ProviderSpec uno = ProviderRegistry::byId("unorouter");
+    // Katalog yoksa yedek üretilemez (sessizce geçmez)
+    CHECK(!ModelPool::hasCatalog("unorouter"));
+    CHECK(ModelPool::nextCandidate(uno, "x", QStringList()).isEmpty());
+
+    ModelPool::setCatalog("unorouter", {"gpt-4o:free", "gpt-oss-120b:free", "gpt-4o",
+                                        "text-embedding-3-small", "glm-4.7-flash:free",
+                                        "deepseek-v4.1-flash:free"});
+    CHECK(ModelPool::hasCatalog("unorouter"));
+    CHECK(ModelPool::catalog("unorouter").size() == 6);
+
+    // Fiyat sınıfı
+    CHECK(ModelPool::priceClassOf(uno, "gpt-4o:free") == ModelPool::PriceClass::Free);
+    CHECK(ModelPool::priceClassOf(uno, "gpt-4o") == ModelPool::PriceClass::Paid);
+    CHECK(ModelPool::priceClassOf(uno, "bilinmeyen-xyz") == ModelPool::PriceClass::Unknown);
+    CHECK(ModelPool::priceClassOf(ProviderRegistry::byId("ollama"), "qwen") ==
+          ModelPool::PriceClass::Free);
+    CHECK(ModelPool::samePriceClass(uno, "a:free", "b:free"));
+    CHECK(!ModelPool::samePriceClass(uno, "a:free", "b"));
+    CHECK(ModelPool::plausibleFreeModel("x:free"));
+    CHECK(!ModelPool::plausibleFreeModel("x"));
+
+    // Sıralama: tercih edilen ilk, sonra AYNI fiyat sınıfı
+    const QList<QString> c = ModelPool::candidates(uno, "gpt-4o:free", 3, false);
+    CHECK(c.size() == 3);
+    CHECK(c.first() == "gpt-4o:free");
+    for (const QString& m : c) {
+        CHECK(m.endsWith(":free"));                 // ücretliye geçilmedi
+        CHECK(m != "text-embedding-3-small");       // gömme modeli sohbet yedeği değil
+    }
+    CHECK(c.contains("gpt-oss-120b:free"));
+    // Ücretli tercihli model → aynı sınıftan (ücretli) adaylar
+    const QList<QString> paid = ModelPool::candidates(uno, "gpt-4o", 3, false);
+    CHECK(paid.first() == "gpt-4o");
+    for (const QString& m : paid) CHECK(!m.endsWith(":free"));
+    // İzin verilirse ücretli sınıfa geçilebilir
+    const QList<QString> mixed = ModelPool::candidates(uno, "gpt-4o:free", 6, true);
+    CHECK(mixed.size() > 3);
+    // nextCandidate: denenenler atlanır
+    QStringList tried{"gpt-4o:free"};
+    QString n1 = ModelPool::nextCandidate(uno, "gpt-4o:free", tried, false);
+    CHECK(!n1.isEmpty() && n1 != "gpt-4o:free");
+    tried << n1;
+    const QString n2 = ModelPool::nextCandidate(uno, "gpt-4o:free", tried, false);
+    CHECK(!n2.isEmpty() && n2 != n1);
+    // Hepsi denendi → boş
+    QStringList all = ModelPool::candidates(uno, "gpt-4o:free", 99, false);
+    CHECK(ModelPool::nextCandidate(uno, "gpt-4o:free", all, false).isEmpty());
+    // Gömme amacı: yalnız gömme modelleri
+    const QList<QString> emb = ModelPool::candidates(uno, "text-embedding-3-small", 3, false,
+                                                    ModelPool::Need::Embed);
+    for (const QString& m : emb) CHECK(ModelCapabilities::isEmbeddingModel(m));
+    // Görsel amacı: gömme modelleri elenir
+    const QList<QString> vis = ModelPool::candidates(uno, "gpt-4o:free", 3, false,
+                                                    ModelPool::Need::Vision);
+    for (const QString& m : vis) CHECK(!ModelCapabilities::isEmbeddingModel(m));
+    // Bilinen model kontrolü
+    CHECK(ModelPool::isKnownModel("unorouter", "gpt-4o"));
+    CHECK(ModelPool::isKnownModel("unorouter", "vendor/gpt-4o"));
+    CHECK(!ModelPool::isKnownModel("unorouter", "yok"));
+    CHECK(!ModelPool::isKnownModel("bilinmeyen-saglayici", "gpt-4o"));
+    // Sohbet olmayan modeller yedeğe aday OLMAZ (canlı doğrulama bulgusu:
+    // "absolutereality:free" gibi görsel üretim modelleri sıraya giriyordu)
+    CHECK(!ModelPool::isChatCapable("absolutereality:free"));
+    CHECK(!ModelPool::isChatCapable("cyberrealistic-pony"));
+    CHECK(!ModelPool::isChatCapable("dreamshaper:free"));
+    CHECK(!ModelPool::isChatCapable("whisper-large-v3"));
+    CHECK(!ModelPool::isChatCapable("tts-1"));
+    CHECK(!ModelPool::isChatCapable("text-embedding-3-small"));
+    CHECK(!ModelPool::isChatCapable("omni-moderation-latest"));
+    CHECK(ModelPool::isChatCapable("llava:7b"));        // görsel-dil sohbet modeli
+    CHECK(!ModelPool::isChatCapable("sdxl-turbo"));
+    CHECK(ModelPool::isChatCapable("gpt-4o:free"));
+    CHECK(ModelPool::isChatCapable("llama-3.3-70b-versatile"));
+    CHECK(ModelPool::isChatCapable("qwen3-32b:free"));
+    CHECK(ModelPool::isChatCapable("glm-4.7-flash:free"));
+    CHECK(ModelPool::isChatCapable("grok-beta:free"));
+    // Aile tanınan model önceliklenir
+    CHECK(ModelPool::chatScore("llama-3.3-70b:free") >
+          ModelPool::chatScore("absolutereality:free"));
+    CHECK(ModelPool::chatScore("qwen3-32b:free") > 0);
+    CHECK(ModelPool::chatScore("text-embedding-3-small") == 0);
+    // Görsel/ses modelleri listede olsa da havuza girmez
+    ModelPool::setCatalog("unorouter",
+                          {"absolutereality:free", "dreamshaper:free", "whisper-1",
+                           "gpt-4o:free", "llama-3.3-70b-versatile", "qwen3-32b:free"});
+    const QList<QString> clean = ModelPool::candidates(uno, "gpt-4o:free", 3, false);
+    for (const QString& m : clean) CHECK(ModelPool::isChatCapable(m));
+    // Bilinen sohbet ailesi önce gelir
+    ModelPool::setCatalog("unorouter", {"zzz-bilinmeyen:free", "llama-3.3-70b:free"});
+    const QList<QString> ranked = ModelPool::candidates(uno, "gpt-4o:free", 2, false);
+    CHECK(ranked.size() == 2);
+    if (ranked.size() == 2) CHECK(ranked.at(1) == "llama-3.3-70b:free");
+    ModelPool::setCatalog("unorouter", {"gpt-4o:free", "gpt-oss-120b:free", "gpt-4o",
+                                        "text-embedding-3-small", "glm-4.7-flash:free",
+                                        "deepseek-v4.1-flash:free"});
+
+    // Disk kalıcılığı
+    ModelPool::loadFromDisk();
+    CHECK(ModelPool::hasCatalog("unorouter"));
+    ModelPool::clear();
+}
+
+// --- 13: LlmClient model yedeği davranışı ---
+static void testModelFailoverLogic() {
+    const ProviderSpec uno = ProviderRegistry::byId("unorouter");
+    // "Yoğun" sayılan hatalar
+    CHECK(LlmClient::isModelBusy(429, QByteArray()));
+    CHECK(LlmClient::isModelBusy(403, "rate limit right now"));
+    CHECK(LlmClient::isModelBusy(503, R"({"error":{"message":"All providers for model \"x\" are busy right now"}})"));
+    CHECK(LlmClient::isModelBusy(500, "no healthy upstream"));
+    // Yoğun olmayanlar
+    CHECK(!LlmClient::isModelBusy(404, QByteArray()));
+    CHECK(!LlmClient::isModelBusy(401, QByteArray()));
+    CHECK(!LlmClient::isModelBusy(200, QByteArray()));
+    CHECK(!LlmClient::isModelBusy(400, "bad request"));
+    CHECK(LlmClient::maxModelFailovers() == 2);
+    // Havuz doluyken yedek seçilir, boşken seçilmez
+    ModelPool::clear();
+    CHECK(LlmClient::pickModelFallback(uno, "gpt-4o:free", QStringList()).isEmpty());
+    ModelPool::setCatalog("unorouter", {"gpt-4o:free", "gpt-oss-120b:free"});
+    const QString pick = LlmClient::pickModelFallback(uno, "gpt-4o:free", QStringList{"gpt-4o:free"});
+    CHECK(pick == "gpt-oss-120b:free");
+    CHECK(LlmClient::pickModelFallback(uno, "gpt-4o:free",
+                                       QStringList{"gpt-4o:free", "gpt-oss-120b:free"})
+              .isEmpty());
+    ModelPool::clear();
+}
+
 // --- 11: gerçek sağlayıcı davranışından çıkan hata sınıflandırması ---
 // UnoRouter/NIM gibi ağgeçitler hız sınırını 429 değil 403 olarak ve
 // "per minute limit / try again in a minute" diyerek bildirir. Bu GEÇİCİDİR:
@@ -554,6 +687,8 @@ int main(int argc, char** argv) {
     testArenaTargets();
     testQueue();
     testRealProviderErrorShape();
+    testModelPool();
+    testModelFailoverLogic();
     testSummary();
     testAllSurfacesRoute();
     testRegression();

@@ -23,6 +23,26 @@ public:
     QString apiKey() const;
     void setSecretStore(SecretStore* s) { m_secrets = s; }
     SecretStore* secretStore() const { return m_secrets; }
+    // Stage 37: model düzeyinde yedekleme. Seçili model hız sınırına takılırsa
+    // (429/403/503 "rate limit" / "model busy") aynı sağlayıcıdaki başka bir
+    // modele geçilir. Fiyat sınıfı korunur: :free → ücretliye sessizce geçilmez.
+    void setModelFailoverEnabled(bool on) { m_modelFailover = on; }
+    bool modelFailoverEnabled() const { return m_modelFailover; }
+    // Ücretli modele geçmeye izin ver (varsayılan: hayır)
+    void setModelFailoverAllowPaid(bool on) { m_modelFailoverPaid = on; }
+    // Ayarlardan yükle (ai/modelFailover, ai/modelFailoverAllowPaid)
+    void loadFailoverSettings();
+    // Değiştirilen model (boşsa değişiklik olmadı)
+    QString lastModelFailoverFrom() const { return m_modelFailoverFrom; }
+    // Geçilen model (boşsa değişiklik olmadı)
+    QString lastModelFailoverTo() const { return m_modelFailoverTo; }
+    static int maxModelFailovers() { return 2; }
+    // "Yoğun" sayılan hata mı? (hız sınırı veya model meşgul)
+    static bool isModelBusy(int httpStatus, const QByteArray& body);
+    // Yedeğe geçilecek model (boşsa yok)
+    static QString pickModelFallback(const ProviderSpec& spec, const QString& current,
+                                     const QStringList& tried, bool allowPaid = false);
+
     // Stage 36: sağlayıcı kalıcı olarak reddedilirse (401/403/404/5xx) eşdeğer
     // bir sağlayıcıya otomatik devret.
     void setFailoverEnabled(bool on) { m_failover = on; }
@@ -102,6 +122,12 @@ private:
     bool m_failover = true;
     int m_failoverCount = 0;
     QString m_failoverFrom;
+    bool m_modelFailover = true;
+    bool m_modelFailoverPaid = false;
+    int m_modelFailoverCount = 0;
+    QStringList m_modelsTried;
+    QString m_modelFailoverFrom;
+    QString m_modelFailoverTo;
     SseParser m_sse;
     AiChatRequest m_req;      // yeniden denemede kullanılır
     AiReply m_acc;            // akış birikimi

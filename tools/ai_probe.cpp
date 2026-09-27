@@ -29,6 +29,7 @@
 #include "../src/core/AgentTools.h"
 #include "../src/core/ai/AiRunner.h"
 #include "../src/core/ai/LlmClient.h"
+#include "../src/core/ai/ModelPool.h"
 #include "../src/core/ai/ProviderHealth.h"
 #include "../src/core/ai/ProviderPrefs.h"
 #include "../src/core/ai/ProviderPricing.h"
@@ -331,6 +332,70 @@ int main(int argc, char** argv) {
             const bool turkish = QString(r.error).contains(QRegularExpression("[ğüşıöç]", QRegularExpression::UseUnicodePropertiesOption));
             check(turkish, "hata Türkçe", r.error);
             check(r.error.size() < 260, "hata makul uzunlukta", QString::number(r.error.size()));
+        }
+    }
+
+    // --- 6b) model yedeği (yoğun model → aynı sağlayıcıda yedek) ---
+    if (wants("modelYedek")) {
+        out << "[model yedeği — yoğun modelden aynı sağlayıcıya geçiş]\n";
+        if (model.isEmpty()) {
+            skip("model yedeği", "model bilinmiyor");
+        } else {
+            // Katalogu yükle (havuz dolmadan yedek üretilemez)
+            client.setProvider(spec);
+            client.setSecretStore(&store);
+            client.loadKeyForProvider();
+            QStringList models;
+            QEventLoop loop;
+            QTimer t;
+            t.setSingleShot(true);
+            QObject::connect(&t, &QTimer::timeout, &loop, &QEventLoop::quit);
+            QObject::connect(&client, &LlmClient::modelsReady, &loop,
+                             [&models, &loop](const QStringList& m) {
+                                 models = m;
+                                 QTimer::singleShot(0, &loop, &QEventLoop::quit);
+                             });
+            t.start(20000);
+            client.fetchModels();
+            loop.exec();
+            if (models.size() < 2) {
+                skip("model yedeği", "katalog yetersiz");
+            } else {
+                // Kasıtlı olarak yoğun olması muhtemel bir model seç (upstream
+                // doygunluğu canlı olarak gerçekleşmesini tetikler).
+                const QString busy = pinnedModel.isEmpty() ? model : pinnedModel;
+                client.setProvider(spec);
+                client.setSecretStore(&store);
+                client.loadKeyForProvider();
+                client.setModelFailoverEnabled(true);
+                client.setModelFailoverAllowPaid(false);
+                AiChatRequest req;
+                req.model = busy;
+                req.messages << AiMessage::user("tek kelimeyle: ok");
+                req.maxTokens = 30;
+                QElapsedTimer mt;
+                mt.start();
+                const AiReply rep = client.chatSync(req, 120000);
+                const QString from = client.lastModelFailoverFrom();
+                const QString to = client.lastModelFailoverTo();
+                if (from.isEmpty()) {
+                    ok("model yedeği", QString("geçiş gerekmedi (%1, %2 ms)")
+                                             .arg(busy).arg(mt.elapsed()));
+                } else {
+                    ok("model yedeği çalıştı",
+                       QString("%1 yoğundu → %2 (%3 ms)")
+                           .arg(from, to)
+                           .arg(mt.elapsed()));
+                    check(to != from, "gerçekten farklı modele geçildi");
+                    if (rep.ok) {
+                        ok("yedekten yanıt alındı",
+                           QString("\"%1\"").arg(rep.text.trimmed().left(50)));
+                    } else {
+                        bad("yedekten yanıt alınamadı", rep.error);
+                    }
+                }
+                check(client.maxModelFailovers() == 2, "en fazla 2 model denemesi");
+            }
         }
     }
 

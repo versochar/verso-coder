@@ -864,6 +864,17 @@ void SettingsDialog::buildProviderTab() {
     m_routeFreeFirst = new QCheckBox("Ücretsiz/hızlı modeli tercih et", m_provPage);
     root->addWidget(m_routeFreeFirst);
 
+    m_modelFailover = new QCheckBox("Model yoğunsa aynı sağlayıcıda yedeğe geç", m_provPage);
+    m_modelFailover->setToolTip(
+        "Seçili model hız sınırı alırsa veya meşgulse (429/403/503), aynı "
+        "sağlayıcıda benzer fiyatlı başka bir modele otomatik geçilir.");
+    root->addWidget(m_modelFailover);
+    m_modelFailoverPaid = new QCheckBox("…geçerken ücretli modele de izin ver", m_provPage);
+    m_modelFailoverPaid->setToolTip(
+        "Kapalıyken :free bir modelden ücretli bir modele geçilmez (faturayı "
+        "şaşırtmamak için varsayılan kapalıdır).");
+    root->addWidget(m_modelFailoverPaid);
+
     auto provBox = [this](QComboBox*& box) {
         box = new QComboBox(m_provPage);
         box->addItem("(seçili sağlayıcı)", QString());
@@ -1035,6 +1046,12 @@ void SettingsDialog::loadStage36() {
     const TaskRouter::Prefs p = TaskRouter::readSettings();
     m_routeEnabled->setChecked(p.enabled);
     m_routeFreeFirst->setChecked(p.useFreeFirst);
+    m_modelFailover->setChecked(QSettings().value("ai/modelFailover", true).toBool());
+    m_modelFailoverPaid->setChecked(
+        QSettings().value("ai/modelFailoverAllowPaid", false).toBool());
+    m_modelFailoverPaid->setEnabled(m_modelFailover->isChecked());
+    connect(m_modelFailover, &QCheckBox::toggled, this,
+            [this](bool on) { m_modelFailoverPaid->setEnabled(on); });
     m_quickProv->setCurrentIndex(qMax(0, m_quickProv->findData(p.quickProvider)));
     m_quickModel->setText(p.quickModel);
     m_strongProv->setCurrentIndex(qMax(0, m_strongProv->findData(p.strongProvider)));
@@ -1066,6 +1083,9 @@ void SettingsDialog::storeStage36() {
     p.embedProvider = m_embedProv->currentData().toString();
     p.embedModel = m_embedModel->text().trimmed();
     TaskRouter::writeSettings(p);
+    QSettings st;
+    st.setValue("ai/modelFailover", m_modelFailover->isChecked());
+    st.setValue("ai/modelFailoverAllowPaid", m_modelFailoverPaid->isChecked());
 }
 
 void SettingsDialog::onHealthReset() {

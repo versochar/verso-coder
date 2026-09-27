@@ -191,6 +191,7 @@ AiRunner::Result AiRunner::run(const Options& opts, const QString& userPrompt,
     LlmClient* c = clientFor(plan.providerId);
     c->setProvider(spec);
     c->setFailoverEnabled(opts.allowFailover);
+    c->loadFailoverSettings();
     if (!c->secretStore()) c->setSecretStore(m_secrets);
     c->loadKeyForProvider();
     if (spec.requiresKey() && c->apiKey().isEmpty()) {
@@ -228,10 +229,14 @@ AiRunner::Result AiRunner::run(const Options& opts, const QString& userPrompt,
         emit finished(res);
         return res;
     }
+    if (!c->lastModelFailoverFrom().isEmpty()) {
+        res.model = c->lastModelFailoverFrom() + " → " + res.model;
+        res.reason = QStringLiteral("model yoğundu, aynı sağlayıcıda yedeğe geçildi");
+    }
     if (c->lastFailoverFrom() == plan.providerId) {
         // İstek eşdeğer bir sağlayıcıda tamamlandı: gerçek kimliği yaz
         res.providerId = c->provider().id;
-        res.reason = QStringLiteral("otomatik failover");
+        res.reason = QStringLiteral("otomatik sağlayıcı failover'ı");
     }
     if (res.reason.isEmpty()) res.reason = plan.reason;
     res.ok = true;
@@ -277,6 +282,10 @@ void AiRunner::handleAsyncResult(const LlmClient* client, const AiReply& rep,
     if (m_recordUsage)
         ProviderHealth::instance().record(res.providerId, rep.ok, int(res.ms), rep.httpStatus);
     if (rep.ok) {
+        if (!client->lastModelFailoverFrom().isEmpty()) {
+            res.model = client->lastModelFailoverFrom() + " → " + res.model;
+            res.reason = QStringLiteral("model yoğundu, yedeğe geçildi");
+        }
         if (client->lastFailoverFrom() == plan.providerId) {
             res.providerId = client->provider().id;
             res.reason = QStringLiteral("otomatik failover");
@@ -323,6 +332,7 @@ void AiRunner::runAsync(const Options& opts, const QString& userPrompt,
     LlmClient* c = clientFor(plan.providerId);
     c->setProvider(ProviderPrefs::resolve(plan.providerId));
     c->setFailoverEnabled(opts.allowFailover);
+    c->loadFailoverSettings();
     if (!c->secretStore()) c->setSecretStore(m_secrets);
     c->loadKeyForProvider();
     if (c->provider().requiresKey() && c->apiKey().isEmpty()) {

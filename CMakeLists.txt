@@ -69,6 +69,7 @@ set(SOURCES
     src/core/ai/AgentLlmAdapter.cpp
     src/core/ai/ProviderBench.cpp
     src/core/ai/AiRunner.cpp
+    src/core/ai/ModelPool.cpp
     src/core/StartupArgs.cpp
     src/core/ToolchainProbe.cpp
     src/core/TaskRunner.cpp
@@ -281,6 +282,7 @@ set(HEADERS
     src/core/ai/AgentLlmAdapter.h
     src/core/ai/ProviderBench.h
     src/core/ai/AiRunner.h
+    src/core/ai/ModelPool.h
     src/core/ai/AiProfiles.h
     src/core/StartupArgs.h
     src/core/ToolchainProbe.h
@@ -713,6 +715,7 @@ add_test(NAME stage36 COMMAND test_stage36)
 # --- Stage 37: tek AI cephesi (AiRunner) + görev profilleri ---
 add_executable(test_stage37
     tests/test_stage37.cpp
+    src/core/ai/ModelPool.cpp
     src/widgets/ModelArenaDialog.cpp
     src/core/ai/AiRunner.cpp
     src/core/ai/LlmProvider.cpp
@@ -766,6 +769,7 @@ install(FILES ${CMAKE_SOURCE_DIR}/packaging/verso-coder.appdata.xml
 add_executable(ai-probe EXCLUDE_FROM_ALL
     tools/ai_probe.cpp
     src/core/ModelCapabilities.cpp
+    src/core/ai/ModelPool.cpp
     src/core/ai/AiRunner.cpp
     src/core/ai/LlmProvider.cpp
     src/core/ai/SecretStore.cpp

@@ -73,6 +73,8 @@ private:
     // Stage 36
     QCheckBox* m_routeEnabled = nullptr;
     QCheckBox* m_routeFreeFirst = nullptr;
+    QCheckBox* m_modelFailover = nullptr;      // Stage 37: yoğun modele yedek
+    QCheckBox* m_modelFailoverPaid = nullptr;  // ücretliye geçmeye izin
     QComboBox* m_quickProv = nullptr;
     QLineEdit* m_quickModel = nullptr;
     QComboBox* m_strongProv = nullptr;

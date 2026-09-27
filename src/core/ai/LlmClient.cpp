@@ -1,4 +1,5 @@
 #include "LlmClient.h"
+#include "ModelPool.h"
 #include "ProviderHealth.h"
 #include "ProviderPrefs.h"
 #include "SecretStore.h"
@@ -6,6 +7,7 @@
 #include <QJsonDocument>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QSettings>
 #include <QThread>
 #include <QTimer>
 
@@ -63,6 +65,24 @@ bool LlmClient::isHardFailure(int httpStatus, const QByteArray& body) {
     // 401: anahtar · 403: yetki · 404: model yok · 5xx: sağlayıcı bozuk
     return httpStatus == 401 || httpStatus == 403 || httpStatus == 404 ||
            (httpStatus >= 500 && httpStatus < 600);
+}
+
+bool LlmClient::isModelBusy(int httpStatus, const QByteArray& body) {
+    if (isRateLimited(httpStatus, body)) return true;
+    // Ağgeçitler "bu model şu an meşgul / tüm sağlayıcılar dolu" der (5xx)
+    const QByteArray low = body.toLower();
+    static const char* busy[] = {"all providers", "model is busy", "busy right now",
+                                 "no available",  "temporarily unavailable", "overloaded",
+                                 "capacity",     "no healthy upstream"};
+    if (httpStatus < 400) return false;
+    for (const char* n : busy)
+        if (low.contains(n)) return true;
+    return false;
+}
+
+QString LlmClient::pickModelFallback(const ProviderSpec& spec, const QString& current,
+                                     const QStringList& tried, bool allowPaid) {
+    return ModelPool::nextCandidate(spec, current, tried, allowPaid, ModelPool::Need::Chat);
 }
 
 bool LlmClient::retryAfterTooLong(const QByteArray& retryAfter) {
@@ -141,6 +161,7 @@ void LlmClient::fetchModels() {
         }
         QStringList models = ProviderCodec::parseModels(m_spec, body);
         if (models.isEmpty()) models = ProviderRegistry::sampleModels(m_spec.id);
+        if (!models.isEmpty()) ModelPool::setCatalog(m_spec.id, models);
         emit modelsReady(models);
     });
 }
@@ -163,6 +184,11 @@ void LlmClient::sendChat(const AiChatRequest& req, bool stream) {
     m_attempt = 0;        // YALNIZ yeni istekte sıfırlanır
     m_failoverCount = 0;
     m_failoverFrom.clear();
+    m_modelFailoverCount = 0;
+    m_modelsTried.clear();
+    m_modelsTried << req.model;
+    m_modelFailoverFrom.clear();
+    m_modelFailoverTo.clear();
     dispatch(req, stream);
 }
 
@@ -224,6 +250,26 @@ void LlmClient::dispatch(const AiChatRequest& req, bool stream) {
         m_busy = false;
         const int status = rep->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray body = rep->readAll();
+
+        // Stage 37: model yedeği — hız sınırı/mesgul durumda aynı sağlayıcıda
+        // başka bir modele geç. Sağlayıcı değiştirmekten çok daha iyi bir sonuç.
+        if (m_modelFailover && isModelBusy(status, body) &&
+            m_modelFailoverCount < maxModelFailovers()) {
+            const QString next = pickModelFallback(m_spec, m_req.model, m_modelsTried,
+                                                   m_modelFailoverPaid);
+            if (!next.isEmpty()) {
+                const QString busy = m_req.model;
+                m_modelFailoverFrom = busy;
+                m_req.model = next;
+                m_modelsTried << next;
+                m_modelFailoverTo = next;
+                ++m_modelFailoverCount;
+                emit statusChanged(QString("%1 yoğun → %2 modeline geçildi")
+                                       .arg(busy, next));
+                QTimer::singleShot(0, this, [this]() { dispatch(m_req, m_wantStream); });
+                return;
+            }
+        }
 
         if (isRetryable(status, body) && m_attempt < maxRetries() &&
             !retryAfterTooLong(rep->rawHeader("Retry-After"))) {
@@ -325,8 +371,9 @@ void LlmClient::cancel() {
 
 // --- senkron çağrılar ---
 
-AiReply LlmClient::chatSync(const AiChatRequest& request, int timeoutMs) {
+AiReply LlmClient::chatSync(const AiChatRequest& requestIn, int timeoutMs) {
     AiReply r;
+    AiChatRequest request = requestIn; // model yedeğiyle değişebilir
     if (m_spec.requiresKey() && apiKey().isEmpty()) {
         r.error = QString("%1 için API anahtarı eksik.").arg(m_spec.label);
         return r;
@@ -357,6 +404,24 @@ AiReply LlmClient::chatSync(const AiChatRequest& request, int timeoutMs) {
         const bool netErr = rep->error() != QNetworkReply::NoError;
         rep->deleteLater();
         if (netErr || status >= 400) {
+            // Stage 37: model yedeği (senkrom yol)
+            if (m_modelFailover && isModelBusy(status, body) &&
+                m_modelFailoverCount < maxModelFailovers()) {
+                const QString next = pickModelFallback(m_spec, request.model, m_modelsTried,
+                                                       m_modelFailoverPaid);
+                if (!next.isEmpty()) {
+                    m_modelFailoverFrom = request.model;
+                    m_modelsTried << next;
+                    m_modelFailoverTo = next;
+                    ++m_modelFailoverCount;
+                    request.model = next;
+                    b = ProviderCodec::chatRequest(m_spec, request, &model);
+                    b["stream"] = false;
+                    url = ProviderCodec::chatUrl(m_spec, model);
+                    attempt = -1;
+                    continue;
+                }
+            }
             if (isRetryable(status, body) && attempt < maxRetries() &&
                 !retryAfterTooLong(rep->rawHeader("Retry-After"))) {
                 QThread::msleep(static_cast<unsigned long>(
@@ -482,4 +547,11 @@ bool LlmClient::testConnection(QString& error, int timeoutMs) {
         return false;
     }
     return true;
+}
+
+// Model yedeği tercihleri (ayarlar; varsayılan: açık, ücretliye geçiş kapalı)
+void LlmClient::loadFailoverSettings() {
+    QSettings st;
+    m_modelFailover = st.value(QStringLiteral("ai/modelFailover"), true).toBool();
+    m_modelFailoverPaid = st.value(QStringLiteral("ai/modelFailoverAllowPaid"), false).toBool();
 }
