@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "core/AboutInfo.h"
 #include "core/CrashHandler.h"
+#include "core/LeakWatch.h"
 #include "core/PerfMonitor.h"
 #include "core/StartupArgs.h"
 #include <QApplication>
@@ -43,6 +44,7 @@ int main(int argc, char** argv) {
     app.setApplicationVersion(AboutInfo::version());
     app.setApplicationDisplayName("Verso Coder");
 
+    LeakWatch::loadThreshold();           // Stage 50: soak eşiği ayarlardan
     PerfMonitor::instance().reset();      // Stage 22: başlangıç ölçümü
     PerfMonitor::instance().mark("main"); // Stage 22
     migrateLegacySettings();

@@ -33,6 +33,8 @@ public:
     // gerçek sızıntılar açar.
     static double growthThresholdKb();
     static void setGrowthThresholdKb(double kb);
+    // Stage 50: ayarlardan yükle (diag/leakThresholdKb, varsayılan 64)
+    static void loadThreshold();
 
 private:
     QString m_label;

@@ -805,6 +805,7 @@ add_executable(ai-probe EXCLUDE_FROM_ALL
     src/core/ai/providers/ProviderCodec.cpp
     src/core/ai/providers/SseParser.cpp
     src/core/AgentTools.cpp
+    src/core/AboutInfo.cpp
     src/core/AgentLoop.cpp
     src/core/AgentPolicy.cpp
     src/core/AgentBudget.cpp
@@ -1383,3 +1384,10 @@ target_include_directories(test_stage49 PRIVATE src)
 target_link_libraries(test_stage49 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml Qt6::Test Qt6::WebSockets ${HUNSPELL_LIBRARIES})
 target_include_directories(test_stage49 PRIVATE ${HUNSPELL_INCLUDE_DIRS})
 add_test(NAME stage49 COMMAND test_stage49)
+
+add_executable(test_stage50
+    tests/test_stage50.cpp
+)
+target_include_directories(test_stage50 PRIVATE src)
+target_link_libraries(test_stage50 PRIVATE Qt6::Core)
+add_test(NAME stage50 COMMAND test_stage50)

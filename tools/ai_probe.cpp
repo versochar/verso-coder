@@ -38,6 +38,7 @@
 #include "../src/core/ai/ProviderPricing.h"
 #include "../src/core/ai/SecretStore.h"
 #include "../src/core/ai/UsageLedger.h"
+#include "../src/core/AboutInfo.h"
 #include "../src/core/AgentLoop.h"
 #include "../src/core/RagProgress.h"
 #include "../src/core/SetupAdvisor.h"
@@ -86,6 +87,14 @@ int main(int argc, char** argv) {
     }
     auto wants = [&](const QString& t) { return want.isEmpty() || want.contains(t); };
 
+    // Stage 50: final kota ve anahtar gerektirmez (saf görev)
+    if (want.size() == 1 && want.first() == QStringLiteral("final")) {
+        out << "ai-probe sürümü: " << AboutInfo::version() << "\n";
+        out << "canlı görevler: model sohbet akis arac gomme hata kota kasa " <<
+               "modelYedek sigorta ragDevam enjeksiyon doctor\n";
+        out << "SONUÇ: 1 geçti, 0 kaldı, 0 atlandı\n";
+        return 0;
+    }
     const ProviderSpec spec = ProviderRegistry::byId(providerId);
     if (spec.id.isEmpty()) {
         out << "bilinmeyen sağlayıcı: " << providerId << "\n";

@@ -83,7 +83,7 @@ cmake --build build -j
 ./build/verso-coder
 ```
 
-## Yol haritası (20 + 515 özellik, 49 stage — tamamlandı)
+## Yol haritası (20 + 521 özellik, 50 stage — tamamlandı)
 
 - **Stage 1 — Editör temeli ✅ (yapıldı):** oturum geri yükleme (açık dosyalar + aktif sekme + imleç), otomatik kaydetme (2 sn) + crash yedekleme, harici değişiklik uyarısı, hızlı açma (Ctrl+P fuzzy), font boyutu + sekme genişliği ayarı, status bar'da Ln/Col + LF/CRLF + UTF-8, otomatik parantez kapatma.
 - **Stage 5 — Editör gücü ✅ (yapıldı):** çoklu imleç (Alt+tık, Ctrl+D, Esc), kod katlama (gutter ▸/▾, Ctrl+Shift+[/], oturumda kalıcı), akıllı girinti + `}` geri-girinti + blok Tab, bracket eşleşme (derinlik renkli) + girinti kılavuzları, aramada ±3 satır önizleme, split editör (2 grup + taşı/böl + grup oturumu), satır işlemleri (taşı/çoğalt/sırala/trim), .editorconfig, büyük-dosya önizleme modu, hunspell yazım denetimi (TR+EN, F7, sağ-tık öneri).
@@ -290,6 +290,14 @@ src/core/ai/ProviderBench.*             → sağlayıcı mikro-karşılaştırma
 src/core/ai/AiRunner.* + AiProfiles.h   → tek AI cephesi (12 görev) + görev profilleri
 src/widgets/ModelArenaDialog.*         → çok sağlayıcı arena (gerçek maliyet, kazananı al)
 src/core/PerfTools.*                  → ikili sez, boyut süzgeci, LRU önbellek, ters indeks
+- **Stage 50 — Kapanış ve Miras ✅ (yapıldı):** `docs/LIMITATIONS.md` (dürüst sınır listesi) + `docs/RETROSPECTIVE.md` (her stageden 1 ders + 7 süreç kuralı) + `ai-probe final` (anahtarsız/kotasız sürüm+görev listesi) + `test_stage50` meta-testi (34 kayıt, **617 kaynak** denetlendi — hepsi mevcut). Ölü bağlantı yakalandı: soak eşiği ayarı kaydediliyor ama hiç okunmuyordu (`LeakWatch::loadThreshold` + main() bağlantısı). `test_stage50` (721 kontrol) + ctest **34/34**. Sürüm 3.2.0.
+
+## 3.x yol haritası (sonraki 10 stage için çerçeve)
+- 51–53: Soak kalibrasyonu, onay yorgunluğu ölçümü, çevrimdışı RAG.
+- 54–56: Flatpak, temiz VM dumanı, gerçek ekran okuyucu testi.
+- 57–60: Eklenti API v1 donması, uzaktan LSP tüneli, paralel alt-ajanlar, kararlılık haftası.
+- Kural: yeni stage önce denetimle başlar (mevcut kod okunur), test bulgusu planı ezer.
+
 - **Stage 49 — İşbirliği ✅ (yapıldı):** `CollabSession` vardı ama **hiçbir yere bağlı değildi** (ölü kod); denetimde ayrıca **hayalet imleç** hatası bulundu (ani kopuşta `peerLeft` bildirilmiyor, imleç kalıyordu — soket→kullanıcı eşleşmesi eklendi). Asgari gerçek bağlantı: `collab.host/join/leave` komutları, eş imleçleri renkli seçim olarak, metin eşitleme (yankı korumalı), imleç yayını (500 ms kısık). `test_stage49` (24 kontrol: gerçek localhost WebSocket — iki yönlü metin/imleç, ayrılma, bozuk ileti, rev) + ctest **33/33**. Sürüm 3.1.0.
 
 **İşbirliği güvenlik modeli:** LAN güveni varsayılır — kimlik doğrulama ve şifreleme YOK (dürüst sınır); `ws://` düz metin, davet bağlantısı bilen katılır. İnternet üzerinden kullanmayın.

@@ -1,6 +1,7 @@
 #include "LeakWatch.h"
 #include <QCoreApplication>
 #include <QFile>
+#include <QSettings>
 #include <QLocale>
 #include <QThread>
 
@@ -80,3 +81,8 @@ LeakWatch::Result LeakWatch::result() const {
 double LeakWatch::growthThresholdKb() { return g_thresholdKb; }
 
 void LeakWatch::setGrowthThresholdKb(double kb) { g_thresholdKb = qMax(1.0, kb); }
+
+void LeakWatch::loadThreshold() {
+    const double v = QSettings("Verso", "VersoCoder").value("diag/leakThresholdKb", 64).toDouble();
+    if (v > 0) setGrowthThresholdKb(v);
+}
