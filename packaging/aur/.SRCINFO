@@ -1,6 +1,6 @@
 pkgbase = verso-coder
 	pkgdesc = Yerel öncelikli Qt6 kod editörü — çok sağlayıcılı AI, ajan, LSP, Git
-	pkgver = 1.0.3
+	pkgver = 1.0.4
 	pkgrel = 1
 	url = https://github.com/versochar/verso-coder
 	arch = x86_64
@@ -18,7 +18,7 @@ pkgbase = verso-coder
 	optdepends = rust-analyzer: Rust dil sunucusu
 	optdepends = gopls: Go dil sunucusu
 	optdepends = bwrap: ajan salt-okunur kipi
-	source = verso-coder-1.0.3.tar.gz::https://github.com/versochar/verso-coder/archive/refs/tags/v1.0.3.tar.gz
-	sha256sums = 3d62828345c7b565e06758b2fd390182d431aec0ccec4fe4935a1f0e1d573e22
+	source = verso-coder-1.0.4.tar.gz::https://github.com/versochar/verso-coder/archive/refs/tags/v1.0.4.tar.gz
+	sha256sums = 646ebd58787f5a2e8cb8a4fdd72a0bd8f763eb071b6a54c43dcfe446d3a445dc
 
 pkgname = verso-coder
