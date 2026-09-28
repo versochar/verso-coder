@@ -52,6 +52,8 @@ jobs:
           curl -sL -o linuxdeploy-plugin-qt https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
           chmod +x linuxdeploy linuxdeploy-plugin-qt
           ./linuxdeploy --appimage-extract-and-run --appdir "$PWD/build/AppDir" --plugin qt --output appimage
+          # linuxdeploy adı desktop girdisinden türetir (Verso_Coder); kalıba uydur
+          mv -f Verso_Coder-*.AppImage "VersoCoder-${{ github.ref_name }}-x86_64.AppImage"
       - name: Yükle
         uses: softprops/action-gh-release@v2
         with:
@@ -114,9 +116,23 @@ jobs:
           cmake --build build -j"$(sysctl -n hw.ncpu)"
       - name: Paketle
         run: |
-          mkdir -p dist/VersoCoder.app/Contents/MacOS
+          mkdir -p dist/VersoCoder.app/Contents/MacOS dist/VersoCoder.app/Contents/Resources
           cp build/verso-coder dist/VersoCoder.app/Contents/MacOS/
-          cp -r resources dist/VersoCoder.app/Contents/MacOS/resources
+          cp -r resources dist/VersoCoder.app/Contents/Resources/
+          cat > dist/VersoCoder.app/Contents/Info.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key><string>verso-coder</string>
+            <key>CFBundleIdentifier</key><string>io.verso.Coder</string>
+            <key>CFBundleName</key><string>Verso Coder</string>
+            <key>CFBundleVersion</key><string>${{ github.ref_name }}</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          PLIST
           macdeployqt dist/VersoCoder.app -dmg
           mv dist/VersoCoder.dmg "VersoCoder-${{ github.ref_name }}-macos-arm64.dmg"
       - name: Yükle
