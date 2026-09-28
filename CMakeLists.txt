@@ -296,6 +296,7 @@ set(SOURCES
     src/widgets/GitTagsDialog.cpp
     src/widgets/PluginManagerDialog.cpp
     src/widgets/PluginStoreDialog.cpp
+    src/widgets/PluginSidePanel.cpp
     src/widgets/MergeEditorDialog.cpp
     src/widgets/SearchEditorDialog.cpp
     src/widgets/NewProjectDialog.cpp
@@ -973,6 +974,7 @@ if(Qt6Test_FOUND)
         src/core/ai/providers/SseParser.cpp
         src/widgets/SettingsDialog.cpp
         src/widgets/PluginStoreDialog.cpp
+        src/widgets/PluginSidePanel.cpp
         src/core/PluginEngine.cpp
         src/core/PluginStore.cpp
         src/core/AboutInfo.cpp

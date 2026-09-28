@@ -294,6 +294,8 @@ private:
     void installPluginKeybinding(const QString& pid, const QString& cmdId, const QString& keys);
     void showPluginProblems(const QString& pid, const QString& json);
     void showPluginManager();
+    void showPluginStore();
+    void onPluginsChanged();
     // Stage 30
     void openMergeEditor();
     void importSshConfig();
@@ -561,7 +563,9 @@ private:
     PortForwardPanel* m_fwdPanel = nullptr;
     QPushButton* m_btnRemote = nullptr;
     QPushButton* m_btnOutline = nullptr; // Stage 17
+    QPushButton* m_btnPlugins = nullptr; // Eklenti yan sayfası
     class OutlinePanel* m_outline = nullptr; // Stage 17
+    class PluginSidePanel* m_pluginPanel = nullptr; // Eklenti yan sayfası (dizin 7)
     class TimelinePanel* m_timeline = nullptr; // Stage 17
     class LocalHistory* m_localHist = nullptr; // Stage 17: kaydetmede anlık görüntü
     ConnectionProfile m_remoteProfile;

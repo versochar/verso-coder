@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "1.3.0"; }
+QString AboutInfo::version() { return "1.3.1"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,10 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "1.3.1\n"
+        "  • Eklentiler sol panele taşındı (VS Code uzantılar görünümü)\n"
+        "  • Kurulular aç/kapa + arama, görünümler listesi, Mağaza kısayolu\n"
+        "  • view.plugins artık yan sayfayı açar\n"
         "1.3.0\n"
         "  • 20 yeni mağaza eklentisi (kayıtta 34 oldu)\n"
         "  • Geliştirici: log avcısı, TODO, import, model, boşluk,\n"

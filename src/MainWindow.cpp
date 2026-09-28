@@ -127,6 +127,8 @@
 #include "widgets/HexViewDialog.h"
 #include "widgets/GitHistoryDialog.h"
 #include "widgets/PluginManagerDialog.h"
+#include "widgets/PluginSidePanel.h"
+#include "widgets/PluginStoreDialog.h"
 #include "widgets/NewProjectDialog.h"
 #include "widgets/ClipboardDialog.h"
 #include "widgets/MergeEditorDialog.h"
@@ -380,7 +382,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     mkAct("help.about", "Sistem Teşhisi / Hakkında", [this]() { runCommand("help.about"); });
     mkAct("help.shortcuts", "Klavye Kısayolları", [this]() { showShortcutDialog(); });
     mkAct("file.pluginsDir", "Eklentiler Klasörünü Aç", [this]() { openPluginsDir(); });
-    mkAct("view.plugins", "Eklenti Yöneticisi", [this]() { runCommand("view.plugins"); });
+    mkAct("view.plugins", "Eklenti Paneli", [this]() { runCommand("view.plugins"); });
     mkAct("file.factoryReset", "Fabrika Ayarlarına Dön...", [this]() { factoryReset(); });
     mkAct("task.run", "Görevi Çalıştır (tasks.json)", [this]() { runCommand("task.run"); });
     mkAct("task.panel", "Görev Panelini Aç", [this]() { runCommand("task.panel"); });
@@ -636,6 +638,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         m_btnOutline->setIcon(QIcon());
     }
     actLay->addWidget(m_btnOutline);
+    // Eklenti yan sayfası (VS Code uzantılar görünümü)
+    m_btnPlugins = mkSideBtn("plugins");
+    m_btnPlugins->setToolTip("Eklentiler");
+    if (m_btnPlugins->icon().isNull()) {
+        m_btnPlugins->setText("🧩");
+        m_btnPlugins->setIcon(QIcon());
+    }
+    actLay->addWidget(m_btnPlugins);
     actLay->addStretch(1);
     actLay->addWidget(m_btnSettings);
 
@@ -672,6 +682,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_side->addWidget(m_remoteExplorer); // Stage 16: dizin 5 = Uzak
     m_outline = new OutlinePanel(m_side); // Stage 17: dizin 6 = Outline
     m_side->addWidget(m_outline);
+    m_pluginPanel = new PluginSidePanel(m_side); // dizin 7 = Eklentiler
+    m_side->addWidget(m_pluginPanel);
     connect(m_outline, &OutlinePanel::symbolClicked, this, [this](int line0) {
         if (auto* ce = currentEditor()) {
             ce->gotoLine(line0 + 1);
@@ -695,6 +707,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_btnRemote, &QPushButton::clicked, this, [switchTo]() { switchTo(5); });
     connect(m_btnOutline, &QPushButton::clicked, this,
             [switchTo]() { switchTo(6); }); // Stage 17
+    connect(m_btnPlugins, &QPushButton::clicked, this, [this, switchTo]() {
+        switchTo(7);
+        if (m_pluginPanel) m_pluginPanel->refresh();
+    });
     connect(m_btnSettings, &QPushButton::clicked, this, &MainWindow::openSettings);
     // --- Editör alanı: breadcrumb + (grup1 + grup2 + minimap) ---
     m_crumb = new BreadcrumbBar(this);
@@ -1167,6 +1183,7 @@ QString MainWindow::sideTitleFor(int i) const {
     case 3: return L.t("ai_assistant");
     case 5: return L.lang() == "tr" ? "UZAK (SSH)" : "REMOTE (SSH)";
     case 6: return "OUTLINE";
+    case 7: return L.lang() == "tr" ? "EKLENTİLER" : "EXTENSIONS";
     default: return L.lang() == "tr" ? "SORUNLAR" : "PROBLEMS";
     }
 }
@@ -2126,13 +2143,12 @@ bool MainWindow::dispatchCmd2(const QString& id) {
     else if (id == "help.about" || id == "tool.diagnostics") showDiagnostics();
     else if (id == "help.shortcuts") showShortcutDialog();
     else if (id == "file.pluginsDir") openPluginsDir();
-    else if (id == "view.plugins") showPluginManager();
+    else if (id == "view.plugins") showSidePanel(7);
     else if (id == "file.factoryReset") factoryReset();
     else if (id.startsWith("plugin.")) {
         if (m_pluginViews.contains(id)) showPluginView(id);
         else runPluginCommand(id);
     }
-    else if (id == "view.plugins") showPluginManager();
     else if (id.startsWith("tool.")) runExternalTool(id);
     else if (id == "view.theme") openThemeGallery();
     else if (id == "view.git") showSidePanel(2);
@@ -3035,6 +3051,10 @@ void MainWindow::loadPluginsDeferred() {
                 [this](const QString& id, const QString& title) {
                     m_pluginCmds[id] = title;
                     m_pluginViews[id] = title;
+                    if (m_pluginPanel) {
+                        m_pluginPanel->setViews(m_pluginViews);
+                        m_pluginPanel->refresh();
+                    }
                 });
         connect(m_plugins, &PluginEngine::themeRegistered, this,
                 &MainWindow::installPluginTheme);
@@ -3081,6 +3101,22 @@ void MainWindow::loadPluginsDeferred() {
             return e ? e->filePath() : QString();
         });
         m_plugins->fireEvent("startup"); // Stage 29
+    }
+    if (m_pluginPanel) {
+        // Yan sayfa motoru geç alır (gecikmeli yükleme): burada bağla
+        m_pluginPanel->setEngine(m_plugins);
+        connect(m_pluginPanel, &PluginSidePanel::manageRequested, this,
+                &MainWindow::showPluginManager);
+        connect(m_pluginPanel, &PluginSidePanel::folderRequested, this,
+                &MainWindow::openPluginsDir);
+        connect(m_pluginPanel, &PluginSidePanel::storeRequested, this,
+                &MainWindow::showPluginStore);
+        connect(m_pluginPanel, &PluginSidePanel::viewRequested, this,
+                &MainWindow::showPluginView);
+        connect(m_pluginPanel, &PluginSidePanel::pluginsChanged, this,
+                &MainWindow::onPluginsChanged);
+        m_pluginPanel->setViews(m_pluginViews);
+        m_pluginPanel->refresh();
     }
 }
 
@@ -3190,16 +3226,34 @@ void MainWindow::showPluginManager() {
     }
     auto* d = new PluginManagerDialog(m_plugins, this);
     d->setAttribute(Qt::WA_DeleteOnClose);
-    connect(d, &QDialog::finished, this, [this]() {
-        // Yönetici değişiklikleri palete yansısın
-        m_pluginCmds.clear();
-        m_pluginViews.clear();
-        if (m_plugins) {
-            for (const auto& p : m_plugins->plugins())
-                for (const QString& c : p.commands) m_pluginCmds[c] = c;
-        }
-    });
+    connect(d, &QDialog::finished, this, &MainWindow::onPluginsChanged);
     d->show();
+}
+
+// Eklenti yan sayfası: mağaza penceresi
+void MainWindow::showPluginStore() {
+    if (!m_plugins) {
+        toast(0, "Eklenti motoru henüz hazır değil");
+        return;
+    }
+    auto* d = new PluginStoreDialog(m_plugins, this);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    connect(d, &PluginStoreDialog::changed, this, &MainWindow::onPluginsChanged);
+    d->show();
+}
+
+// Eklenti kümesi değişti: palet + yan sayfayı tazele
+void MainWindow::onPluginsChanged() {
+    m_pluginCmds.clear();
+    m_pluginViews.clear(); // loadAll sinyalleriyle yeniden dolar
+    if (m_plugins) {
+        for (const auto& p : m_plugins->plugins())
+            for (const QString& c : p.commands) m_pluginCmds[c] = c;
+    }
+    if (m_pluginPanel) {
+        m_pluginPanel->setViews(m_pluginViews);
+        m_pluginPanel->refresh();
+    }
 }
 
 // Stage 22: fabrika ayarları — önce JSON yedeği, sonra sıfırla
@@ -3381,6 +3435,7 @@ void MainWindow::showSidePanel(int index) {
     m_btnProblems->setChecked(index == 4);
     if (m_btnRemote) m_btnRemote->setChecked(index == 5);
     if (m_btnOutline) m_btnOutline->setChecked(index == 6);
+    if (m_btnPlugins) m_btnPlugins->setChecked(index == 7);
     m_sideTitle->setText(sideTitleFor(index));
     refreshActivityIcons();
 }
@@ -3982,7 +4037,9 @@ void MainWindow::applySidePages() {
         return;
     }
     if (m_sideWrap) m_sideWrap->setVisible(true);
-    if (!s.sidePages.contains(ids[m_side->currentIndex()])) {
+    // ids yalnız ilk 5 sayfayı kapsar (uzak/outline/eklenti her zaman görünür)
+    const int cur = m_side ? m_side->currentIndex() : 0;
+    if (cur < 0 || cur >= ids.size() || !s.sidePages.contains(ids[cur])) {
         for (int i = 0; i < 5; ++i)
             if (s.sidePages.contains(ids[i])) { showSidePanel(i); break; }
     }

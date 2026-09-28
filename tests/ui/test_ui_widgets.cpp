@@ -12,6 +12,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QSettings>
 #include <QSignalSpy>
 #include <QTabWidget>
 #include <QTemporaryDir>
@@ -30,6 +31,7 @@
 #include "../src/widgets/SettingsDialog.h"
 #include "../src/core/PluginEngine.h"
 #include "../src/widgets/PluginStoreDialog.h"
+#include "../src/widgets/PluginSidePanel.h"
 
 class UiWidgetsTest : public QObject {
     Q_OBJECT
@@ -49,6 +51,7 @@ private slots:
     void pathGuard_allowsNormalPaths();
     void commandAudit_roundTrip();
     void pluginStoreDialog_buildsAndLists();
+    void pluginSidePanel_buildsAndLists();
 
 private:
     QTemporaryDir m_home;
@@ -362,6 +365,41 @@ void UiWidgetsTest::pluginStoreDialog_buildsAndLists() {
     dlg.show();
     QVERIFY(QTest::qWaitForWindowExposed(&dlg, 3000));
     dlg.close();
+}
+
+void UiWidgetsTest::pluginSidePanel_buildsAndLists() {
+    QSettings("Verso", "VersoCoder").remove("plugin/enabled"); // izole başla
+    QTemporaryDir plugdir;
+    QVERIFY(plugdir.isValid());
+    QFile f(plugdir.filePath("ornek.js"));
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write("// @name Örnek\n// @version 1.0.0\nverso.log(\"x\");\n");
+    f.close();
+    PluginEngine eng;
+    eng.loadAll(plugdir.path());
+    QVERIFY(eng.isLoaded("ornek"));
+    PluginSidePanel panel;
+    panel.setEngine(&eng);
+    panel.refresh();
+    panel.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&panel, 3000));
+    // Kapatma: ayar yazılır + yeniden yüklenir, sinyal gelir
+    QSignalSpy changed(&panel, &PluginSidePanel::pluginsChanged);
+    bool found = false;
+    for (auto* it : panel.findChildren<QListWidget*>()) {
+        for (int i = 0; i < it->count(); ++i) {
+            auto* wi = it->item(i);
+            if (wi && wi->data(Qt::UserRole).toString() == "ornek" &&
+                (wi->flags() & Qt::ItemIsUserCheckable)) {
+                wi->setCheckState(Qt::Unchecked);
+                found = true;
+            }
+        }
+    }
+    QVERIFY(found);
+    QCOMPARE(changed.size(), 1);
+    QVERIFY(!eng.isLoaded("ornek")); // yeniden yüklemede devre dışı
+    panel.close();
 }
 
 QTEST_MAIN(UiWidgetsTest)
