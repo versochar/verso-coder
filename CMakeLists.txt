@@ -1518,3 +1518,13 @@ add_executable(test_plugins
 target_include_directories(test_plugins PRIVATE src)
 target_link_libraries(test_plugins PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml)
 add_test(NAME plugins COMMAND test_plugins)
+
+# --- Mağaza eklentileri 2: 20 yeni eklenti (geliştirici + dil + web) ---
+add_executable(test_plugins2
+    tests/test_plugins2.cpp
+    src/core/PluginEngine.cpp
+    src/core/PathGuard.cpp
+)
+target_include_directories(test_plugins2 PRIVATE src)
+target_link_libraries(test_plugins2 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml)
+add_test(NAME plugins2 COMMAND test_plugins2)

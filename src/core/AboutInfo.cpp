@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "1.2.0"; }
+QString AboutInfo::version() { return "1.3.0"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,15 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "1.3.0\n"
+        "  • 20 yeni mağaza eklentisi (kayıtta 34 oldu)\n"
+        "  • Geliştirici: log avcısı, TODO, import, model, boşluk,\n"
+        "    karmaşıklık, REST, regex, gitignore, snippet\n"
+        "  • Dil: pydoc, pyfstring, cheader, cppmodern, javags,\n"
+        "    html, cssrenk, jsvar, jsarrow + web önizleme\n"
+        "  • Motor: quickPick JS dizisini doğru ayırır, başsız\n"
+        "    inputBox/quickPick çökmez (test koruması)\n"
+        "  • test_plugins2: 102 davranış denetimi\n"
         "1.2.0\n"
         "  • 10 hazır mağaza eklentisi (kayıtta 14 oldu)\n"
         "  • Markdown/CSV önizleme, JSON bakımı, kod sayacı, Lorem\n"

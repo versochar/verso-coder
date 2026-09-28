@@ -25,7 +25,7 @@ kısıtlanabilir (`plugin/perms/<id>` geçersiz kılma).
 | `readFile(yol)` / `writeFile(yol, metin)` | `fs.read` / `fs.write` | Dosya erişimi |
 | `onEvent(ad, fn)` | `events` | `save`, `open`, `startup`, `language` (arg: yol) |
 | `showStatus(metin, ms)` | `ui` | Durum çubuğu (ms sonra temizlenir) |
-| `quickPick(jsonDizi, ipucu)` | `ui` | Listeden seç (dizi JSON ya da satırlı metin) |
+| `quickPick(dizi, ipucu)` | `ui` | Listeden seç (JS dizisi, JSON ya da satırlı metin) |
 | `inputBox(soru, varsayılan)` | `ui` | Metin sor |
 | `sendTerminal(metin)` | `ui` | Terminal kabuğuna gönder |
 | `fetch(url, ms)` | `net` | HTTP GET (eşzamanlı, en çok 1 MB) |
@@ -66,6 +66,38 @@ kısıtlanabilir (`plugin/perms/<id>` geçersiz kılma).
 
 Davranış denetimleri: `tests/test_plugins.cpp` (62 kontrol; ağ gerektiren
 iki eklenti yükleme + kayıt denetimiyle sınırlı).
+
+## Geliştirici eklentileri (kayıtta)
+
+| Eklenti | Ne yapar | İzinler |
+|---|---|---|
+| Log Avcısı (`logavcisi`) | debug artığı tara + toplu sil | `fs.read`, `fs.write`, `ui` |
+| TODO Paneli (`todo`) | TODO tara, kaydetmede otomatik | `fs.read`, `ui`, `events` |
+| Import Düzenleyici (`importlar`) | Python/JS import sırala | `fs.read`, `fs.write`, `ui` |
+| Model Üretici (`modeluret`) | JSON→C++ struct/dataclass/TS | `fs.read`, `fs.write`, `ui` |
+| Boşluk Temizleyici (`bosluktemiz`) | sondaki boşluk, kaydetmede otomatik | `fs.read`, `fs.write`, `ui`, `events` |
+| Karmaşıklık Ölçer (`karmasiklik`) | işlev skoru, riskliyi bildir | `fs.read`, `ui` |
+| REST İstemcisi (`rest`) | GET denetimi + görünüm | `net`, `ui` |
+| Regex Deneme (`regex`) | kalıp tahtası (saf JS) | `ui` |
+| Gitignore Üretici (`gitignore`) | dile göre `.gitignore` | `net`, `fs.write`, `ui` |
+| Snippet Kitaplığı (`snippet`) | adlı parçalar, dosyaya ekle | `fs.read`, `fs.write`, `ui` |
+
+## Dil eklentileri + web (kayıtta)
+
+| Eklenti | Ne yapar | İzinler |
+|---|---|---|
+| Python Docstring (`pydoc`) | eksik docstring + iskelet | `fs.read`, `fs.write`, `ui` |
+| Python f-string (`pyfstring`) | `%`/`.format()` → f-string | `fs.read`, `fs.write`, `ui` |
+| C Header Guard (`cheader`) | `#ifndef` muhafızı | `fs.read`, `fs.write`, `ui` |
+| C++ Modernleştirici (`cppmodern`) | `nullptr`, `using` | `fs.read`, `fs.write`, `ui` |
+| Java Getter Setter (`javags`) | alanlardan üretir | `fs.read`, `fs.write`, `ui` |
+| HTML Araçları (`html`) | etiket denetimi + iskelet | `fs.read`, `fs.write`, `ui` |
+| CSS Renk Değişkeni (`cssrenk`) | renkleri `:root`'a çıkar | `fs.read`, `fs.write`, `ui` |
+| JS var Dönüştürücü (`jsvar`) | `const`/`let` | `fs.read`, `fs.write`, `ui` |
+| JS Arrow Dönüştürücü (`jsarrow`) | ok işlevi | `fs.read`, `fs.write`, `ui` |
+| Web Önizleme (`webizle`) | HTML + gömülü CSS/JS | `fs.read`, `ui` |
+
+Denetimler: `tests/test_plugins2.cpp` (102 kontrol).
 
 ## Mağaza (kayıt deposu)
 

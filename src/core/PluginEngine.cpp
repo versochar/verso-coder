@@ -1,5 +1,7 @@
 #include "PluginEngine.h"
 #include "PathGuard.h"
+#include <QApplication>
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
@@ -141,9 +143,18 @@ void VersoApi::showStatus(const QString& text, int timeoutMs) {
     emit apiStatus(m_id, text.left(160), qBound(0, timeoutMs, 10000));
 }
 
-QString VersoApi::quickPick(const QString& itemsJson, const QString& placeholder) {
-    if (!need("ui")) return {};
+QStringList VersoApi::pickItems(const QJSValue& itemsV) {
     QStringList items;
+    if (itemsV.isArray()) {
+        // JS dizisi: virgülle yapıştırma, öğe öğe al
+        const quint32 n = itemsV.property("length").toUInt();
+        for (quint32 i = 0; i < n; i++) {
+            const QString s = itemsV.property(i).toString();
+            if (!s.isEmpty()) items << s;
+        }
+        return items;
+    }
+    const QString itemsJson = itemsV.toString();
     const QJsonDocument d = QJsonDocument::fromJson(itemsJson.toUtf8());
     if (d.isArray())
         for (const QJsonValue& v : d.array()) {
@@ -154,7 +165,15 @@ QString VersoApi::quickPick(const QString& itemsJson, const QString& placeholder
     else if (!itemsJson.trimmed().isEmpty()) {
         items = itemsJson.split('\n', Qt::SkipEmptyParts);
     }
+    return items;
+}
+
+QString VersoApi::quickPick(const QJSValue& itemsV,
+                              const QString& placeholder) {
+    if (!need("ui")) return {};
+    const QStringList items = pickItems(itemsV);
     if (items.isEmpty()) return {};
+    if (!qobject_cast<QApplication*>(QCoreApplication::instance())) return {};
     bool ok = false;
     QWidget* parent = qobject_cast<QWidget*>(this->parent());
     while (parent && parent->parentWidget()) parent = parent->parentWidget();
@@ -165,6 +184,7 @@ QString VersoApi::quickPick(const QString& itemsJson, const QString& placeholder
 
 QString VersoApi::inputBox(const QString& prompt, const QString& def) {
     if (!need("ui")) return {};
+    if (!qobject_cast<QApplication*>(QCoreApplication::instance())) return {};
     bool ok = false;
     QWidget* parent = qobject_cast<QWidget*>(this->parent());
     while (parent && parent->parentWidget()) parent = parent->parentWidget();

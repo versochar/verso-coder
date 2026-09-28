@@ -30,7 +30,10 @@ public:
     Q_INVOKABLE void onEvent(const QString& name, const QJSValue& fn); // save|open|startup|language
     // v2: arayüz ("ui" izni)
     Q_INVOKABLE void showStatus(const QString& text, int timeoutMs = 0);
-    Q_INVOKABLE QString quickPick(const QString& itemsJson, const QString& placeholder = QString());
+    Q_INVOKABLE QString quickPick(const QJSValue& items,
+                                    const QString& placeholder = QString());
+    // Başsız test için: dizi/JSON/satırlı metni listeye çevirir
+    static QStringList pickItems(const QJSValue& v);
     Q_INVOKABLE QString inputBox(const QString& prompt, const QString& def = QString());
     Q_INVOKABLE void sendTerminal(const QString& text);
     Q_INVOKABLE QString fetch(const QString& url, int timeoutMs = 10000); // Stage 30: "net" izni
