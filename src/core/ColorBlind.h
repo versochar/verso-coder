@@ -3,7 +3,7 @@
 #include <QString>
 #include <QStringList>
 
-class ThemeTokens;
+struct ThemeTokens;
 
 // Stage 12: renk körü dostu palet dönüşümü (Machado 2009 yaklaşıklığı).
 // ThemeTokens JSON turu üzerinden uygulanır — yeni renk alanları otomatik kapsanır.

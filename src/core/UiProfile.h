@@ -2,7 +2,7 @@
 #include <QString>
 #include <QStringList>
 
-class AppSettings;
+struct AppSettings;
 
 // Stage 10: kişiselleştirme profili — kullanıcının tüm görünüm tercihlerini
 // (tema, accent, tipografi, düzen...) tek JSON dosyasında dışa/içe aktarır.
