@@ -1508,3 +1508,13 @@ add_executable(test_pluginstore
 target_include_directories(test_pluginstore PRIVATE src)
 target_link_libraries(test_pluginstore PRIVATE Qt6::Core Qt6::Network)
 add_test(NAME pluginstore COMMAND test_pluginstore)
+
+# --- Mağaza eklentileri: 10 eklenti yüklenir, komutlar başsız çağrılır ---
+add_executable(test_plugins
+    tests/test_plugins.cpp
+    src/core/PluginEngine.cpp
+    src/core/PathGuard.cpp
+)
+target_include_directories(test_plugins PRIVATE src)
+target_link_libraries(test_plugins PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml)
+add_test(NAME plugins COMMAND test_plugins)

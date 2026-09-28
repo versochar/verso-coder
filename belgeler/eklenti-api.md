@@ -49,6 +49,24 @@ kısıtlanabilir (`plugin/perms/<id>` geçersiz kılma).
 `resources/plugins/`: `echo.js` (v1), `selam.js` (durum + giriş + sayaç),
 `notal.js` (quickPick + dosya + görünüm). İlk açılışta klasöre kopyalanırlar.
 
+## Mağaza eklentileri (kayıtta)
+
+| Eklenti | Ne yapar | İzinler |
+|---|---|---|
+| Markdown Önizleme (`md`) | `.md` → HTML görünüm | `fs.read`, `ui` |
+| JSON Bakımı (`json`) | doğrula + pretty-print | `fs.read`, `fs.write`, `ui` |
+| CSV Tablo (`csv`) | `.csv` → tablo görünüm | `fs.read`, `ui` |
+| Kod Sayacı (`kodsay`) | satır/kod/yorum/boş + işlev | `fs.read`, `ui` |
+| Lorem Üretici (`lorem`) | paragraf üretir, dosyaya ekler | `fs.read`, `fs.write`, `ui` |
+| Çeviri (`ceviri`) | EN↔TR (ücretsiz API) | `net`, `ui` |
+| Hava Durumu (`hava`) | 3 günlük tahmin (ücretsiz API) | `net`, `ui` |
+| Git Hızlı Komut (`githizli`) | status/log/diff → terminal | `ui` |
+| Çalışma Alanı Notları (`notlar`) | dosyasız notlar (proje başına) | `ui` |
+| Pastel Temalar (`pastel`) | 3 tema (galeriye düşer) | `ui` |
+
+Davranış denetimleri: `tests/test_plugins.cpp` (62 kontrol; ağ gerektiren
+iki eklenti yükleme + kayıt denetimiyle sınırlı).
+
 ## Mağaza (kayıt deposu)
 
 Resmi kayıt: `github.com/versochar/verso-coder-plugins` (git reposu).

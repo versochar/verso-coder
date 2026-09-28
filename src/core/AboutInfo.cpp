@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "1.1.0"; }
+QString AboutInfo::version() { return "1.2.0"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,11 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "1.2.0\n"
+        "  • 10 hazır mağaza eklentisi (kayıtta 14 oldu)\n"
+        "  • Markdown/CSV önizleme, JSON bakımı, kod sayacı, Lorem\n"
+        "  • Çeviri, hava durumu, git kısayolları, alan notları, pastel temalar\n"
+        "  • test_plugins: 62 davranış denetimi (ağ gerektirenler hariç)\n"
         "1.1.0\n"
         "  • Eklenti Mağazası: kayıt deposundan tek tıkla kur/güncelle/kaldır\n"
         "  • Kayıt deposu: github.com/versochar/verso-coder-plugins (git)\n"

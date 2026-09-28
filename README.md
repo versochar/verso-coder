@@ -2,7 +2,7 @@
 
 Yerel öncelikli, Qt6 ile yazılmış hızlı kod editörü. Sekmeli editör, LSP, Git, uzak geliştirme ve **çok sağlayıcılı yapay zekâ** (yerel Ollama'dan buluta) tek uygulamada.
 
-Sürüm 1.1.0 · MIT lisansı · Linux (AppImage/pacman) · Windows · macOS (Apple Silicon)
+Sürüm 1.2.0 · MIT lisansı · Linux (AppImage/pacman) · Windows · macOS (Apple Silicon)
 
 ## Kurulum
 
@@ -74,7 +74,9 @@ sudo pacman -Sy verso-coder
 - **Uzak geliştirme:** SSH ile dosya/terminal/LSP/git/tünel; bağlantı profilleri
 - **Eklentiler:** JavaScript API (`verso.*`), örnek kelime sayacı dahil
 - **Eklenti Mağazası:** kayıt deposundan tek tıkla kur/güncelle/kaldır
-  (Eklentiler → Mağaza); kurulumda izin onayı istenir
+  (Eklentiler → Mağaza); kurulumda izin onayı istenir.
+  14 hazır eklenti: Markdown/CSV önizleme, JSON bakımı, kod sayacı,
+  Lorem, çeviri, hava durumu, git kısayolları, alan notları, pastel temalar
 - **Birlikte çalışma:** yerel ağda oturum barındır/katıl, renkli eş imleçleri (şifresizdir — yalnız güvenilir ağda)
 
 ## Klavye (seçmeler)
