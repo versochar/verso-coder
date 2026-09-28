@@ -133,6 +133,9 @@ void PluginStoreDialog::refreshRemote() {
 }
 
 void PluginStoreDialog::refreshList() {
+    // setCurrentItem sinyali aynı slota dönerdi (sonsuz özyineleme → donma);
+    // yeniden kurulumda sinyalleri sustur
+    const QSignalBlocker b(m_list);
     const QString sel = m_list->currentItem()
                             ? m_list->currentItem()->data(Qt::UserRole).toString()
                             : QString();

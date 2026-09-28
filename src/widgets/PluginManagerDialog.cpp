@@ -13,6 +13,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QSplitter>
 #include <QTextEdit>
 #include <QVBoxLayout>
@@ -73,6 +74,8 @@ static QString curId(QListWidget* list) {
 }
 
 void PluginManagerDialog::refreshList() {
+    // Mağaza ile aynı tuzak: setCurrentItem → currentRowChanged → refreshList
+    const QSignalBlocker b(m_list);
     const QString sel = curId(m_list);
     m_list->clear();
     if (!m_eng) return;

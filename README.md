@@ -2,7 +2,7 @@
 
 Yerel öncelikli, Qt6 ile yazılmış hızlı kod editörü. Sekmeli editör, LSP, Git, uzak geliştirme ve **çok sağlayıcılı yapay zekâ** (yerel Ollama'dan buluta) tek uygulamada.
 
-Sürüm 0.3.2 · MIT lisansı · Linux (AppImage/pacman) · Windows · macOS (Apple Silicon)
+Sürüm 0.3.3 · MIT lisansı · Linux (AppImage/pacman) · Windows · macOS (Apple Silicon)
 
 ## Kurulum
 
@@ -85,7 +85,7 @@ sudo pacman -Sy verso-coder
 
 ## Klavye (seçmeler)
 
-`Ctrl+P` dosya aç · `Ctrl+Shift+P` komutlar · `Ctrl+F` bul · `F5` çalıştır · `F9` kesme noktası · `F12` tanıma git · `F2` yeniden adlandır · `Ctrl+.` AI durdur · `F7` yazım denetimi · `Ctrl+=/-` yakınlaştırma. Tamamı Ayarlar → Kısayollar'dan değişir (VS Code / JetBrains / Vim profilleri hazır).
+`Ctrl+P` dosya aç · `Ctrl+Shift+P` komutlar · `Ctrl+F` bul · `Ctrl+Shift+O` gezginde göster · `F5` çalıştır · `F9` kesme noktası · `Ctrl+F10` imlece kadar çalıştır · `F12` tanıma git · `F2` yeniden adlandır · `Ctrl+.` AI durdur · `F7` yazım denetimi · `Ctrl+=/-` yakınlaştırma. Tamamı Ayarlar → Kısayollar'dan değişir (VS Code / JetBrains / Vim profilleri hazır).
 
 ## Bilinen sınırlamalar (kısa)
 

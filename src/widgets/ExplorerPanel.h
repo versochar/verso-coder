@@ -26,6 +26,8 @@ public:
     explicit ExplorerPanel(QWidget* parent = nullptr);
     void setRoot(const QString& path);
     QString root() const { return m_root; }
+    // Açık dosyayı ağaçta bul + kaydır + seç (yoksa sessiz)
+    void revealFile(const QString& path);
     void setGitIgnore(GitIgnore* ig);
     void setTrash(TrashManager* trash) { m_trash = trash; }
 

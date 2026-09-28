@@ -5,7 +5,7 @@
 class QLineEdit;
 class QListWidget;
 
-// Stage 13: sembol seçici — Ctrl+Shift+O (belge) ve Ctrl+T (çalışma alanı) ortak.
+// Stage 13: sembol seçici — palet üzerinden (belge) ve Ctrl+T (çalışma alanı) ortak.
 class SymbolPickerDialog : public QDialog {
     Q_OBJECT
 public:

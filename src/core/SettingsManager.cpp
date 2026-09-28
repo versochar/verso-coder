@@ -63,6 +63,8 @@ AppSettings SettingsManager::load() const {
     s.showLineEnds      = q.value("editor/showLineEnds", false).toBool();
     s.foldGutter        = q.value("editor/foldGutter", "sol").toString();
     s.minimapWidth      = qBound(40, q.value("editor/minimapWidth", 90).toInt(), 220);
+    s.tabBarMaxWidth    = qBound(0, q.value("editor/tabBarMaxWidth", 0).toInt(), 400);
+    s.maxOpenTabs       = qBound(0, q.value("editor/maxOpenTabs", 0).toInt(), 50);
     s.aiTokenBudget     = qMax(0, q.value("ai/tokenBudget", 0).toInt());
     s.testOnSave        = q.value("test/onSave", false).toBool();
     s.aiScheduleMin     = qMax(0, q.value("ai/scheduleMin", 0).toInt());
@@ -223,6 +225,8 @@ void SettingsManager::save(const AppSettings& s) const {
     q.setValue("editor/showLineEnds", s.showLineEnds);
     q.setValue("editor/foldGutter", s.foldGutter);
     q.setValue("editor/minimapWidth", s.minimapWidth);
+    q.setValue("editor/tabBarMaxWidth", s.tabBarMaxWidth);
+    q.setValue("editor/maxOpenTabs", s.maxOpenTabs);
     q.setValue("ai/tokenBudget", s.aiTokenBudget);
     q.setValue("test/onSave", s.testOnSave);
     q.setValue("ai/scheduleMin", s.aiScheduleMin);

@@ -1,7 +1,7 @@
 pkgbase = verso-coder
 	pkgdesc = Yerel öncelikli Qt6 kod editörü — çok sağlayıcılı AI, ajan, LSP, Git
 	epoch = 1
-	pkgver = 0.3.2
+	pkgver = 0.3.3
 	pkgrel = 1
 	url = https://github.com/versochar/verso-coder
 	arch = x86_64

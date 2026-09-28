@@ -120,6 +120,7 @@ private:
     QCheckBox* m_crashReport = nullptr; // Stage 31
     QCheckBox* m_restore;
     QCheckBox* m_updateCheck = nullptr; // Stage 48
+    QCheckBox* m_pluginUpdateCheck = nullptr;
     // Stage 3: AI
     QCheckBox* m_streaming;
     QComboBox* m_ctxMode;
@@ -166,6 +167,8 @@ private:
     QCheckBox* m_showLineEnds;
     QComboBox* m_foldGutter;
     QSpinBox* m_minimapWidth;
+    QSpinBox* m_tabBarMaxWidth;
+    QSpinBox* m_maxOpenTabs;
     QSpinBox* m_ruler;
     QCheckBox* m_stickyScroll;
     // Stage 12

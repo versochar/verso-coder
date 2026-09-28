@@ -22,6 +22,7 @@
 #include <QWidget>
 
 #include "../src/MainWindow.h"
+#include "../src/widgets/CodeEditor.h"
 #include "../src/core/LeakWatch.h"
 #include "../src/core/ProjectSessions.h"
 #include "../src/core/SettingsManager.h"
@@ -45,6 +46,7 @@ private slots:
     void mainWindow_survivesRepeatedProviderSwitching();
     void mainWindow_settingsSoakDoesNotLeak();
     void mainWindow_lazyTabsRestoreAndMaterialize();
+    void mainWindow_tabLimitAndWidth();
 
 private:
     QTemporaryDir m_home;
@@ -378,6 +380,75 @@ void UiSmokeTest::mainWindow_lazyTabsRestoreAndMaterialize() {
     for (const QString& c : back.cursors)
         if (c.startsWith(files[1]) || c.startsWith(files[2])) sawCursor = true;
     QVERIFY(sawCursor);
+}
+
+void UiSmokeTest::mainWindow_tabLimitAndWidth() {
+    QVERIFY(m_win);
+    // Modal kapatıcı (file.new dil seçici açar): OK düğmesine bas
+    // (doğrudan accept() m_lang'i doldurmaz)
+    auto* closer = new QTimer;
+    closer->setInterval(40);
+    QObject::connect(closer, &QTimer::timeout, []() {
+        QWidget* modal = QApplication::activeModalWidget();
+        if (!modal) return;
+        if (auto* box = modal->findChild<QDialogButtonBox*>()) {
+            if (QPushButton* ok = box->button(QDialogButtonBox::Ok)) {
+                ok->click();
+                return;
+            }
+        }
+        if (auto* d = qobject_cast<QDialog*>(modal)) d->accept();
+        else modal->close();
+    });
+    closer->start();
+    auto edCount = [&]() { return m_win->findChildren<CodeEditor*>().size(); };
+    // Sınır 3 + genişlik 150 uygula
+    {
+        AppSettings s = SettingsManager::instance().load();
+        s.maxOpenTabs = 3;
+        s.tabBarMaxWidth = 150;
+        SettingsManager::instance().save(s);
+    }
+    QVERIFY(QMetaObject::invokeMethod(m_win, "applySettings", Qt::DirectConnection));
+    QTest::qWait(100);
+    bool widthOk = false;
+    for (auto* t : m_win->findChildren<QTabWidget*>()) {
+        if (!t->tabBar()) continue;
+        if (t->tabBar()->styleSheet().contains("max-width:150px") &&
+            t->tabBar()->elideMode() == Qt::ElideRight)
+            widthOk = true;
+    }
+    QVERIFY(widthOk);
+    // 4 adsız sekme aç → editör sayısı 3'e sabitlenir (en eskiler kapanır)
+    QAction* yeni = m_win->findChild<QAction*>("file.new");
+    QVERIFY(yeni);
+    for (int i = 0; i < 4; ++i) {
+        yeni->trigger();
+        QTest::qWait(80);
+    }
+    QTRY_COMPARE(edCount(), 3);
+    // Temizlik: bu test dosyada sonda; tüm editör sekmelerini kapat
+    for (int k = 0; k < 20 && edCount() > 0; ++k) {
+        for (auto* t : m_win->findChildren<QTabWidget*>()) {
+            for (int i = t->count() - 1; i >= 0 && edCount() > 0; --i) {
+                if (qobject_cast<CodeEditor*>(t->widget(i))) {
+                    t->tabCloseRequested(i);
+                    QTest::qWait(30);
+                }
+            }
+        }
+    }
+    QCOMPARE(edCount(), 0);
+    {
+        AppSettings s = SettingsManager::instance().load();
+        s.maxOpenTabs = 0;
+        s.tabBarMaxWidth = 0;
+        SettingsManager::instance().save(s);
+    }
+    QVERIFY(QMetaObject::invokeMethod(m_win, "applySettings", Qt::DirectConnection));
+    QTest::qWait(100);
+    closer->stop();
+    closer->deleteLater();
 }
 
 QTEST_MAIN(UiSmokeTest)

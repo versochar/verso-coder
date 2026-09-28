@@ -93,6 +93,9 @@ private slots:
     void showPalette();
     void runCommand(const QString& id);
     void gotoLineDialog();
+    void revealInExplorer();
+    void applyTabBarSettings();
+    void enforceTabLimit(QTabWidget* tabs);
     void lspDefinition();
     void lspHover();
     void checkSpelling();
@@ -306,6 +309,8 @@ private:
     void importSshConfig();
     void searchAiChats();
     void showClipboardManager();
+    void pasteClipboardText(const QString& t);
+    void showRecentClipboard();
     void newProjectWizard();
     void newFileFromTemplate();
     QString fileTemplateDir() const;

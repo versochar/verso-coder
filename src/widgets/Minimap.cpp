@@ -39,6 +39,11 @@ void Minimap::setEditor(QPlainTextEdit* editor) {
     m_searchCur = -1;
     m_lensLine = -1;
     if (!m_editor) { update(); return; }
+    // Editör silinirse sarkan göstericiyle boyama (çökme)
+    connect(m_editor, &QObject::destroyed, this, [this]() {
+        m_editor = nullptr;
+        update();
+    });
     connect(m_editor->document(), &QTextDocument::contentsChanged, this,
             &Minimap::invalidateBars); // Stage 32: içerik değişince çubuklar tazelenir
     connect(m_editor->verticalScrollBar(), &QScrollBar::valueChanged, this, &Minimap::scheduleUpdate);

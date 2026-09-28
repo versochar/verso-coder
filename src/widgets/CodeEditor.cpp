@@ -282,12 +282,16 @@ void CodeEditor::applyEditorSettings(int fontSize, int tabWidth) {
 
 // Stage 9: satır yüksekliği (1.0 = tek satır) — blok formatıyla uygulanır.
 void CodeEditor::applyLineHeight(double lh) {
+    // Salt görsel biçim: içerik değişmiş sayılmaz (kirli bayrağı + hayalet
+    // undo adımı üretmemeli, yoksa her açılan dosya "değişti" görünür)
+    const bool wasMod = document()->isModified();
     QTextCursor c(document());
     c.select(QTextCursor::Document);
     QTextBlockFormat fmt;
     fmt.setLineHeight(lh > 1.001 ? int(Typography::clampLineHeight(lh) * 100) : 100,
                       QTextBlockFormat::ProportionalHeight);
     c.mergeBlockFormat(fmt);
+    document()->setModified(wasMod);
 }
 
 // Stage 9: tema değişince renkleri tazele.
@@ -815,29 +819,94 @@ QPair<int, int> CodeEditor::selectedLineRange() const {
 
 void CodeEditor::moveLineOrSelection(int dir) {
     if (m_preview) return;
-    auto [first, last] = selectedLineRange();
-    int count = blockCount();
-    if ((dir < 0 && first == 0) || (dir > 0 && last >= count - 1)) return;
-    QStringList lines = toPlainText().split('\n');
-    // Son satır boşluğu ( trailing \n ) koruması: split parçası olarak ele al
-    QStringList moving;
-    for (int i = first; i <= last; ++i) moving << lines[i];
-    for (int i = 0; i <= last - first; ++i) lines.removeAt(first);
-    int insertAt = first + dir;
-    for (int i = 0; i < moving.size(); ++i) lines.insert(insertAt + i, moving[i]);
-    int col = textCursor().columnNumber();
-    bool hadSel = textCursor().hasSelection();
-    setPlainText(lines.join('\n'));
-    QTextCursor c(document());
-    c.movePosition(QTextCursor::Start);
-    c.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, insertAt);
-    if (hadSel || first != last) {
-        c.movePosition(QTextCursor::Down, QTextCursor::KeepAnchor, last - first);
-        c.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
-    } else {
-        c.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, qMin(col, c.block().length() - 1));
+    if (dir != -1 && dir != 1) return;
+    // Tüm imleçlerin (ana + ek) satır aralıklarını topla
+    struct Snap { int sb, sc, eb, ec; }; // başlangıç/bitiş blok+sütun (ofset sırası)
+    QList<QTextCursor> all;
+    all << textCursor();
+    all << m_extra;
+    QList<Snap> snaps;
+    QList<QPair<int, int>> ranges;
+    for (const QTextCursor& c : all) {
+        QTextCursor ca(document()), cb(document());
+        ca.setPosition(c.selectionStart());
+        cb.setPosition(c.selectionEnd());
+        int first = ca.blockNumber(), last = cb.blockNumber();
+        if (c.hasSelection() && cb.positionInBlock() == 0 && last > first) --last;
+        ranges << qMakePair(first, last);
+        snaps << Snap{first, ca.positionInBlock(), last, cb.positionInBlock()};
     }
-    setTextCursor(c);
+    // Çakışan/bitişik aralıkları birleştir
+    std::sort(ranges.begin(), ranges.end());
+    QList<QPair<int, int>> blocks;
+    for (const auto& r : ranges) {
+        if (!blocks.isEmpty() && r.first <= blocks.last().second + 1)
+            blocks.last().second = qMax(blocks.last().second, r.second);
+        else
+            blocks << r;
+    }
+    QStringList lines = toPlainText().split('\n');
+    const int n = lines.size();
+    QVector<int> newPos(n); // eski satır -> yeni satır
+    for (int i = 0; i < n; ++i) newPos[i] = i;
+    bool moved = false;
+    auto swapUp = [&](int f, int l) { // [f..l] bir yukarı
+        QString tmp = lines[f - 1];
+        for (int i = f; i <= l; ++i) lines[i - 1] = lines[i];
+        lines[l] = tmp;
+        for (int i = f; i <= l; ++i) newPos[i] = i - 1;
+        newPos[f - 1] = l;
+        moved = true;
+    };
+    auto swapDown = [&](int f, int l) { // [f..l] bir aşağı
+        QString tmp = lines[l + 1];
+        for (int i = l; i >= f; --i) lines[i + 1] = lines[i];
+        lines[f] = tmp;
+        for (int i = f; i <= l; ++i) newPos[i] = i + 1;
+        newPos[l + 1] = f;
+        moved = true;
+    };
+    if (dir < 0) {
+        for (const auto& b : blocks) {
+            if (b.first == 0) continue; // sınırdakiler sabit kalır
+            swapUp(b.first, b.second);
+        }
+    } else {
+        for (int i = blocks.size() - 1; i >= 0; --i) {
+            const auto& b = blocks[i];
+            if (b.second >= n - 1) continue;
+            swapDown(b.first, b.second);
+        }
+    }
+    if (!moved) return;
+    setPlainText(lines.join('\n'));
+    // İmleçleri yeni konumlarına koy
+    auto place = [&](const Snap& s) {
+        int nb1 = newPos[qBound(0, s.sb, n - 1)];
+        int nb2 = newPos[qBound(0, s.eb, n - 1)];
+        QTextCursor c(document());
+        QTextBlock b1 = document()->findBlockByNumber(nb1);
+        QTextBlock b2 = document()->findBlockByNumber(nb2);
+        c.setPosition(b1.position() + qMin(s.sc, qMax(0, b1.length() - 1)));
+        if (nb2 != nb1 || s.ec != s.sc)
+            c.setPosition(b2.position() + qMin(s.ec, qMax(0, b2.length() - 1)),
+                          QTextCursor::KeepAnchor);
+        return c;
+    };
+    QTextCursor mainCur = place(snaps[0]);
+    setTextCursor(mainCur);
+    m_extra.clear();
+    for (int i = 1; i < snaps.size(); ++i) {
+        QTextCursor c = place(snaps[i]);
+        bool dup = (c.position() == mainCur.position() && c.anchor() == mainCur.anchor());
+        for (const QTextCursor& e : m_extra) {
+            if (e.position() == c.position() && e.anchor() == c.anchor()) {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup) m_extra << c;
+    }
 }
 
 void CodeEditor::duplicateLineOrSelection() {

@@ -4,6 +4,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QStandardPaths>
 #include <QUrl>
 
@@ -29,6 +30,12 @@ void SecretStore::setUseKeyring(bool on) {
 }
 
 bool SecretStore::keyringAvailable() {
+    // Test kancası: VERSO_NO_KEYRING doluysa sistem anahtarlığı yok sayılır
+    // (geliştirici makinesindeki gerçek anahtarlar testleri kirletmesin)
+    if (!QProcessEnvironment::systemEnvironment()
+             .value("VERSO_NO_KEYRING")
+             .isEmpty())
+        return false;
     return !QStandardPaths::findExecutable("secret-tool").isEmpty();
 }
 

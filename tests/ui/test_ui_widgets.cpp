@@ -5,6 +5,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileSystemModel>
 #include <QTableWidget>
 #include <QCheckBox>
 #include <QComboBox>
@@ -14,16 +15,20 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSignalSpy>
+#include <QSortFilterProxyModel>
+#include <QSpinBox>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTextBrowser>
+#include <QTreeView>
 #include <QTreeWidget>
 
 #include "../src/core/AgentTools.h"
 #include <QJsonObject>
 #include "../src/core/CommandAudit.h"
 #include "../src/core/PathGuard.h"
+#include "../src/core/SettingsManager.h"
 #include "../src/core/ai/ProviderPrefs.h"
 #include "../src/core/ai/SecretStore.h"
 #include "../src/core/ai/UsageLedger.h"
@@ -34,6 +39,8 @@
 #include "../src/core/GitRunner.h"
 #include "../src/widgets/PluginStoreDialog.h"
 #include "../src/widgets/PluginSidePanel.h"
+#include "../src/widgets/ExplorerPanel.h"
+#include "../src/widgets/PluginManagerDialog.h"
 #include "../src/widgets/TestExplorer.h"
 #include "../src/widgets/WorktreeDialog.h"
 
@@ -56,6 +63,10 @@ private slots:
     void commandAudit_roundTrip();
     void pluginStoreDialog_buildsAndLists();
     void pluginSidePanel_buildsAndLists();
+    void settings_pluginUpdateCheckPersists();
+    void settingsDialog_editorTabRoundTrip();
+    void explorerPanel_revealsFile();
+    void pluginManager_clickSelects();
     void testExplorer_filterAndFailed();
     void worktreeDialog_buildsAndLists();
     void pluginStoreDialog_loadsLocalRegistry();
@@ -81,7 +92,7 @@ void UiWidgetsTest::settingsDialog_opensAllPages() {
     QVERIFY(QTest::qWaitForWindowExposed(&dlg, 3000));
     auto* tabs = dlg.findChild<QTabWidget*>();
     QVERIFY(tabs);
-    QVERIFY(tabs->count() >= 6);
+    QVERIFY(tabs->count() >= 7); // +Editör sekmesi
     // Her sayfa gerçekten kurulabiliyor mu?
     for (int i = 0; i < tabs->count(); ++i) {
         tabs->setCurrentIndex(i);
@@ -439,8 +450,40 @@ void UiWidgetsTest::pluginStoreDialog_loadsLocalRegistry() {
     QVERIFY(liste);
     QTRY_VERIFY(liste->count() == 1);
     QVERIFY(liste->item(0)->text().contains("Deneme"));
+    // Tıklama özyinelememeli (donma regresyonu): seçim + ayrıntı gelir
+    liste->setCurrentRow(0);
+    QTest::qWait(50);
+    QCOMPARE(liste->currentRow(), 0);
+    auto* ayrinti = dlg.findChild<QTextEdit*>();
+    QVERIFY(ayrinti);
+    QVERIFY(ayrinti->toPlainText().contains("Deneme"));
     dlg.close();
     qunsetenv("VERSO_PLUGIN_REGISTRY");
+}
+
+void UiWidgetsTest::pluginManager_clickSelects() {
+    // Yönetici penceresinde de aynı tuzak vardı
+    QSettings("Verso", "VersoCoder").remove("plugin/enabled");
+    QTemporaryDir plugdir;
+    QVERIFY(plugdir.isValid());
+    QFile f(plugdir.filePath("ornek.js"));
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write("// @name Örnek\n// @version 1.0.0\nverso.log(1);\n");
+    f.close();
+    PluginEngine eng;
+    eng.loadAll(plugdir.path());
+    QVERIFY(eng.isLoaded("ornek"));
+    PluginManagerDialog yon(&eng);
+    yon.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&yon, 3000));
+    QListWidget* liste = yon.findChild<QListWidget*>();
+    QVERIFY(liste);
+    QTRY_VERIFY(liste->count() >= 1);
+    liste->setCurrentRow(0);
+    QTest::qWait(50);
+    QCOMPARE(liste->currentRow(), 0);
+    yon.close();
+    QSettings("Verso", "VersoCoder").remove("plugin/enabled");
 }
 
 void UiWidgetsTest::worktreeDialog_buildsAndLists() {
@@ -500,6 +543,96 @@ void UiWidgetsTest::testExplorer_filterAndFailed() {
     QCOMPARE(gorunur, 1);
     süz->clear();
     ex.close();
+}
+
+void UiWidgetsTest::explorerPanel_revealsFile() {
+    QTemporaryDir kok;
+    QVERIFY(kok.isValid());
+    QVERIFY(QDir().mkpath(kok.filePath("alt")));
+    QFile f(kok.filePath("alt/dosya.txt"));
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write("x");
+    f.close();
+    ExplorerPanel panel;
+    panel.setRoot(kok.path());
+    panel.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&panel, 3000));
+    QTest::qWait(300); // QFileSystemModel tembel yüklenir
+    panel.revealFile(kok.filePath("alt/dosya.txt"));
+    QTreeView* agac = panel.findChild<QTreeView*>();
+    QVERIFY(agac);
+    // GitIgnore proxy'sinden kaynağa: seçili dizin dosyayı göstermeli
+    const QModelIndex cur = agac->currentIndex();
+    QVERIFY(cur.isValid());
+    const auto* proxy =
+        qobject_cast<const QSortFilterProxyModel*>(agac->model());
+    QVERIFY(proxy);
+    const QModelIndex src = proxy->mapToSource(cur);
+    QVERIFY(src.isValid());
+    QCOMPARE(QFileInfo(QDir(kok.path()), "alt/dosya.txt").absoluteFilePath(),
+             QFileInfo(src.data(QFileSystemModel::FilePathRole).toString())
+                 .absoluteFilePath());
+    // Kök dışı sessizce yoksayılır (çökme yok)
+    panel.revealFile("/yok/boyle/bir/dosya.txt");
+    panel.close();
+}
+
+void UiWidgetsTest::settingsDialog_editorTabRoundTrip() {
+    SettingsDialog dlg;
+    dlg.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&dlg, 3000));
+    auto* tabs = dlg.findChild<QTabWidget*>();
+    QVERIFY(tabs);
+    int ed = -1;
+    for (int i = 0; i < tabs->count(); ++i)
+        if (tabs->tabText(i) == "Editör") ed = i;
+    QVERIFY(ed >= 0);
+    tabs->setCurrentIndex(ed);
+    QTest::qWait(50);
+    QWidget* page = tabs->widget(ed);
+    QVERIFY(page);
+    auto spins = page->findChildren<QSpinBox*>();
+    QCOMPARE(spins.size(), 2);
+    spins[0]->setValue(160);
+    spins[1]->setValue(7);
+    QPushButton* kaydet = nullptr;
+    for (auto* b : dlg.findChildren<QPushButton*>())
+        if (b->text() == "Kaydet") kaydet = b;
+    QVERIFY(kaydet);
+    QTest::mouseClick(kaydet, Qt::LeftButton);
+    QTest::qWait(50);
+    AppSettings s = SettingsManager::instance().load();
+    QCOMPARE(s.tabBarMaxWidth, 160);
+    QCOMPARE(s.maxOpenTabs, 7);
+    // Temiz bırak
+    s.tabBarMaxWidth = 0;
+    s.maxOpenTabs = 0;
+    SettingsManager::instance().save(s);
+}
+
+void UiWidgetsTest::settings_pluginUpdateCheckPersists() {
+    QSettings q("Verso", "VersoCoder");
+    q.remove("plugin/checkUpdates");
+    {
+        SettingsDialog dlg;
+        dlg.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&dlg, 3000));
+        QCheckBox* kutu = nullptr;
+        for (auto* c : dlg.findChildren<QCheckBox*>())
+            if (c->text().contains("Eklenti güncellemelerini")) kutu = c;
+        QVERIFY(kutu);
+        QVERIFY(kutu->isChecked()); // varsayılan açık
+        kutu->setChecked(false);
+        QPushButton* kaydet = nullptr;
+        for (auto* b : dlg.findChildren<QPushButton*>())
+            if (b->text() == "Kaydet") kaydet = b;
+        QVERIFY(kaydet);
+        QTest::mouseClick(kaydet, Qt::LeftButton);
+        QTest::qWait(50);
+    }
+    QCOMPARE(QSettings("Verso", "VersoCoder").value("plugin/checkUpdates", true).toBool(),
+             false);
+    q.remove("plugin/checkUpdates"); // temiz bırak
 }
 
 QTEST_MAIN(UiWidgetsTest)

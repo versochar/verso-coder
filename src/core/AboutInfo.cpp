@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "0.3.2"; }
+QString AboutInfo::version() { return "0.3.3"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,12 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "0.3.3\n"
+        "  • Mağaza/Yönetici tıklama donması bitti (özyineleme kilidi)\n"
+        "  • Çoklu imleçle satır taşıma (ek imleçler korunur)\n"
+        "  • Explorer aktif dosyayı gösterir + Ctrl+Shift+O\n"
+        "  • Sekme genişliği + en fazla sekme ayarı (Editör sayfası)\n"
+        "  • Son kopyalananlar hızlı menüsü + eklenti güncelleme anahtarı\n"
         "0.3.2\n"
         "  • Sürüm dizisi sıfırlandı (mağaza dönemi)\n"
         "  • Mağaza donması bitti: kayıt/indirme eşzamansız\n"

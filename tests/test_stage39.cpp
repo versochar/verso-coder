@@ -190,6 +190,8 @@ int main(int argc, char** argv) {
     QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, home.path());
     qputenv("XDG_DATA_HOME", home.path().toUtf8());
     qputenv("HOME", home.path().toUtf8());
+    // Sistem anahtarlığındaki GERÇEK anahtarlar varsayımları bozar
+    qputenv("VERSO_NO_KEYRING", "1");
 
     testShellMetachars();
     testQueueThreshold();

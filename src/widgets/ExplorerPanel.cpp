@@ -3,6 +3,7 @@
 #include "../core/GitIgnore.h"
 #include "../core/TrashManager.h"
 #include <QDir>
+#include <QEventLoop>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
@@ -10,6 +11,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QTimer>
 #include <QVBoxLayout>
 
 // ---------- GitIgnoreFilterModel ----------
@@ -98,6 +100,48 @@ void ExplorerPanel::setRoot(const QString& path) {
     m_tree->setRootIndex(m_proxy->mapFromSource(srcIdx));
     if (m_tree->rootIndex().isValid())
         m_tree->expand(m_tree->rootIndex());
+}
+
+void ExplorerPanel::revealFile(const QString& path) {
+    if (path.isEmpty() || m_root.isEmpty()) return;
+    const QString rel = QDir(m_root).relativeFilePath(QFileInfo(path).absoluteFilePath());
+    if (rel.isEmpty() || rel.startsWith("..")) return; // kök dışı
+    // Kökten aşağı in (QFileSystemModel tembel yükler: katman katman besle)
+    QModelIndex parent = m_model->index(m_root);
+    if (!parent.isValid()) return;
+    QString abs = m_root;
+    const QStringList parts = rel.split('/', Qt::SkipEmptyParts);
+    for (const QString& part : parts) {
+        // Model tembel: dizini açıkça iste (canFetchMore'a bakmadan),
+        // diskte doluysa sonucu sınırlı bekle
+        m_model->fetchMore(parent);
+        if (m_model->rowCount(parent) == 0 &&
+            !QDir(abs).entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty()) {
+            for (int deneme = 0;
+                 deneme < 20 && m_model->rowCount(parent) == 0; ++deneme) {
+                QEventLoop loop;
+                QTimer::singleShot(50, &loop, &QEventLoop::quit);
+                loop.exec();
+            }
+        }
+        QModelIndex next;
+        for (int r = 0; r < m_model->rowCount(parent); ++r) {
+            QModelIndex c = m_model->index(r, 0, parent);
+            if (m_model->fileName(c) == part) {
+                next = c;
+                break;
+            }
+        }
+        if (!next.isValid()) return; // diskte yok
+        abs += "/" + part;
+        parent = next;
+    }
+    QModelIndex proxy = m_proxy->mapFromSource(parent);
+    if (!proxy.isValid()) return; // gitignore filtresi
+    for (QModelIndex p = proxy.parent(); p.isValid(); p = p.parent())
+        m_tree->expand(p);
+    m_tree->scrollTo(proxy);
+    m_tree->setCurrentIndex(proxy);
 }
 
 // Stage 21: ağaç odaktayken F2 / Del / F5

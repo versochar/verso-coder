@@ -978,6 +978,11 @@ if(Qt6Test_FOUND)
         src/core/ai/providers/ProviderCodec.cpp
         src/core/ai/providers/SseParser.cpp
         src/widgets/SettingsDialog.cpp
+        src/widgets/ExplorerPanel.cpp
+        src/core/FileIcons.cpp
+        src/core/GitIgnore.cpp
+        src/core/TrashManager.cpp
+        src/widgets/PluginManagerDialog.cpp
         src/widgets/TestExplorer.cpp
         src/widgets/PluginStoreDialog.cpp
         src/widgets/PluginSidePanel.cpp

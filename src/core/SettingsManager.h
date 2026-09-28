@@ -109,6 +109,8 @@ struct AppSettings {
     bool    showLineEnds = false;       // satır sonu işaretleri (¶)
     QString foldGutter = "sol";         // "sol" | "sag" | "gizli"
     int     minimapWidth = 90;          // px
+    int     tabBarMaxWidth = 0;         // sekme genişliği px (0=doğal)
+    int     maxOpenTabs = 0;            // en fazla sekme (0=sınırsız)
     int     aiTokenBudget = 0;            // Stage 25: oturum token tavanı (0=kapalı)
     bool    autoReload = false;           // Stage 28: harici değişiklikte sessiz yükle
     bool    crashReport = false;          // Stage 31: çökme izi yaz (opt-in)

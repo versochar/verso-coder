@@ -381,8 +381,9 @@ static void testSetupAdvisor() {
     ProviderPrefs::setActiveProvider("openai");
     const auto all = SetupAdvisor::analyze();
     bool found = false;
-    for (const SetupAction& a : all)
+    for (const SetupAction& a : all) {
         if (a.title.contains("ücretsiz seçenek")) found = true;
+    }
     CHECK2(found, "anahtarsız durumda ücretsiz seçenek önerisi üretilmedi");
     // Yerel sağlayıcı etkinken bu eylem çıkmamalı (her zaman bir yol vardır)
     ProviderPrefs::setActiveProvider("ollama");
@@ -545,6 +546,8 @@ int main(int argc, char** argv) {
     QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, home.path());
     qputenv("XDG_DATA_HOME", home.path().toUtf8());
     qputenv("HOME", home.path().toUtf8());
+    // Sistem anahtarlığındaki GERÇEK anahtarlar varsayımları bozar
+    qputenv("VERSO_NO_KEYRING", "1");
 
     testPathGuard();
     testCommandHardening();

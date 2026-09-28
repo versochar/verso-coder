@@ -105,6 +105,66 @@ static void testCacheBounds() {
     CHECK(c.hits() + c.misses() >= 0);
 }
 
+// --- 4: çoklu imleçle satır taşıma (ek imleçler korunur) ---
+static void testMultiCaretMoveLine() {
+    // Tek imleç: klasik davranış
+    {
+        CodeEditor e;
+        e.setPlainText("a\nb");
+        QTextCursor c(e.document());
+        c.movePosition(QTextCursor::Start);
+        e.setTextCursor(c);
+        e.moveLineOrSelection(1);
+        CHECK(e.toPlainText() == "b\na");
+        CHECK(e.textCursor().blockNumber() == 1);
+    }
+    // İki ayrı satır, aşağı: üst blok kayar, sınırdaki sabit kalır
+    {
+        CodeEditor e;
+        e.setPlainText("a\nb\nc");
+        QTextCursor c(e.document());
+        c.movePosition(QTextCursor::Start);
+        e.setTextCursor(c);
+        e.addCursorAt(e.document()->findBlockByNumber(2).position());
+        CHECK(e.extraCursorCount() == 1);
+        e.moveLineOrSelection(1);
+        CHECK(e.toPlainText() == "b\na\nc");
+        CHECK(e.extraCursorCount() == 1);
+        CHECK(e.textCursor().blockNumber() == 1); // "a"yı izledi
+    }
+    // Bitişik iki satır, yukarı: tek blok gibi taşınır
+    {
+        CodeEditor e;
+        e.setPlainText("a\nb\nc\nd");
+        QTextCursor c(e.document());
+        c.setPosition(e.document()->findBlockByNumber(1).position());
+        e.setTextCursor(c);
+        e.addCursorAt(e.document()->findBlockByNumber(2).position());
+        e.moveLineOrSelection(-1);
+        CHECK(e.toPlainText() == "b\nc\na\nd");
+        CHECK(e.extraCursorCount() == 1);
+        CHECK(e.textCursor().blockNumber() == 0);
+    }
+    // Sınır: en üst satır yukarı oynamaz, undo kirlenmez
+    {
+        CodeEditor e;
+        e.setPlainText("a\nb");
+        QTextCursor c(e.document());
+        c.movePosition(QTextCursor::Start);
+        e.setTextCursor(c);
+        e.moveLineOrSelection(-1);
+        CHECK(e.toPlainText() == "a\nb");
+    }
+    // Görsel biçim kirletmez: satır yüksekliği kirli bayrağı oynatmaz
+    {
+        CodeEditor e;
+        e.setPlainText("x\ny");
+        e.document()->setModified(false);
+        e.applyLineHeight(1.5);
+        CHECK(!e.document()->isModified());
+    }
+}
+
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QTemporaryDir home;
@@ -117,6 +177,7 @@ int main(int argc, char** argv) {
     testLargeFileOpen();
     testReopenSoak();
     testCacheBounds();
+    testMultiCaretMoveLine();
 
     fprintf(stderr, "STAGE46: %d passed, %d failed\n", g_pass, g_fail);
     fflush(stderr);

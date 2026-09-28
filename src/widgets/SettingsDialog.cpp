@@ -144,6 +144,10 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     gf->addRow(m_crashReport); // Stage 31
     gf->addRow(m_restore);
     gf->addRow(m_updateCheck);
+    m_pluginUpdateCheck = new QCheckBox("Eklenti güncellemelerini açılışta denetle", general);
+    m_pluginUpdateCheck->setToolTip("Mağaza kaydı yoklanır (arka planda). Kapalıysa hiç ağ isteği yapılmaz.");
+    m_pluginUpdateCheck->setChecked(QSettings("Verso", "VersoCoder").value("plugin/checkUpdates", true).toBool());
+    gf->addRow("", m_pluginUpdateCheck);
     auto* note = new QLabel("Dil ve tema Kaydet'e basınca anında uygulanır.", general);
     note->setWordWrap(true);
     gf->addRow(note);
@@ -635,6 +639,24 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     lookNote->setWordWrap(true);
     lf->addRow(lookNote);
     tabs->addTab(look, "Görünüm");
+
+    // --- Editör ---
+    auto* ed = new QWidget(this);
+    auto* ef = new QFormLayout(ed);
+    m_tabBarMaxWidth = new QSpinBox(ed);
+    m_tabBarMaxWidth->setRange(0, 400);
+    m_tabBarMaxWidth->setSpecialValueText("Doğal");
+    m_tabBarMaxWidth->setSuffix(" px");
+    m_tabBarMaxWidth->setValue(s.tabBarMaxWidth);
+    m_tabBarMaxWidth->setToolTip("Sekme başlığı genişlik sınırı (0 = doğal genişlik)");
+    ef->addRow("Sekme genişliği:", m_tabBarMaxWidth);
+    m_maxOpenTabs = new QSpinBox(ed);
+    m_maxOpenTabs->setRange(0, 50);
+    m_maxOpenTabs->setSpecialValueText("Sınırsız");
+    m_maxOpenTabs->setValue(s.maxOpenTabs);
+    m_maxOpenTabs->setToolTip("Açık sekme üst sınırı; aşınca en eski sabitlenmemiş/temiz sekme kapanır (0 = sınırsız)");
+    ef->addRow("En fazla sekme:", m_maxOpenTabs);
+    tabs->addTab(ed, "Editör");
 
     // --- Kısayollar ---
     auto* keys = new QWidget(this);
@@ -1512,6 +1534,7 @@ void SettingsDialog::saveAll() {    AppSettings cur = SettingsManager::instance(
     s.crashReport = m_crashReport->isChecked(); // Stage 31
     s.restoreSession = m_restore->isChecked();
     QSettings("Verso", "VersoCoder").setValue("update/check", m_updateCheck->isChecked());
+    QSettings("Verso", "VersoCoder").setValue("plugin/checkUpdates", m_pluginUpdateCheck->isChecked());
     s.aiStreaming = m_streaming->isChecked();
     s.aiGhost = m_ghost->isChecked(); // Stage 15
     s.contextMode = m_ctxMode->currentText();
@@ -1548,6 +1571,8 @@ void SettingsDialog::saveAll() {    AppSettings cur = SettingsManager::instance(
     s.showLineEnds = m_showLineEnds->isChecked();
     s.foldGutter = m_foldGutter->currentText().section(':', 0, 0);
     s.minimapWidth = m_minimapWidth->value();
+    s.tabBarMaxWidth = m_tabBarMaxWidth->value();
+    s.maxOpenTabs = m_maxOpenTabs->value();
     s.lineHighlightOn = m_lineHighlight->isChecked();
     s.reducedMotion = m_reducedMotion->isChecked(); // Stage 10
     s.showWhitespace = m_showWhitespace->isChecked(); // Stage 11

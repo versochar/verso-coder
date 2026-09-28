@@ -165,6 +165,7 @@
 #include <QFutureWatcher>
 #include <QHelpEvent>
 #include <QtConcurrent>
+#include "core/PluginStore.h"
 #include <QColorDialog>
 #include <QDateTime>
 #include <QTemporaryFile>
@@ -315,6 +316,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     mkAct("term.newTab", "Yeni Terminal Sekmesi", [this]() { runCommand("term.newTab"); });
     mkAct("remote.importSsh", "SSH Config İçe Aktar", [this]() { runCommand("remote.importSsh"); });
     mkAct("view.clipboard", "Pano Geçmişi", [this]() { runCommand("view.clipboard"); });
+    mkAct("view.clipboardRecent", "Son Kopyalananlar", [this]() { runCommand("view.clipboardRecent"); });
     mkAct("task.chain", "Görev Zincirini Çalıştır", [this]() { runCommand("task.chain"); });
     mkAct("remote.reconnect", "Yeniden Bağlan", [this]() { runCommand("remote.reconnect"); });
     mkAct("ai.searchChats", "Sohbetlerde Ara", [this]() { runCommand("ai.searchChats"); });
@@ -329,6 +331,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     mkAct("nav.palette", "Komut Paleti", [this]() { showPalette(); });
     mkAct("nav.search", "Projede Ara", [this]() { runCommand("nav.search.focus"); });
     mkAct("nav.gotoLine", "Satıra Git", [this]() { gotoLineDialog(); });
+    mkAct("nav.revealInExplorer", "Gezginde Göster", [this]() { runCommand("nav.revealInExplorer"); });
     mkAct("view.minimap", "Minimap Aç/Kapa", [this]() { m_actMinimap->toggle(); });
     mkAct("view.terminal", "Terminal Aç/Kapa", [this]() { m_termDock->setVisible(!m_termDock->isVisible()); });
     mkAct("run.build", "Derle & Çalıştır", [this]() { runBuildForCurrent(); });
@@ -1173,6 +1176,29 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         });
         uc->check();
     });
+    // Eklenti güncellemeleri (açılışta bir kez, arka planda; arayüz donmaz)
+    QTimer::singleShot(45000, this, [this]() {
+        if (!QSettings("Verso", "VersoCoder")
+                 .value("plugin/checkUpdates", true)
+                 .toBool())
+            return;
+        if (!m_plugins) return;
+        const QString dir = m_plugins->pluginDir();
+        using Liste = QList<PluginStore::Entry>;
+        auto* w = new QFutureWatcher<Liste>(this);
+        connect(w, &QFutureWatcher<Liste>::finished, this, [this, w, dir]() {
+            const Liste uzak = w->result();
+            w->deleteLater();
+            if (uzak.isEmpty()) return;
+            const int n = PluginStore::updatesAvailable(uzak, dir).size();
+            if (n > 0)
+                toast(0, QString("%1 eklenti güncellemesi var (Eklentiler sayfası)").arg(n));
+        });
+        w->setFuture(QtConcurrent::run([]() -> Liste {
+            QString err;
+            return PluginStore::fetchIndex(&err);
+        }));
+    });
     // Stage 9: tema/accent değişince tüm görselleri tazele
     ThemeManager::instance().onApplied([this]() {
         refreshActivityIcons();
@@ -1347,6 +1373,11 @@ void MainWindow::closeTabIn(QTabWidget* tabs, int i) {
     }
     tabs->removeTab(i);
     delete w;
+    // Minimap kapanan editörde asılı kalmasın (boya çökmesi)
+    if (m_minimap) {
+        CodeEditor* cur = qobject_cast<CodeEditor*>(tabs->currentWidget());
+        m_minimap->setEditor(cur);
+    }
     // Stage 10: son sekme kapandıysa karşılama ekranı göster
     if (tabs->count() == 0) ensureWelcome(tabs);
     saveSession();
@@ -1402,6 +1433,7 @@ void MainWindow::onGroupCurrentChanged(int group) {
         e->setDiagnostics(mergedDiags3(m_diags, m_spellDiags, m_buildDiags, e->filePath()));
         refreshGitMarks(e); // Stage 11
         refreshDiagMinimap(); // Stage 17: tanı çizgileri
+        if (!e->filePath().isEmpty() && m_explorer) m_explorer->revealFile(e->filePath());
         if (m_side && m_side->currentIndex() == 6) refreshOutline(); // Stage 17
         if (m_findBar && m_findBar->isVisible()) applyFindToEditor();
         else m_minimap->setSearchMarks({}, -1);
@@ -1586,16 +1618,18 @@ CodeEditor* MainWindow::addEditorTab(CodeEditor* e, const QString& title,
     // Stage 21: büyük dosyada LSP ertelenir (tamamı yüklenince başlar)
     if (!e->filePath().isEmpty() && !e->largeFileMode())
         setupLspFor(e->filePath(), e->toPlainText());
-    // Stage 27: lens + renk (sunucu hazırsa)
-    QTimer::singleShot(2500, this, [this, e]() {
-        if (e->isRemote()) return;
-        refreshCodeLens(e);
-        refreshDocColors(e);
+    // Stage 27: lens + renk (sunucu hazırsa; sekme kapanmış olabilir)
+    QPointer<CodeEditor> lensEd = e;
+    QTimer::singleShot(2500, this, [this, lensEd]() {
+        if (lensEd.isNull() || lensEd->isRemote()) return;
+        refreshCodeLens(lensEd);
+        refreshDocColors(lensEd);
     });
     refreshGitMarks(e); // Stage 11: gutter + minimap diff işaretleri
     updateCursorStatus();
     updateBreadcrumb();
     saveSession();
+    enforceTabLimit(target);
     if (m_plugins && !e->filePath().isEmpty())
         m_plugins->fireEvent("open", e->filePath()); // Stage 29
     return e;
@@ -2075,6 +2109,7 @@ bool MainWindow::dispatchCmd1(const QString& id) {
     else if (id == "term.newTab") { if (m_terminal) m_terminal->newSession(); }
     else if (id == "remote.importSsh") importSshConfig();
     else if (id == "view.clipboard") showClipboardManager();
+    else if (id == "view.clipboardRecent") showRecentClipboard();
     else if (id == "task.chain") runTaskChain();
     else if (id == "remote.reconnect") remoteReconnect();
     else if (id == "ai.searchChats") searchAiChats();
@@ -2115,6 +2150,7 @@ bool MainWindow::dispatchCmd2(const QString& id) {
         m_sideTitle->setText(sideTitleFor(1));
         m_search->focusSearch();
     } else if (id == "nav.gotoLine") gotoLineDialog();
+    else if (id == "nav.revealInExplorer") revealInExplorer();
     else if (id == "nav.splitRight") splitActiveToOther();
     else if (id == "nav.moveTab") moveActiveTab();
     else if (id == "edit.moveUp") m_actions["edit.moveUp"]->trigger();
@@ -2327,6 +2363,19 @@ void MainWindow::showPalette() {
         CommandPalette::pushRecent(pal.selectedId()); // Stage 10: son kullanılanlar
         CommandPalette::recordUse(pal.selectedId());  // Stage 30: sıklık
         runCommand(pal.selectedId());
+    }
+}
+
+void MainWindow::revealInExplorer() {
+    CodeEditor* e = currentEditor();
+    if (!e || e->filePath().isEmpty()) {
+        toast(0, "Önce bir dosya açın");
+        return;
+    }
+    showSidePanel(0);
+    if (m_explorer) {
+        m_explorer->revealFile(e->filePath());
+        m_explorer->setFocus();
     }
 }
 
@@ -3666,6 +3715,45 @@ void MainWindow::openSettings() {
     d.exec();
 }
 
+// Sekme çubuğu genişlik sınırı (0 = doğal)
+void MainWindow::applyTabBarSettings() {
+    AppSettings s = SettingsManager::instance().load();
+    const int w = qBound(0, s.tabBarMaxWidth, 400);
+    for (QTabWidget* t : {m_tabs, m_tabs2}) {
+        if (!t || !t->tabBar()) continue;
+        t->tabBar()->setElideMode(w > 0 ? Qt::ElideRight : Qt::ElideNone);
+        QString css = w > 0 ? QString("QTabBar::tab{max-width:%1px;}").arg(w)
+                            : QString();
+        if (t == m_tabs2)
+            css += "QTabBar::tab:selected { border-bottom: 2px solid #4ec9b0; }";
+        t->tabBar()->setStyleSheet(css);
+    }
+}
+
+// Sekme üst sınırı: en eski kapatılabilir sekmeyi kapat
+void MainWindow::enforceTabLimit(QTabWidget* tabs) {
+    if (!tabs) return;
+    AppSettings s = SettingsManager::instance().load();
+    const int max = qBound(0, s.maxOpenTabs, 50);
+    if (max <= 0) return;
+    while (tabs->count() > max) {
+        int victim = -1;
+        for (int i = 0; i < tabs->count(); ++i) {
+            if (i == tabs->currentIndex()) continue;
+            if (isPinnedTab(tabs, i)) continue;
+            auto* e = qobject_cast<CodeEditor*>(tabs->widget(i));
+            if (e && e->document()->isModified()) continue;
+            victim = i;
+            break;
+        }
+        if (victim < 0) {
+            toast(0, "Sekme sınırı dolu (sabit/kirli sekmeler duruyor)");
+            return;
+        }
+        closeTabIn(tabs, victim);
+    }
+}
+
 void MainWindow::applySettings() {
     AppSettings s = SettingsManager::instance().load();
     LanguageManager::instance().setLanguage(s.language);
@@ -3708,6 +3796,7 @@ void MainWindow::applySettings() {
     ThemeManager::instance().setVisionMode(s.colorVision);
     applyChips();
     applySidePages();
+    applyTabBarSettings();
     setCustomTitleBar(s.customTitleBar);
     evaluateAutoTheme();
     updateProfileChip();
@@ -5378,14 +5467,38 @@ void MainWindow::showClipboardManager() {
     d->setAttribute(Qt::WA_DeleteOnClose);
     connect(d, &ClipboardDialog::pasteRequested, this, [this, d](const QString& t) {
         d->close();
-        if (auto* e = currentEditor()) {
-            e->insertPlainText(t);
-            e->setFocus();
-        } else {
-            QApplication::clipboard()->setText(t);
-        }
+        pasteClipboardText(t);
     });
     d->show();
+}
+
+void MainWindow::pasteClipboardText(const QString& t) {
+    if (auto* e = currentEditor()) {
+        e->insertPlainText(t);
+        e->setFocus();
+    } else {
+        QApplication::clipboard()->setText(t);
+    }
+}
+
+// Son 5 pano kaydı: hızlı menüden tek tıkla yapıştır
+void MainWindow::showRecentClipboard() {
+    const QStringList items = m_clipRing.items();
+    if (items.isEmpty()) {
+        toast(0, "Pano boş");
+        return;
+    }
+    QMenu menu(this);
+    const int n = qMin(5, items.size());
+    for (int i = 0; i < n; ++i) {
+        QString label = items[i];
+        label.replace('\n', ' ');
+        if (label.size() > 60) label = label.left(60) + "…";
+        QAction* a = menu.addAction(QString("%1. %2").arg(i + 1).arg(label));
+        const QString full = items[i];
+        connect(a, &QAction::triggered, this, [this, full]() { pasteClipboardText(full); });
+    }
+    menu.exec(QCursor::pos());
 }
 
 // Stage 30: yeni proje sihirbazı
