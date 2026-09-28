@@ -442,7 +442,7 @@ static void testModelFailoverLogic() {
     // "Yoğun" sayılan hatalar
     CHECK(LlmClient::isModelBusy(429, QByteArray()));
     CHECK(LlmClient::isModelBusy(403, "rate limit right now"));
-    CHECK(LlmClient::isModelBusy(503, R"({"error":{"message":"All providers for model \"x\" are busy right now"}})"));
+    CHECK(LlmClient::isModelBusy(503, "{\"error\":{\"message\":\"All providers are busy\"}}"));
     CHECK(LlmClient::isModelBusy(500, "no healthy upstream"));
     // Yoğun olmayanlar
     CHECK(!LlmClient::isModelBusy(404, QByteArray()));

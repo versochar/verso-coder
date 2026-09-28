@@ -2009,12 +2009,7 @@ void MainWindow::refreshProjectViews() {
     if (!m_root.isEmpty()) m_sessions->touchRoot(m_root);
 }
 
-void MainWindow::runCommand(const QString& id) {
-    if (!m_macroPlaying) m_macro.push(id); // Stage 25: makro kaydı
-    // Stage 28: güvenilmez alanda tehlikeli komutlar kapalı
-    if (!m_trusted && (id.startsWith("ai.") || id.startsWith("plugin.") || id == "task.run")) {
-        if (!requireTrusted("Bu işlem")) return;
-    }
+bool MainWindow::dispatchCmd1(const QString& id) {
     if (id == "file.openFolder") openFolderDialog();
     else if (id == "file.new") newUntitledFile();
     else if (id == "file.language") changeFileLanguage();
@@ -2066,7 +2061,12 @@ void MainWindow::runCommand(const QString& id) {
     }
     else if (id == "ai.reviewStaged") reviewStagedDiff();
     else if (id == "nav.symbol") showSymbolSearch();
-    else if (id == "view.radar") showMetricsRadar();
+    else return false;
+    return true;
+}
+
+bool MainWindow::dispatchCmd2(const QString& id) {
+    if (id == "view.radar") showMetricsRadar();
     else if (id == "file.projectNotes") openProjectNotes();
     else if (id == "file.bulkRename") bulkRenameHere();
     else if (id == "test.runRelated") { if (auto* e = currentEditor()) runRelatedTest(e->filePath()); }
@@ -2143,7 +2143,12 @@ void MainWindow::runCommand(const QString& id) {
     else if (id == "view.zoomIn") zoom(+1);
     else if (id == "view.zoomOut") zoom(-1);
     else if (id == "view.zoomReset") zoom(0);
-    else if (id == "ui.exportProfile") exportUiProfile();
+    else return false;
+    return true;
+}
+
+bool MainWindow::dispatchCmd3(const QString& id) {
+    if (id == "ui.exportProfile") exportUiProfile();
     else if (id == "ui.importProfile") importUiProfile();
     // Stage 11: editör görsel derinliği
     else if (id == "edit.find") showFindBar();
@@ -2193,7 +2198,12 @@ void MainWindow::runCommand(const QString& id) {
     else if (id == "debug.attach") debugAttach();
     else if (id == "debug.core") debugOpenCore();
     else if (id == "debug.substitutePath") debugSubstitutePath();
-    else if (id == "debug.editBp") {
+    else return false;
+    return true;
+}
+
+bool MainWindow::dispatchCmd4(const QString& id) {
+    if (id == "debug.editBp") {
         if (auto* e = currentEditor())
             editBreakpoint(e->filePath(), e->textCursor().blockNumber() + 1);
     } else if (id == "debug.toggleSkipped") {
@@ -2251,7 +2261,7 @@ void MainWindow::runCommand(const QString& id) {
         m_bottomTabs->setCurrentWidget(m_taskPanel);
     }
     else if (id == "task.run") {
-        if (!requireTrusted("Görev çalıştırma")) return; // Stage 28
+        if (!requireTrusted("Görev çalıştırma")) return true; // Stage 28
         m_termDock->setVisible(true);
         m_bottomTabs->setCurrentWidget(m_taskPanel);
         m_taskPanel->runSelected();
@@ -2259,6 +2269,20 @@ void MainWindow::runCommand(const QString& id) {
     else if (id == "run.build") runBuildForCurrent();
     else if (id == "lsp.definition") lspDefinition();
     else if (id == "lsp.hover") lspHover();
+    else return false;
+    return true;
+}
+
+void MainWindow::runCommand(const QString& id) {
+    if (!m_macroPlaying) m_macro.push(id); // Stage 25: makro kaydı
+    // Stage 28: güvenilmez alanda tehlikeli komutlar kapalı
+    if (!m_trusted && (id.startsWith("ai.") || id.startsWith("plugin.") || id == "task.run")) {
+        if (!requireTrusted("Bu işlem")) return;
+    }
+    if (dispatchCmd1(id)) return;
+    if (dispatchCmd2(id)) return;
+    if (dispatchCmd3(id)) return;
+    dispatchCmd4(id);
 }
 
 void MainWindow::showPalette() {

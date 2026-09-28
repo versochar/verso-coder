@@ -258,6 +258,11 @@ private:
     void closeTabIn(QTabWidget* tabs, int i);
     void onGroupCurrentChanged(int group);
     CodeEditor* openEditorFor(const QString& path, int group = -1);
+    // Stage 50-debug: MSVC dal sınırı (C1061) — komut dağıtımı 4 parça
+    bool dispatchCmd1(const QString& id);
+    bool dispatchCmd2(const QString& id);
+    bool dispatchCmd3(const QString& id);
+    bool dispatchCmd4(const QString& id);
     // Stage 46: tembel sekme geri yükleme
     void materializePending(QWidget* w);
     bool isPendingTab(QWidget* w) const;
