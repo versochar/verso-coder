@@ -108,7 +108,9 @@ jobs:
           echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - name: Derle
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          # Yalnız arm64: brew bağımlılıkları universal değil (Intel emekliye ayrıldı;
+          # dökümantasyonda belirtilir)
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64"
           cmake --build build -j"$(sysctl -n hw.ncpu)"
       - name: Paketle
         run: |
@@ -116,7 +118,7 @@ jobs:
           cp build/verso-coder dist/VersoCoder.app/Contents/MacOS/
           cp -r resources dist/VersoCoder.app/Contents/MacOS/resources
           macdeployqt dist/VersoCoder.app -dmg
-          mv dist/VersoCoder.dmg "VersoCoder-${{ github.ref_name }}-macos-universal.dmg"
+          mv dist/VersoCoder.dmg "VersoCoder-${{ github.ref_name }}-macos-arm64.dmg"
       - name: Yükle
         uses: softprops/action-gh-release@v2
         with:
