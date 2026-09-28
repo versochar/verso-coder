@@ -71,6 +71,9 @@ jobs:
         run: vcpkg install hunspell:x64-windows --clean-after-build
         env:
           VCPKG_ROOT: C:\vcpkg
+      - name: vcpkg içerik dökümü (tanı)
+        run: dir C:\vcpkg\installed\x64-windows\lib\hunspell* ; dir C:\vcpkg\installed\x64-windows\share\hunspell* 2>nul || echo yok
+        shell: pwsh
       - name: Derle
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake"

@@ -17,11 +17,11 @@ if(WIN32)
               "$ENV{VCPKG_ROOT}/installed/x64-windows/include"
               "C:/vcpkg/installed/x64-windows/include"
         NO_DEFAULT_PATH)
-    find_library(HUNSPELL_LIBRARIES NAMES hunspell hunspell-mt libhunspell
-        PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib"
-              "$ENV{VCPKG_ROOT}/installed/x64-windows/lib"
-              "C:/vcpkg/installed/x64-windows/lib"
-        NO_DEFAULT_PATH)
+    # Lib adı vcpkg sürümüne göre değişir (hunspell*.lib) — glob ile bul
+    file(GLOB HUNSPELL_CANDIDATES
+        "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib/hunspell*.lib"
+        "C:/vcpkg/installed/x64-windows/lib/hunspell*.lib")
+    list(GET HUNSPELL_CANDIDATES 0 HUNSPELL_LIBRARIES)
     message(STATUS "HUNSPELL include=${HUNSPELL_INCLUDE_DIRS} lib=${HUNSPELL_LIBRARIES}")
     if(NOT HUNSPELL_INCLUDE_DIRS OR NOT HUNSPELL_LIBRARIES)
         message(FATAL_ERROR "hunspell bulunamadı (vcpkg install hunspell:x64-windows)")
