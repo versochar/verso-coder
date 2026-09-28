@@ -17,7 +17,7 @@ if(WIN32)
               "$ENV{VCPKG_ROOT}/installed/x64-windows/include"
               "C:/vcpkg/installed/x64-windows/include"
         NO_DEFAULT_PATH)
-    find_library(HUNSPELL_LIBRARIES NAMES hunspell
+    find_library(HUNSPELL_LIBRARIES NAMES hunspell hunspell-mt libhunspell
         PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib"
               "$ENV{VCPKG_ROOT}/installed/x64-windows/lib"
               "C:/vcpkg/installed/x64-windows/lib"
