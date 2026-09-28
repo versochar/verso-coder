@@ -6,10 +6,10 @@
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
   <url type="homepage">https://github.com/versochar/verso-coder</url>
-  <developer><name>versochar</name></developer>
+  <developer id="io.verso"><name>versochar</name></developer>
   <description>
     <p>
-      Verso Coder; çoklu imleç, kod katlama, LSP (clangd/pylsp), Git entegrasyonu,
+      Hafif bir C++/Qt6 kod editörü; çoklu imleç, kod katlama, LSP (clangd/pylsp), Git entegrasyonu,
       yerel AI asistanı (Ollama) ve araç kullanan ajan içeren hafif bir C++/Qt6 kod editörüdür.
     </p>
   </description>
