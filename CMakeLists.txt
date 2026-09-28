@@ -11,14 +11,18 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Network Concurrent Svg Qml WebSocke
 if(WIN32)
     # Windows: pkg-config yok; vcpkg kurulu ağacından doğrudan alınır.
     # (config adı vcpkg sürümüne göre değişiyor: hunspell/unofficial-hunspell)
+    message(STATUS "VCPKG_ROOT=$ENV{VCPKG_ROOT} VCPKG_INSTALLED_DIR=${VCPKG_INSTALLED_DIR}")
     find_path(HUNSPELL_INCLUDE_DIRS hunspell/hunspell.hxx
         PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include"
               "$ENV{VCPKG_ROOT}/installed/x64-windows/include"
+              "C:/vcpkg/installed/x64-windows/include"
         NO_DEFAULT_PATH)
     find_library(HUNSPELL_LIBRARIES NAMES hunspell
         PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib"
               "$ENV{VCPKG_ROOT}/installed/x64-windows/lib"
+              "C:/vcpkg/installed/x64-windows/lib"
         NO_DEFAULT_PATH)
+    message(STATUS "HUNSPELL include=${HUNSPELL_INCLUDE_DIRS} lib=${HUNSPELL_LIBRARIES}")
     if(NOT HUNSPELL_INCLUDE_DIRS OR NOT HUNSPELL_LIBRARIES)
         message(FATAL_ERROR "hunspell bulunamadı (vcpkg install hunspell:x64-windows)")
     endif()
