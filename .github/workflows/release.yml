@@ -38,6 +38,8 @@ jobs:
           cp packaging/verso-coder.desktop "$APPDIR/verso-coder.desktop"
           cp packaging/verso-coder.appdata.xml "$APPDIR/usr/share/metainfo/"
           rsvg-convert -w 256 -h 256 resources/icon.svg -o "$APPDIR/verso-coder.png"
+          mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+          cp "$APPDIR/verso-coder.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/"
           cat > "$APPDIR/AppRun" <<'EOF'
           #!/bin/sh
           HERE="$(dirname "$(readlink -f "$0")")"

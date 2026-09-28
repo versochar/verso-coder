@@ -22,14 +22,29 @@ if(WIN32)
         "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib/hunspell*.lib"
         "C:/vcpkg/installed/x64-windows/lib/hunspell*.lib")
     list(GET HUNSPELL_CANDIDATES 0 HUNSPELL_LIBRARIES)
-    message(STATUS "HUNSPELL include=${HUNSPELL_INCLUDE_DIRS} lib=${HUNSPELL_LIBRARIES}")
+    message(STATUS "HUNSPELL include=${HUNSPELL_INCLUDE_DIRS} lib=VersoHunspell")
     if(NOT HUNSPELL_INCLUDE_DIRS OR NOT HUNSPELL_LIBRARIES)
         message(FATAL_ERROR "hunspell bulunamadı (vcpkg install hunspell:x64-windows)")
     endif()
 else()
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(HUNSPELL REQUIRED hunspell)
-    pkg_check_modules(LIBSSH2 libssh2)
+    pkg_check_modules(HUNSPELL REQUIRED hunspell IMPORTED_TARGET)
+    pkg_check_modules(LIBSSH2 libssh2 IMPORTED_TARGET)
+endif()
+# -L dizinlerini de taşıyan arayüz hedefler (brew /opt/homebrew/lib gibi
+# standart-dışı yollarda düz -l yetmez; mac bağlama hatası verirdi).
+if(NOT WIN32)
+    add_library(VersoHunspell INTERFACE)
+    target_link_libraries(VersoHunspell INTERFACE PkgConfig::HUNSPELL)
+    add_library(VersoSsh2 INTERFACE)
+    if(TARGET PkgConfig::LIBSSH2)
+        target_link_libraries(VersoSsh2 INTERFACE PkgConfig::LIBSSH2)
+    endif()
+else()
+    add_library(VersoHunspell INTERFACE)
+    target_include_directories(VersoHunspell INTERFACE ${HUNSPELL_INCLUDE_DIRS})
+    target_link_libraries(VersoHunspell INTERFACE ${HUNSPELL_LIBRARIES})
+    add_library(VersoSsh2 INTERFACE)
 endif()
 # Bazı .pc dosyaları Cflags vermez (örn. brew hunspell) → başlık dizini
 # boş kalır ve derleme düşer. Bilinen yerlere yedek arama.
@@ -518,9 +533,9 @@ add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 target_include_directories(${PROJECT_NAME} PRIVATE src ${HUNSPELL_INCLUDE_DIRS})
 if(LIBSSH2_FOUND)
     target_include_directories(${PROJECT_NAME} PRIVATE ${LIBSSH2_INCLUDE_DIRS})
-    target_link_libraries(${PROJECT_NAME} PRIVATE ${LIBSSH2_LIBRARIES})
+    target_link_libraries(${PROJECT_NAME} PRIVATE VersoSsh2)
 endif()
-target_link_libraries(${PROJECT_NAME} PRIVATE Qt6::Widgets Qt6::Network Qt6::Concurrent Qt6::Svg Qt6::Qml Qt6::WebSockets ${HUNSPELL_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} PRIVATE Qt6::Widgets Qt6::Network Qt6::Concurrent Qt6::Svg Qt6::Qml Qt6::WebSockets VersoHunspell)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Stage 31: çökme izinde sembol adları (backtrace_symbols)
     target_link_options(${PROJECT_NAME} PRIVATE "LINKER:--export-dynamic")
@@ -989,10 +1004,10 @@ if(Qt6Test_FOUND)
     # Stage 38: yeni çekirdek dosyalar SOURCES'a zaten ekli
     add_executable(test_ui_smoke tests/ui/test_ui_smoke.cpp ${VERSO_UI_SOURCES})
     target_include_directories(test_ui_smoke PRIVATE src)
-    target_link_libraries(test_ui_smoke PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Concurrent Qt6::Svg Qt6::Qml Qt6::WebSockets Qt6::Test ${HUNSPELL_LIBRARIES})
+    target_link_libraries(test_ui_smoke PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Concurrent Qt6::Svg Qt6::Qml Qt6::WebSockets Qt6::Test VersoHunspell)
     target_include_directories(test_ui_smoke PRIVATE ${HUNSPELL_INCLUDE_DIRS})
     if(LIBSSH2_FOUND)
-        target_link_libraries(test_ui_smoke PRIVATE ${LIBSSH2_LIBRARIES})
+        target_link_libraries(test_ui_smoke PRIVATE VersoSsh2)
         target_compile_definitions(test_ui_smoke PRIVATE VERSO_HAVE_LIBSSH2)
     endif()
     add_test(NAME ui_smoke COMMAND test_ui_smoke)
@@ -1434,7 +1449,7 @@ add_executable(test_stage46
     src/core/ai/providers/SseParser.cpp
 )
 target_include_directories(test_stage46 PRIVATE src)
-target_link_libraries(test_stage46 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml Qt6::Test ${HUNSPELL_LIBRARIES})
+target_link_libraries(test_stage46 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml Qt6::Test VersoHunspell)
 target_include_directories(test_stage46 PRIVATE ${HUNSPELL_INCLUDE_DIRS})
 add_test(NAME stage46 COMMAND test_stage46)
 
@@ -1446,7 +1461,7 @@ add_executable(test_stage47
     src/core/ThemeTokens.cpp
 )
 target_include_directories(test_stage47 PRIVATE src)
-target_link_libraries(test_stage47 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml Qt6::Test ${HUNSPELL_LIBRARIES})
+target_link_libraries(test_stage47 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml Qt6::Test VersoHunspell)
 target_include_directories(test_stage47 PRIVATE ${HUNSPELL_INCLUDE_DIRS})
 add_test(NAME stage47 COMMAND test_stage47)
 
@@ -1457,7 +1472,7 @@ add_executable(test_stage48
     src/core/CrashHandler.cpp
 )
 target_include_directories(test_stage48 PRIVATE src)
-target_link_libraries(test_stage48 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml Qt6::Test ${HUNSPELL_LIBRARIES})
+target_link_libraries(test_stage48 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml Qt6::Test VersoHunspell)
 target_include_directories(test_stage48 PRIVATE ${HUNSPELL_INCLUDE_DIRS})
 add_test(NAME stage48 COMMAND test_stage48)
 
@@ -1467,7 +1482,7 @@ add_executable(test_stage49
     src/core/CollabMerge.cpp
 )
 target_include_directories(test_stage49 PRIVATE src)
-target_link_libraries(test_stage49 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml Qt6::Test Qt6::WebSockets ${HUNSPELL_LIBRARIES})
+target_link_libraries(test_stage49 PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Qml Qt6::Test Qt6::WebSockets VersoHunspell)
 target_include_directories(test_stage49 PRIVATE ${HUNSPELL_INCLUDE_DIRS})
 add_test(NAME stage49 COMMAND test_stage49)
 
