@@ -1,5 +1,6 @@
 #pragma once
 #include <QByteArray>
+#include <QDateTime>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -35,4 +36,9 @@ public:
                         QString* error);
     static QString installedVersion(const QString& dir, const QString& id);
     static bool isValidId(const QString& id);
+    // Kurulup yenisi kayıtta olanlar (toplu güncelleme için)
+    static QList<Entry> updatesAvailable(const QList<Entry>& remote, const QString& dir);
+    // Çevrimdışı önbellek (son başarılı liste + tarihi)
+    static void saveCache(const QList<Entry>& entries);
+    static QList<Entry> loadCache(QDateTime* updated = nullptr);
 };

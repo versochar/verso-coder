@@ -1,6 +1,7 @@
 #include "UpdateChecker.h"
 #include <QDateTime>
 #include <QEventLoop>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
@@ -43,6 +44,19 @@ UpdateChecker::Result UpdateChecker::parseFeed(const QByteArray& body,
     }
     r.latest = o.value("tag_name").toString().trimmed();
     r.url = o.value("html_url").toString();
+    // AppImage varlığı: x86_64 AppImage dosyasını bul
+    const QJsonValue assets = o.value("assets");
+    if (assets.isArray()) {
+        for (const QJsonValue& a : assets.toArray()) {
+            const QJsonObject ao = a.toObject();
+            const QString name = ao.value("name").toString();
+            if (name.endsWith("-x86_64.AppImage")) {
+                r.appImageUrl = ao.value("browser_download_url").toString();
+                r.appImageSize = qint64(ao.value("size").toDouble());
+                break;
+            }
+        }
+    }
     if (r.latest.isEmpty()) {
         r.error = "sürüm alanı yok";
         return r;
@@ -52,12 +66,8 @@ UpdateChecker::Result UpdateChecker::parseFeed(const QByteArray& body,
 }
 
 bool UpdateChecker::shouldCheck() {
-    QSettings st("Verso", "VersoCoder");
-    if (!st.value("update/check", true).toBool()) return false;
-    const QDateTime last =
-        st.value("update/lastCheck").toDateTime();
-    if (!last.isValid()) return true;
-    return last.daysTo(QDateTime::currentDateTime()) >= 7;
+    // Her açılışta denetle; yalnız ayar kapalıysa vazgeç
+    return QSettings("Verso", "VersoCoder").value("update/check", true).toBool();
 }
 
 void UpdateChecker::markChecked() {
@@ -87,10 +97,28 @@ UpdateChecker::Result UpdateChecker::checkSync() {
 }
 
 void UpdateChecker::check() {
-    // Arka planda engelleyici yoklama (kısa); sonuç sinyalle gelir
-    QTimer::singleShot(0, this, [this]() {
-        const Result r = checkSync();
+    // Gerçekten eşzamansız: arayüz beklemez, sonuç ready ile gelir.
+    // Zaman aşımında yanıt iptal edilir (asılı yanıt yok).
+    auto* nam = new QNetworkAccessManager(this);
+    QNetworkReply* reply = nam->get(QNetworkRequest(QUrl(m_feed)));
+    auto* timer = new QTimer(this);
+    timer->setSingleShot(true);
+    connect(timer, &QTimer::timeout, reply, &QNetworkReply::abort);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, nam, timer]() {
+        timer->stop();
+        Result r;
+        if (reply->error() != QNetworkReply::NoError) {
+            r.error = reply->error() == QNetworkReply::OperationCanceledError
+                          ? "zaman aşımı"
+                          : reply->errorString().left(200);
+        } else {
+            r = parseFeed(reply->readAll(), m_current);
+        }
         if (r.checked) markChecked();
+        reply->deleteLater();
+        nam->deleteLater();
+        timer->deleteLater();
         emit ready(r);
     });
+    timer->start(m_timeoutMs);
 }

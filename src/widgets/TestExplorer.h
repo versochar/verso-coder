@@ -25,15 +25,22 @@ signals:
     void discoverRequested();
     void runAllRequested();
     void runOneRequested(const QString& testId);
+    void runFailedRequested();
     void stopRequested();
+
+public:
+    QStringList failedIds() const { return m_failed; }
 
 private:
     void onItemDoubleClicked();
+    void applyFilter(const QString& text);
 
     QToolBar* m_bar;
     QTreeWidget* m_tree;
     QPlainTextEdit* m_log;
     QProgressBar* m_bar2;
     class QLabel* m_summary;
+    class QLineEdit* m_filter;
     QList<TestCase> m_tests;
+    QStringList m_failed;
 };

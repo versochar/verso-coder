@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "1.3.1"; }
+QString AboutInfo::version() { return "0.3.2"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,15 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "0.3.2\n"
+        "  • Sürüm dizisi sıfırlandı (mağaza dönemi)\n"
+        "  • Mağaza donması bitti: kayıt/indirme eşzamansız\n"
+        "  • Her açılışta sürüm denetimi; AppImage tek tıkla indir-kur\n"
+        "  • 10 özellik: eklenti zamanlayıcı/pano/dizin API,\n"
+        "    mağazada toplu güncelle + çevrimdışı önbellek,\n"
+        "    AppImage boyut doğrulaması, imlece-kadar-çalıştır,\n"
+        "    git worktree, başarısız testleri koştur + süzgeç,\n"
+        "    işbirliği uçtan uca şifreleme (ChaCha20+HMAC)\n"
         "1.3.1\n"
         "  • Eklentiler sol panele taşındı (VS Code uzantılar görünümü)\n"
         "  • Kurulular aç/kapa + arama, görünümler listesi, Mağaza kısayolu\n"

@@ -40,6 +40,8 @@ static void testMiQuote() {
     CHECK(GdbDriver::miQuote("a b") == "\"a b\"");
     CHECK(GdbDriver::miQuote("x\"y") == "\"x\\\"y\"");
     CHECK(GdbDriver::miQuote("p\\q") == "\"p\\\\q\"");
+    CHECK(GdbDriver::untilCommand("/a/b.cc", 10) == "-exec-until \"/a/b.cc:10\"");
+    CHECK(GdbDriver::untilCommand("x.cc", 0) == "-exec-until \"x.cc:1\"");
 }
 
 static void testLaunchVars() {

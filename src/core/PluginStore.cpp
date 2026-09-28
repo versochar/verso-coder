@@ -1,7 +1,10 @@
 #include "PluginStore.h"
+#include "AboutInfo.h"
+#include <QDateTime>
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -10,6 +13,7 @@
 #include <QNetworkRequest>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QTimer>
 #include <cstdlib>
 
@@ -103,6 +107,58 @@ QList<PluginStore::Entry> PluginStore::fetchIndex(QString* error) {
 bool PluginStore::isValidId(const QString& id) {
     static QRegularExpression re("^[a-z0-9][a-z0-9-]{0,39}$");
     return re.match(id).hasMatch();
+}
+
+QList<PluginStore::Entry> PluginStore::updatesAvailable(const QList<Entry>& remote,
+                                                        const QString& dir) {
+    QList<Entry> out;
+    for (const auto& e : remote) {
+        const QString inst = installedVersion(dir, e.id);
+        if (!inst.isEmpty() && AboutInfo::compareVersions(e.version, inst) > 0)
+            out << e;
+    }
+    return out;
+}
+
+static QString cachePath() {
+    return QStandardPaths::writableLocation(QStandardPaths::CacheLocation) +
+           "/pluginstore.json";
+}
+
+void PluginStore::saveCache(const QList<Entry>& entries) {
+    QJsonArray a;
+    for (const auto& e : entries) {
+        QJsonObject o;
+        o["id"] = e.id;
+        o["name"] = e.name;
+        o["version"] = e.version;
+        o["description"] = e.description;
+        o["author"] = e.author;
+        o["file"] = e.file;
+        o["minApp"] = e.minApp;
+        QJsonArray p;
+        for (const QString& s : e.permissions) p.append(s);
+        o["permissions"] = p;
+        a.append(o);
+    }
+    QJsonObject root;
+    root["updated"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    root["plugins"] = a;
+    const QString yol = cachePath();
+    QDir().mkpath(QFileInfo(yol).absolutePath());
+    QFile f(yol);
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        f.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+}
+
+QList<PluginStore::Entry> PluginStore::loadCache(QDateTime* updated) {
+    QFile f(cachePath());
+    if (!f.open(QIODevice::ReadOnly)) return {};
+    const QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
+    if (updated)
+        *updated = QDateTime::fromString(root.value("updated").toString(), Qt::ISODate);
+    QString err;
+    return parseIndex(QJsonDocument(root).toJson(QJsonDocument::Compact), &err);
 }
 
 bool PluginStore::install(const Entry& e, const QString& source, const QString& dir,

@@ -61,6 +61,8 @@ public:
     void execNext();
     void execStep();
     void execFinish();
+    void execUntil(const QString& file, int line); // imlece kadar çalıştır
+    static QString untilCommand(const QString& file, int line);
     void execStepInstruction(); // Stage 26: disas adımı
     void execNextInstruction();
     void interrupt();

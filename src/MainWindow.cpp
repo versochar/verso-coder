@@ -39,6 +39,8 @@
 #include "core/StartupArgs.h"
 #include "core/ThemeManager.h"
 #include "core/UpdateChecker.h"
+#include "core/AppUpdater.h"
+#include <QProgressDialog>
 #include "core/ThemeStore.h"
 #include "core/IconTheme.h"
 #include "core/Animator.h"
@@ -126,6 +128,8 @@
 #include "widgets/ImageViewerDialog.h"
 #include "widgets/HexViewDialog.h"
 #include "widgets/GitHistoryDialog.h"
+#include "widgets/GitTagsDialog.h"
+#include "widgets/WorktreeDialog.h"
 #include "widgets/PluginManagerDialog.h"
 #include "widgets/PluginSidePanel.h"
 #include "widgets/PluginStoreDialog.h"
@@ -293,6 +297,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     mkAct("collab.join", "Birlikte Çalış: Oturuma Katıl", [this]() { collabJoin(); });
     mkAct("collab.leave", "Birlikte Çalış: Ayrıl", [this]() { collabLeave(); });
     mkAct("git.tags", "Etiketler", [this]() { runCommand("git.tags"); });
+    mkAct("git.worktree", "Çalışma Ağaçları...", [this]() { runCommand("git.worktree"); });
     mkAct("term.find", "Terminalde Bul", [this]() { runCommand("term.find"); });
     mkAct("term.findNext", "Sonraki Eşleşme (terminal)", [this]() { runCommand("term.findNext"); });
     mkAct("term.findPrev", "Önceki Eşleşme (terminal)", [this]() { runCommand("term.findPrev"); });
@@ -425,6 +430,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     mkAct("debug.stepInto", "Adım İçi", [this]() { debugStep(); });
     mkAct("debug.stepOut", "Bitir", [this]() { debugFinish(); });
     mkAct("debug.toggleBp", "Kesme Noktası Aç/Kapa", [this]() { toggleBreakpointAtCursor(); });
+    mkAct("debug.runToCursor", "İmlece Kadar Çalıştır", [this]() { runCommand("debug.runToCursor"); });
     // Stage 26
     mkAct("debug.smartStep", "Akıllı Adım", [this]() { runCommand("debug.smartStep"); });
     mkAct("debug.functionBp", "Fonksiyon Kesmesi", [this]() { runCommand("debug.functionBp"); });
@@ -554,6 +560,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     dbgMenu->addAction(m_actions["debug.stepInto"]);
     dbgMenu->addAction(m_actions["debug.stepOut"]);
     dbgMenu->addAction(m_actions["debug.toggleBp"]);
+    dbgMenu->addAction(m_actions["debug.runToCursor"]);
     dbgMenu->addSeparator();
     dbgMenu->addAction(m_actions["test.discover"]);
     dbgMenu->addAction(m_actions["test.runAll"]);
@@ -946,6 +953,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_tests, &TestExplorer::discoverRequested, this, &MainWindow::discoverTests);
     connect(m_tests, &TestExplorer::runAllRequested, this, &MainWindow::runAllTests);
     connect(m_tests, &TestExplorer::runOneRequested, this, &MainWindow::runOneTest);
+    connect(m_tests, &TestExplorer::runFailedRequested, this,
+            &MainWindow::runFailedTests);
     connect(m_tests, &TestExplorer::stopRequested, this, &MainWindow::stopTests);
     // Stage 14: GDB sürücüsü
     m_gdb = new GdbDriver(this);
@@ -1151,7 +1160,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         w->setFuture(QtConcurrent::run(
             [host]() { return OllamaClient::ensureServer(host, 12000); }));
     });
-    // Stage 48: güncelleme denetimi (haftada 1, ayarlanabilir, sessiz başarısızlık)
+    // Stage 48: güncelleme denetimi (her açılışta, ayarlanabilir) +
+    // AppImage ise tek tıkla indir-kur (ağ eşzamansız, arayüz donmaz)
     QTimer::singleShot(30000, this, [this]() {
         if (!UpdateChecker::shouldCheck()) return;
         auto *uc = new UpdateChecker(this);
@@ -1159,8 +1169,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         connect(uc, &UpdateChecker::ready, this, [this, uc](const UpdateChecker::Result &r) {
             uc->deleteLater();
             if (!r.checked || !r.newer) return;
-            toast(0, QString("Yeni sürüm mevcut: %1 (yardım menüsünden indirin)").arg(r.latest));
-            m_status->setText(QString("Güncelleme: %1").arg(r.latest));
+            onUpdateAvailable(r);
         });
         uc->check();
     });
@@ -2051,6 +2060,7 @@ bool MainWindow::dispatchCmd1(const QString& id) {
     else if (id == "edit.organizeImports") organizeImports();
     else if (id == "git.history") showGitHistory();
     else if (id == "git.tags") showGitTags();
+    else if (id == "git.worktree") showWorktreeDialog();
     else if (id == "term.find") terminalFind(true);
     else if (id == "term.findNext") { if (m_terminal && !m_terminal->findNext(true)) toast(0, "Eşleşme yok"); }
     else if (id == "term.findPrev") { if (m_terminal && !m_terminal->findNext(false)) toast(0, "Eşleşme yok"); }
@@ -2208,6 +2218,7 @@ bool MainWindow::dispatchCmd3(const QString& id) {
     else if (id == "debug.stepInto") debugStep();
     else if (id == "debug.stepOut") debugFinish();
     else if (id == "debug.toggleBp") toggleBreakpointAtCursor();
+    else if (id == "debug.runToCursor") debugRunToCursor();
     else if (id == "debug.smartStep") debugSmartStep();
     else if (id == "debug.functionBp") debugFunctionBp();
     else if (id == "debug.watchpoint") debugWatchpoint();
@@ -3242,9 +3253,77 @@ void MainWindow::showPluginStore() {
     d->show();
 }
 
+// Yeni sürüm bulundu: AppImage ise indir-kur, değilse sayfaya yönlendir
+void MainWindow::onUpdateAvailable(const UpdateChecker::Result& r) {
+    m_status->setText(QString("Güncelleme: %1").arg(r.latest));
+    const bool appImage = qEnvironmentVariableIsSet("APPIMAGE");
+    if (appImage && !r.appImageUrl.isEmpty()) {
+        auto a = QMessageBox::question(
+            this, "Güncelleme",
+            QString("Yeni sürüm %1 hazır (~38 MB). İndirilsin mi?\n"
+                    "Bitince uygulamayı kapatıp yeni dosyayı açman yeterli.")
+                .arg(r.latest),
+            QMessageBox::Yes | QMessageBox::Cancel);
+        if (a == QMessageBox::Yes) downloadUpdate(r);
+        return;
+    }
+    auto a = QMessageBox::question(
+        this, "Güncelleme",
+        QString("Yeni sürüm mevcut: %1.\nRelease sayfası açılsın mı?").arg(r.latest),
+        QMessageBox::Yes | QMessageBox::Cancel);
+    if (a == QMessageBox::Yes) QDesktopServices::openUrl(QUrl(r.url));
+}
+
+void MainWindow::downloadUpdate(const UpdateChecker::Result& r) {
+    const QString fileName = QUrl(r.appImageUrl).fileName();
+    auto* prog = new QProgressDialog("İndiriliyor...", "İptal", 0, 100, this);
+    prog->setWindowModality(Qt::WindowModal);
+    prog->setMinimumDuration(500);
+    auto* up = new AppUpdater(this);
+    up->setSourceUrl(r.appImageUrl);
+    up->setFileName(fileName.isEmpty() ? "VersoCoder-guncelleme.AppImage" : fileName);
+    connect(up, &AppUpdater::progress, prog,
+            [prog](qint64 a, qint64 b) {
+                if (b > 0) {
+                    prog->setMaximum(100);
+                    prog->setValue(int(a * 100 / b));
+                }
+            });
+    connect(prog, &QProgressDialog::canceled, up, &AppUpdater::cancel);
+    connect(up, &AppUpdater::finished, this,
+            [this, up, prog, r](const QString& path) {
+                prog->close();
+                prog->deleteLater();
+                // Boyut doğrulaması: kayıt API'sindeki boyutla uyuşmalı
+                if (r.appImageSize > 0 && QFile(path).size() != r.appImageSize) {
+                    QFile::remove(path);
+                    QMessageBox::warning(this, "Güncelleme",
+                        "İnen dosya bozuk (boyut uyuşmadı), silindi.\n"
+                        "Bağlantını denetleyip tekrar dene.");
+                    up->deleteLater();
+                    return;
+                }
+                prog->close();
+                prog->deleteLater();
+                QFile::setPermissions(path, QFile::permissions(path) | QFile::ExeOwner |
+                                                  QFile::ExeGroup | QFile::ExeOther);
+                QMessageBox::information(
+                    this, "Güncelleme",
+                    QString("İndirildi:\n%1\n\nUygulamayı kapatıp bu dosyayı aç.").arg(path));
+                up->deleteLater();
+            });
+    connect(up, &AppUpdater::failed, this,
+            [this, up, prog](const QString& e) {
+                prog->close();
+                prog->deleteLater();
+                QMessageBox::warning(this, "Güncelleme", "İndirilemedi:\n" + e);
+                up->deleteLater();
+            });
+    up->start();
+}
+
 // Eklenti kümesi değişti: palet + yan sayfayı tazele
-void MainWindow::onPluginsChanged() {
-    m_pluginCmds.clear();
+void MainWindow::onPluginsChanged() {    m_pluginCmds.clear();
     m_pluginViews.clear(); // loadAll sinyalleriyle yeniden dolar
     if (m_plugins) {
         for (const auto& p : m_plugins->plugins())
@@ -5078,6 +5157,16 @@ void MainWindow::showGitTags() {
     d->show();
 }
 
+void MainWindow::showWorktreeDialog() {
+    if (m_root.isEmpty()) {
+        toast(0, "Önce bir klasör açın");
+        return;
+    }
+    auto* d = new WorktreeDialog(m_root, this);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    d->show();
+}
+
 // Stage 28: terminalde bul
 void MainWindow::terminalFind(bool forward) {
     if (!m_terminal) return;
@@ -5769,6 +5858,24 @@ void MainWindow::toggleBreakpointAtCursor() {
         toggleBreakpoint(e->filePath(), e->textCursor().blockNumber() + 1);
 }
 
+// İmleç satırına kadar çalıştır (duraklatılmış oturumda)
+void MainWindow::debugRunToCursor() {
+    if (!m_gdb || !m_gdb->isDebugging()) {
+        toast(0, "Önce hata ayıklamayı başlatın");
+        return;
+    }
+    CodeEditor* e = currentEditor();
+    if (!e || e->filePath().isEmpty()) {
+        toast(0, "Önce bir dosya açın");
+        return;
+    }
+    const int line = e->textCursor().blockNumber() + 1;
+    m_gdb->execUntil(e->filePath(), line);
+    toast(0, QString("İmlece kadar çalışıyor: %1:%2")
+                  .arg(QFileInfo(e->filePath()).fileName())
+                  .arg(line));
+}
+
 void MainWindow::applyBpMarks(CodeEditor* e) {
     if (!e || e->filePath().isEmpty()) return;
     QSet<int> lines;
@@ -6204,7 +6311,20 @@ static QList<TestCase> parseTestOutput(const TestRunner& r, const QString& out) 
 
 void MainWindow::runAllTests() {
     if (!m_hasRunner) { discoverTests(); return; }
+    m_testQueue.clear();
     runOneTest(QString());
+}
+
+void MainWindow::runFailedTests() {
+    if (!m_hasRunner) { discoverTests(); return; }
+    const QStringList ids = m_tests ? m_tests->failedIds() : QStringList();
+    if (ids.isEmpty()) {
+        toast(0, "Başarısız test yok");
+        return;
+    }
+    m_testQueue = ids;
+    m_status->setText(QString("%1 başarısız test koşturuluyor...").arg(ids.size()));
+    runOneTest(m_testQueue.takeFirst());
 }
 
 void MainWindow::runOneTest(const QString& testId) {
@@ -6247,6 +6367,8 @@ void MainWindow::runOneTest(const QString& testId) {
                     : QString("%1: %2").arg(testId, fail ? "KALDI" : "GEÇTİ"));
                 m_testProc->deleteLater();
                 m_testProc = nullptr;
+                if (!m_testQueue.isEmpty() && !testId.isEmpty())
+                    runOneTest(m_testQueue.takeFirst()); // başarısız kuyruğu
             });
     m_testProc->start(cmd.first(), cmd.mid(1));
 }
@@ -6256,6 +6378,7 @@ QString MainWindow::testLog() const {
 }
 
 void MainWindow::stopTests() {
+    m_testQueue.clear(); // kuyruk da durur (bitişte devam etmez)
     if (m_testProc && m_testProc->state() != QProcess::NotRunning) {
         m_testProc->kill();
         m_tests->setRunning(false);
@@ -7588,6 +7711,12 @@ void MainWindow::collabHost() {
     }
     const QString user = QInputDialog::getText(this, "Oturum Barındır", "Adın:");
     if (user.trimmed().isEmpty()) return;
+    bool ok = false;
+    const QString anahtar =
+        QInputDialog::getText(this, "Oturum Barındır",
+                              "Anahtar (boş = şifresiz; davetlilere verilir):",
+                              QLineEdit::Password, QString(), &ok);
+    if (!ok) return;
     const int port = c->host(user.trimmed());
     if (port <= 0) {
         toast(3, "Oturum açılamadı.");
@@ -7595,10 +7724,18 @@ void MainWindow::collabHost() {
     }
     CodeEditor* e = currentEditor();
     if (e) c->setBaseText(e->toPlainText());
-    const QString url = QString("ws://<bu-bilgisayar>:%1").arg(port);
+    QString url = QString("ws://<bu-bilgisayar>:%1").arg(port);
+    if (!anahtar.isEmpty()) {
+        c->setKey(anahtar);
+        url += "#" + anahtar;
+    }
     QApplication::clipboard()->setText(url);
-    toast(0, QString("Oturum açık (port %1) — adres panoda, davetlilerle paylaş.").arg(port));
-    m_status->setText(QString("Birlikte (evsahibi, port %1)").arg(port));
+    toast(0, QString("Oturum açık (port %1%2) — adres panoda, davetlilerle paylaş.")
+                  .arg(port)
+                  .arg(anahtar.isEmpty() ? "" : ", 🔒 şifreli"));
+    m_status->setText(QString("Birlikte (evsahibi, port %1%2)")
+                          .arg(port)
+                          .arg(anahtar.isEmpty() ? "" : ", 🔒"));
 }
 
 void MainWindow::collabJoin() {
@@ -7607,8 +7744,8 @@ void MainWindow::collabJoin() {
         toast(1, "Zaten bir oturumdasın (önce ayrıl).");
         return;
     }
-    const QString url =
-        QInputDialog::getText(this, "Oturuma Katıl", "Adres (ws://bilgisayar:port):");
+    const QString url = QInputDialog::getText(
+        this, "Oturuma Katıl", "Adres (ws://bilgisayar:port[#anahtar]):");
     if (url.trimmed().isEmpty()) return;
     const QString user = QInputDialog::getText(this, "Oturuma Katıl", "Adın:");
     if (user.trimmed().isEmpty()) return;

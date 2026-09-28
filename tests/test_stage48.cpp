@@ -2,6 +2,7 @@
 // zamanlaması, taşınabilir kip ayrıştırma, çökme dökümü yardımcıları.
 #include <QCoreApplication>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -9,12 +10,14 @@
 #include <QDateTime>
 #include <QSettings>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QUrl>
 #include <cstdio>
 
 #include "../src/core/CrashHandler.h"
 #include "../src/core/StartupArgs.h"
 #include "../src/core/UpdateChecker.h"
+#include "../src/core/AppUpdater.h"
 
 static int g_pass = 0, g_fail = 0;
 
@@ -66,6 +69,20 @@ static void testParseFeed() {
     CHECK(bad.checked && !bad.newer && !bad.error.isEmpty());
     UpdateChecker::Result empty = UpdateChecker::parseFeed("{}", "2.9.0");
     CHECK(!empty.error.isEmpty());
+    // AppImage varlığı + yokluğu
+    const QByteArray withAsset =
+        R"({"tag_name":"v1.4.0","html_url":"https://x/y","assets":[
+             {"name":"VersoCoder-v1.4.0-x86_64.AppImage","size":37964280,
+              "browser_download_url":"https://dl/x.AppImage"},
+             {"name":"VersoCoder-v1.4.0-windows-x86_64.zip","size":1,
+              "browser_download_url":"https://dl/x.zip"}]})";
+    const UpdateChecker::Result wa = UpdateChecker::parseFeed(withAsset, "1.3.1");
+    CHECK(wa.checked && wa.newer);
+    CHECK(wa.appImageUrl == "https://dl/x.AppImage");
+    CHECK(wa.appImageSize == 37964280);
+    const UpdateChecker::Result na = UpdateChecker::parseFeed(good, "2.9.0");
+    CHECK(na.appImageUrl.isEmpty()); // varlıksız besleme
+    CHECK(na.appImageSize == -1);
     // Canlı dosya üzerinden (file:// yoklama yolu)
     QTemporaryDir d;
     QFile f(d.path() + "/feed.json");
@@ -80,26 +97,19 @@ static void testParseFeed() {
     CHECK2(live.checked && live.newer, "file:// yoklama çalışmadı");
 }
 
-// --- 3: denetim zamanlaması ---
+// --- 3: denetim zamanlaması (her açılış + ayar) ---
 static void testSchedule() {
     QSettings st("Verso", "VersoCoder");
     st.remove("update/check");
     st.remove("update/lastCheck");
-    CHECK(UpdateChecker::shouldCheck()); // hiç denetlenmemiş
+    CHECK(UpdateChecker::shouldCheck()); // varsayılan açık
     UpdateChecker::markChecked();
-    CHECK(!UpdateChecker::shouldCheck()); // az önce denetlendi
+    CHECK(UpdateChecker::shouldCheck()); // damga engellemez (her açılış)
     // Kapalıysa hiç
     st.setValue("update/check", false);
     CHECK(!UpdateChecker::shouldCheck());
     st.setValue("update/check", true);
-    // 8 gün önce → yeniden denetle
-    st.setValue("update/lastCheck",
-                QDateTime::currentDateTime().addDays(-8));
     CHECK(UpdateChecker::shouldCheck());
-    // 6 gün önce → bekle
-    st.setValue("update/lastCheck",
-                QDateTime::currentDateTime().addDays(-6));
-    CHECK(!UpdateChecker::shouldCheck());
     st.remove("update/check");
     st.remove("update/lastCheck");
 }
@@ -127,6 +137,55 @@ static void testCrashDumps() {
     CHECK(CrashHandler::pendingDumps().isEmpty());
 }
 
+// --- 3b: indirici (file:// üzerinden) ---
+static void testUpdater() {
+    QTemporaryDir src;
+    QTemporaryDir dst;
+    CHECK(src.isValid() && dst.isValid());
+    QFile f(src.filePath("sürüm.bin"));
+    CHECK(f.open(QIODevice::WriteOnly));
+    const QByteArray icerik("0123456789ABCDEF");
+    CHECK(f.write(icerik) == icerik.size());
+    f.close();
+    AppUpdater up;
+    up.setSourceUrl(QUrl::fromLocalFile(f.fileName()).toString());
+    up.setDestDir(dst.path());
+    up.setFileName("indirilen.bin");
+    QString yol, hata;
+    QEventLoop bekle;
+    QTimer guard;
+    guard.setSingleShot(true);
+    QObject::connect(&guard, &QTimer::timeout, &bekle, &QEventLoop::quit);
+    QObject::connect(&up, &AppUpdater::finished, &bekle,
+                     [&](const QString& p) { yol = p; bekle.quit(); });
+    QObject::connect(&up, &AppUpdater::failed, &bekle,
+                     [&](const QString& e) { hata = e; bekle.quit(); });
+    up.start();
+    guard.start(10000);
+    bekle.exec();
+    CHECK2(hata.isEmpty(), qUtf8Printable(hata));
+    CHECK(yol == dst.filePath("indirilen.bin"));
+    QFile g(yol);
+    CHECK(g.open(QIODevice::ReadOnly));
+    CHECK(g.readAll() == icerik);
+    g.close();
+    // Olmayan kaynak: hata + yarım dosya yok
+    AppUpdater up2;
+    up2.setSourceUrl(QUrl::fromLocalFile(src.filePath("yok.bin")).toString());
+    up2.setDestDir(dst.path());
+    up2.setFileName("olmamali.bin");
+    QString hata2;
+    QEventLoop bekle2;
+    QObject::connect(&up2, &AppUpdater::finished, &bekle2, &QEventLoop::quit);
+    QObject::connect(&up2, &AppUpdater::failed, &bekle2,
+                     [&](const QString& e) { hata2 = e; bekle2.quit(); });
+    up2.start();
+    QTimer::singleShot(10000, &bekle2, &QEventLoop::quit);
+    bekle2.exec();
+    CHECK(!hata2.isEmpty());
+    CHECK(!QFile::exists(dst.filePath("olmamali.bin")));
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     QTemporaryDir home;
@@ -140,6 +199,7 @@ int main(int argc, char** argv) {
     testCompare();
     testParseFeed();
     testSchedule();
+    testUpdater();
     testPortable();
     testCrashDumps();
 

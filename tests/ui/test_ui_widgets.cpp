@@ -18,6 +18,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTextBrowser>
+#include <QTreeWidget>
 
 #include "../src/core/AgentTools.h"
 #include <QJsonObject>
@@ -30,8 +31,11 @@
 #include "../src/widgets/ModelArenaDialog.h"
 #include "../src/widgets/SettingsDialog.h"
 #include "../src/core/PluginEngine.h"
+#include "../src/core/GitRunner.h"
 #include "../src/widgets/PluginStoreDialog.h"
 #include "../src/widgets/PluginSidePanel.h"
+#include "../src/widgets/TestExplorer.h"
+#include "../src/widgets/WorktreeDialog.h"
 
 class UiWidgetsTest : public QObject {
     Q_OBJECT
@@ -52,6 +56,9 @@ private slots:
     void commandAudit_roundTrip();
     void pluginStoreDialog_buildsAndLists();
     void pluginSidePanel_buildsAndLists();
+    void testExplorer_filterAndFailed();
+    void worktreeDialog_buildsAndLists();
+    void pluginStoreDialog_loadsLocalRegistry();
 
 private:
     QTemporaryDir m_home;
@@ -400,6 +407,99 @@ void UiWidgetsTest::pluginSidePanel_buildsAndLists() {
     QCOMPARE(changed.size(), 1);
     QVERIFY(!eng.isLoaded("ornek")); // yeniden yüklemede devre dışı
     panel.close();
+}
+
+void UiWidgetsTest::pluginStoreDialog_loadsLocalRegistry() {
+    // Sahte kayıt deposu (file://): ağ yok, arayüz donmamalı
+    QTemporaryDir reg;
+    QVERIFY(reg.isValid());
+    QVERIFY(QDir().mkpath(reg.filePath("plugins/deneme")));
+    QFile idx(reg.filePath("index.json"));
+    QVERIFY(idx.open(QIODevice::WriteOnly));
+    idx.write(R"({"registry":1,"plugins":[
+        {"id":"deneme","name":"Deneme","version":"1.0.0","description":"d",
+         "author":"t","permissions":["ui"],"file":"plugins/deneme/plugin.js","minApp":""}
+    ]})");
+    idx.close();
+    QFile js(reg.filePath("plugins/deneme/plugin.js"));
+    QVERIFY(js.open(QIODevice::WriteOnly));
+    js.write("// @name Deneme\n// @version 1.0.0\nverso.log(1);\n");
+    js.close();
+    qputenv("VERSO_PLUGIN_REGISTRY", ("file://" + reg.path()).toUtf8());
+    PluginEngine eng;
+    PluginStoreDialog dlg(&eng);
+    dlg.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&dlg, 3000));
+    QPushButton* yenile = nullptr;
+    for (auto* b : dlg.findChildren<QPushButton*>())
+        if (b->text() == "Yenile") yenile = b;
+    QVERIFY(yenile);
+    QTest::mouseClick(yenile, Qt::LeftButton);
+    QListWidget* liste = dlg.findChild<QListWidget*>();
+    QVERIFY(liste);
+    QTRY_VERIFY(liste->count() == 1);
+    QVERIFY(liste->item(0)->text().contains("Deneme"));
+    dlg.close();
+    qunsetenv("VERSO_PLUGIN_REGISTRY");
+}
+
+void UiWidgetsTest::worktreeDialog_buildsAndLists() {
+    // Depo olmayan dizin: hata satırı, çökme yok
+    QTemporaryDir bos;
+    QVERIFY(bos.isValid());
+    WorktreeDialog d0(bos.path());
+    d0.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&d0, 3000));
+    d0.close();
+    // Gerçek depo: ana ağaç listelenir
+    QTemporaryDir repo;
+    QVERIFY(repo.isValid());
+    LocalGitRunner g(repo.path());
+    QCOMPARE(g.run({"init", "-b", "main"}, 10000).exit, 0);
+    WorktreeDialog d1(repo.path());
+    d1.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&d1, 3000));
+    auto* liste = d1.findChild<QListWidget*>();
+    QVERIFY(liste);
+    QVERIFY(liste->count() >= 1);
+    QVERIFY(liste->item(0)->text().contains(repo.path()));
+    d1.close();
+}
+
+void UiWidgetsTest::testExplorer_filterAndFailed() {
+    TestExplorer ex;
+    TestCase a, b, c;
+    a.suite = "Ag";
+    a.name = "elma";
+    b.suite = "Ag";
+    b.name = "armut";
+    c.suite = "Diger";
+    c.name = "elma";
+    ex.setTests({a, b, c});
+    TestCase ra = a, rb = b, rc = c;
+    ra.status = "pass";
+    rb.status = "fail";
+    rc.status = "fail";
+    ex.setResults({ra, rb, rc});
+    QCOMPARE(ex.failedIds(), QStringList({"Ag.armut", "Diger.elma"}));
+    // Süzgeç: "arm" yalnız armut satırını gösterir
+    auto* süz = ex.findChild<QLineEdit*>();
+    QVERIFY(süz);
+    ex.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&ex, 3000));
+    süz->setText("arm");
+    QTreeWidget* agac = nullptr;
+    for (auto* t : ex.findChildren<QTreeWidget*>()) agac = t;
+    QVERIFY(agac);
+    int gorunur = 0;
+    QTreeWidgetItemIterator it(agac);
+    while (*it) {
+        if ((*it)->childCount() == 0 && !(*it)->isHidden()) ++gorunur;
+        ++it;
+    }
+    QCOMPARE(gorunur, 1);
+    süz->clear();
+    ex.close();
 }
 
 QTEST_MAIN(UiWidgetsTest)

@@ -183,7 +183,7 @@ for e in d["plugins"]:
         if author:
             e["author"] = author[:80]
         if not e["minApp"]:
-            e["minApp"] = "1.1.0"
+            e["minApp"] = "0.3.2"
 json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 open(p, "a").write("\n")
 PYEOF

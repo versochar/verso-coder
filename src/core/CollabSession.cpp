@@ -1,7 +1,9 @@
 #include "CollabSession.h"
+#include "CollabCrypt.h"
 #include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QSet>
 #include <QUrl>
 #include <QtWebSockets/QWebSocket>
 #include <QtWebSockets/QWebSocketServer>
@@ -33,6 +35,10 @@ int CollabSession::host(const QString& user, quint16 port) {
 
 bool CollabSession::join(const QString& url, const QString& user) {
     leave();
+    QUrl u(url.trimmed());
+    const QString anahtar = u.fragment(QUrl::FullyDecoded);
+    u.setFragment(QString()); // parça tele gitmez
+    if (!anahtar.isEmpty()) setKey(anahtar);
     m_pendingUser = user.trimmed().isEmpty() ? "misafir" : user.trimmed();
     m_client = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
     connect(m_client, &QWebSocket::connected, this, &CollabSession::onConnected);
@@ -40,7 +46,7 @@ bool CollabSession::join(const QString& url, const QString& user) {
             &CollabSession::onTextMessage);
     connect(m_client, &QWebSocket::disconnected, this, &CollabSession::onClosed);
     connect(m_client, &QWebSocket::errorOccurred, this, &CollabSession::onWsError);
-    m_client->open(QUrl(url));
+    m_client->open(u);
     return true;
 }
 
@@ -50,8 +56,7 @@ void CollabSession::onConnected() {
     m_role = "peer";
     m_active = true;
     m_rev = 0;
-    m_client->sendTextMessage(
-        QString::fromUtf8(QJsonDocument(CollabMerge::makeHello(m_user, 0)).toJson()));
+    sendTo(m_client, CollabMerge::makeHello(m_user, 0));
     emit activeChanged(true);
 }
 
@@ -87,6 +92,8 @@ void CollabSession::leave() {
     m_role.clear();
     m_pendingUser.clear();
     m_cursors.clear();
+    m_key.clear(); // oturum bitince anahtar düşer
+    m_warned.clear();
     if (was) emit activeChanged(false);
 }
 
@@ -114,13 +121,30 @@ void CollabSession::publishTerm(const QString& chunk) {
     broadcast({{"t", "term"}, {"user", m_user}, {"chunk", chunk.left(4000)}});
 }
 
+void CollabSession::setKey(const QString& password) {
+    m_key = password.isEmpty() ? QByteArray() : CollabCrypt::deriveKey(password);
+}
+
+void CollabSession::sendTo(QWebSocket* s, const QJsonObject& msg) {
+    if (!s || !s->isValid()) return;
+    if (hasKey()) {
+        QString err;
+        const QString zarf = CollabCrypt::seal(
+            m_key, QString::fromUtf8(QJsonDocument(msg).toJson(QJsonDocument::Compact)),
+            &err);
+        if (zarf.isEmpty()) return;
+        s->sendTextMessage(zarf);
+        return;
+    }
+    s->sendTextMessage(QString::fromUtf8(QJsonDocument(msg).toJson()));
+}
+
 void CollabSession::broadcast(const QJsonObject& msg, QWebSocket* except) {
-    const QString text = QString::fromUtf8(QJsonDocument(msg).toJson());
     if (m_role == "host") {
         for (QWebSocket* s : m_socks)
-            if (s != except && s->isValid()) s->sendTextMessage(text);
-    } else if (m_client && m_client != except && m_client->isValid()) {
-        m_client->sendTextMessage(text);
+            if (s != except) sendTo(s, msg);
+    } else if (m_client && m_client != except) {
+        sendTo(m_client, msg);
     }
 }
 
@@ -132,15 +156,35 @@ void CollabSession::onNewConnection() {
     connect(s, &QWebSocket::disconnected, this, &CollabSession::onClosed);
     m_socks << s;
     // Yeni eşe güncel durumu gönder
-    s->sendTextMessage(QString::fromUtf8(
-        QJsonDocument(QJsonObject{{"t", "sync"},
-                                  {"text", m_base.left(1000000)},
-                                  {"rev", m_rev}})
-            .toJson()));
+    sendTo(s, QJsonObject{{"t", "sync"},
+                          {"text", m_base.left(1000000)},
+                          {"rev", m_rev}});
 }
 
 void CollabSession::onTextMessage(const QString& text) {
     QWebSocket* from = qobject_cast<QWebSocket*>(sender());
+    if (hasKey()) {
+        // Anahtarlı oturum: yalnız mühürlü ileti kabul edilir
+        QString err;
+        const QString acik = CollabCrypt::open(m_key, text, &err);
+        if (acik.isEmpty()) {
+            if (from && !m_warned.contains(from)) {
+                m_warned << from;
+                // Düz bye: sır içermez, eş nedenini görsün
+                from->sendTextMessage(QString::fromUtf8(
+                    QJsonDocument(QJsonObject{{"t", "bye"},
+                                              {"user", "evsahibi"},
+                                              {"why", "anahtar"}})
+                        .toJson()));
+                emit sessionError("Anahtar uyuşmayan bağlantı reddedildi.");
+            }
+            return;
+        }
+        QJsonDocument d = QJsonDocument::fromJson(acik.toUtf8());
+        if (!d.isObject()) return;
+        handleMessage(from, d.object());
+        return;
+    }
     QJsonDocument d = QJsonDocument::fromJson(text.toUtf8());
     if (!d.isObject()) return;
     handleMessage(from, d.object());
@@ -200,6 +244,8 @@ void CollabSession::handleMessage(QWebSocket* from, const QJsonObject& msg) {
     if (t == "bye") {
         if (m_cursors.remove(user)) emit cursorsChanged();
         emit peerLeft(user);
+        if (msg.value("why").toString() == "anahtar")
+            emit sessionError("Oturum anahtarı uyuşmadı.");
         if (m_role == "host") broadcast(msg, from);
         return;
     }
@@ -225,11 +271,9 @@ void CollabSession::handleMessage(QWebSocket* from, const QJsonObject& msg) {
         } else {
             // Rev uyuşmazlığı: tam eşitleme iste (host'a sor ya da yoksay)
             if (m_role == "host" && from)
-                from->sendTextMessage(QString::fromUtf8(
-                    QJsonDocument(QJsonObject{{"t", "sync"},
-                                              {"text", m_base.left(1000000)},
-                                              {"rev", m_rev}})
-                        .toJson()));
+                sendTo(from, QJsonObject{{"t", "sync"},
+                                         {"text", m_base.left(1000000)},
+                                         {"rev", m_rev}});
         }
         if (m_role == "host") broadcast(msg, from);
         return;

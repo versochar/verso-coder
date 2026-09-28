@@ -11,6 +11,7 @@
 
 #include "../src/core/ConnectionProfile.h"
 #include "../src/core/GitRunner.h"
+#include "../src/core/GitWorktree.h"
 
 static int g_pass = 0, g_fail = 0;
 
@@ -145,6 +146,44 @@ static void testNoRepo() {
     CHECK(r.exit != 0);
 }
 
+static void testWorktree() {
+    QTemporaryDir d;
+    CHECK(d.isValid());
+    LocalGitRunner g(d.path());
+    auto run = [&](const QStringList& a) { return g.run(a, 10000); };
+    CHECK(run({"init", "-b", "main"}).exit == 0);
+    QFile f(d.path() + "/a.txt");
+    CHECK(f.open(QIODevice::WriteOnly));
+    f.write("v1\n");
+    f.close();
+    CHECK(run({"add", "a.txt"}).exit == 0);
+    CHECK(run({"commit", "-m", "ilk"}).exit == 0);
+    QString err;
+    auto l0 = GitWorktree::list(g, &err);
+    CHECK(err.isEmpty());
+    CHECK(l0.size() == 1 && l0[0].branch == "refs/heads/main");
+    // Ekle (yeni dalla)
+    const QString wt = d.path() + "-wt1";
+    CHECK(GitWorktree::add(g, wt, "", "ozellik", &err));
+    auto l1 = GitWorktree::list(g, nullptr);
+    CHECK(l1.size() == 2);
+    bool dal = false;
+    for (const auto& w : l1)
+        if (w.path == wt && w.branch == "refs/heads/ozellik") dal = true;
+    CHECK(dal);
+    CHECK(QFile::exists(wt + "/a.txt")); // dosya ağaca geldi
+    // Kaldır
+    CHECK(GitWorktree::remove(g, wt, false, &err));
+    CHECK(GitWorktree::list(g, nullptr).size() == 1);
+    // Olmayan dizin: hata
+    CHECK(!GitWorktree::remove(g, d.path() + "-yok", false, &err));
+    CHECK(!err.isEmpty());
+    // Depo dışında liste boş + hata
+    LocalGitRunner g2(d.path() + "-bos");
+    CHECK(GitWorktree::list(g2, &err).isEmpty());
+    CHECK(!err.isEmpty());
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     QTemporaryDir home;
@@ -163,6 +202,7 @@ int main(int argc, char** argv) {
     testRemoteCmd();
     testTimeout();
     testNoRepo();
+    testWorktree();
 
     fprintf(stderr, "STAGE43: %d passed, %d failed\n", g_pass, g_fail);
     fflush(stderr);

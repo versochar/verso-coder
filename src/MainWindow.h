@@ -11,6 +11,7 @@
 #include "core/PerfTools.h"
 #include "core/ExternalTools.h"
 #include "core/ConnectionProfile.h"
+#include "core/UpdateChecker.h"
 #include "core/GdbDriver.h"
 #include "core/SnippetManager.h"
 #include "core/LspClient.h"
@@ -177,6 +178,7 @@ private slots:
     void debugFinish();
     void toggleBreakpoint(const QString& file, int line);
     void toggleBreakpointAtCursor();
+    void debugRunToCursor();
     void onDebugStopped(const QString& reason, const struct DebugFrame& frame);
     void onDebugExited(int code);
     void syncBreakpointsToGdb();
@@ -191,6 +193,7 @@ private slots:
     void discoverTests();
     void runAllTests();
     void runOneTest(const QString& testId);
+    void runFailedTests();
     void stopTests();
     QString testLog() const;
     void runCoverage();
@@ -296,6 +299,8 @@ private:
     void showPluginManager();
     void showPluginStore();
     void onPluginsChanged();
+    void onUpdateAvailable(const UpdateChecker::Result& r);
+    void downloadUpdate(const UpdateChecker::Result& r);
     // Stage 30
     void openMergeEditor();
     void importSshConfig();
@@ -339,6 +344,7 @@ private:
     void organizeImports();
     void showGitHistory();
     void showGitTags();
+    void showWorktreeDialog();
     void terminalFind(bool forward);
     void showNotifications();
     void pushRecentProject(const QString& root);
@@ -510,6 +516,7 @@ private:
     class DebugPanel* m_debug = nullptr;
     class TestExplorer* m_tests = nullptr;
     class QProcess* m_testProc = nullptr;
+    QStringList m_testQueue; // başarısızları sırayla koştur
     struct TestRunner m_testRunner;
     bool m_hasRunner = false;
     QList<struct TestCase> m_testCases;

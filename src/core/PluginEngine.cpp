@@ -1,11 +1,14 @@
 #include "PluginEngine.h"
 #include "PathGuard.h"
 #include <QApplication>
+#include <QClipboard>
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
+#include <QGuiApplication>
 #include <QEventLoop>
 #include <QInputDialog>
 #include <QJSEngine>
@@ -20,6 +23,7 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QWidget>
+#include <climits>
 
 PluginEngine::PluginEngine(QObject* parent) : QObject(parent) {}
 
@@ -296,6 +300,65 @@ void VersoApi::setConfig(const QString& key, const QString& value) {
     q.endGroup();
 }
 
+// ---- zamanlayıcı / pano / dizin ----
+int VersoApi::setTimeout(const QJSValue& fn, int ms) {
+    auto* eng = qobject_cast<PluginEngine*>(parent());
+    return eng ? eng->startTimer(m_id, fn, ms, false) : 0;
+}
+
+int VersoApi::setInterval(const QJSValue& fn, int ms) {
+    auto* eng = qobject_cast<PluginEngine*>(parent());
+    return eng ? eng->startTimer(m_id, fn, ms, true) : 0;
+}
+
+void VersoApi::clearTimer(int id) {
+    if (auto* eng = qobject_cast<PluginEngine*>(parent())) eng->stopTimer(m_id, id);
+}
+
+bool VersoApi::copyText(const QString& text) {
+    if (!need("ui") || text.isEmpty()) return false;
+    if (!qobject_cast<QGuiApplication*>(QCoreApplication::instance())) return false;
+    QGuiApplication::clipboard()->setText(text.left(1000000));
+    return true;
+}
+
+QString VersoApi::pasteText() {
+    if (!need("ui")) return {};
+    if (!qobject_cast<QGuiApplication*>(QCoreApplication::instance())) return {};
+    return QGuiApplication::clipboard()->text().left(1000000);
+}
+
+QString VersoApi::listDir(const QString& relPath) {
+    if (!need("fs.read")) return {};
+    const PluginEngine* eng = engine();
+    QString why;
+    const QString abs =
+        scopedPath(eng, relPath.trimmed().isEmpty() ? QString(".") : relPath, &why);
+    if (abs.isEmpty()) {
+        emit apiLog(m_id, QString("listeleme reddedildi (%1)").arg(why.left(120)));
+        return {};
+    }
+    const QDir d(abs);
+    if (!d.exists()) return {};
+    const QString root = eng ? eng->workspaceRoot() : QString();
+    QJsonArray a;
+    const QFileInfoList infos = d.entryInfoList(
+        QDir::AllEntries | QDir::NoDotAndDotDot, QDir::DirsFirst | QDir::Name);
+    for (const QFileInfo& fi : infos) {
+        if (fi.isSymLink() && !root.isEmpty()) {
+            const QString canon = fi.canonicalFilePath();
+            if (canon != root && !canon.startsWith(root + QLatin1Char('/')))
+                continue; // kök dışına kaçan bağ listelenmez
+        }
+        QJsonObject o;
+        o["name"] = fi.fileName();
+        o["dir"] = fi.isDir();
+        o["size"] = fi.isDir() ? 0 : int(qMin<qint64>(fi.size(), INT_MAX));
+        a.append(o);
+    }
+    return QString::fromUtf8(QJsonDocument(a).toJson(QJsonDocument::Compact));
+}
+
 // ---- PluginEngine ----
 QJSValue PluginEngine::makeVerso(const QString& id, const QStringList& perms) {
     auto* api = new VersoApi(id, perms, this);
@@ -342,6 +405,46 @@ QJSValue PluginEngine::makeVerso(const QString& id, const QStringList& perms) {
     return m_js.newQObject(api);
 }
 
+// ---- eklenti zamanlayıcıları ----
+int PluginEngine::startTimer(const QString& pluginId, const QJSValue& fn, int ms,
+                             bool repeat) {
+    if (!fn.isCallable()) return 0;
+    const int id = ++m_timerSeq;
+    auto* t = new QTimer(this);
+    t->setSingleShot(!repeat);
+    t->setInterval(qBound(1, ms, 3600000));
+    m_timers[id] = t;
+    m_timerOwner[id] = pluginId;
+    m_timerFns[pluginId + "#" + QString::number(id)] = fn;
+    connect(t, &QTimer::timeout, this, [this, pluginId, id]() {
+        auto it = m_timerFns.find(pluginId + "#" + QString::number(id));
+        if (it == m_timerFns.end()) return;
+        if (VersoApi* api = m_apis.value(pluginId, nullptr))
+            m_js.globalObject().setProperty("verso", m_js.newQObject(api));
+        QJSValue r = it.value().call();
+        if (r.isError()) noteError(pluginId, r.toString());
+        QTimer* self = m_timers.value(id, nullptr);
+        if (self && self->isSingleShot()) stopTimer(pluginId, id);
+    });
+    t->start();
+    return id;
+}
+
+void PluginEngine::stopTimer(const QString& pluginId, int id) {
+    if (m_timerOwner.value(id) != pluginId) return;
+    m_timerFns.remove(pluginId + "#" + QString::number(id));
+    m_timerOwner.remove(id);
+    if (QTimer* t = m_timers.take(id)) t->deleteLater();
+}
+
+void PluginEngine::clearTimers(const QString& pluginId) {
+    const QList<int> ids = m_timers.keys();
+    for (int id : ids) {
+        if (pluginId.isEmpty() || m_timerOwner.value(id) == pluginId)
+            stopTimer(m_timerOwner.value(id), id);
+    }
+}
+
 void PluginEngine::onApiRegister(const QString& id, const QString& cmdId,
                                  const QString& title, const QJSValue& fn) {
     const QString full = "plugin." + id + "." + cmdId;
@@ -377,6 +480,7 @@ void PluginEngine::noteError(const QString& pluginId, const QString& msg) {
 
 QList<PluginEngine::Plugin> PluginEngine::loadAll(const QString& dir) {
     m_plugins.clear();
+    clearTimers(QString()); // eski yüklemenin zamanlayıcıları ölür
     m_commands.clear();
     m_cmdOwner.clear();
     m_views.clear();
@@ -486,6 +590,7 @@ bool PluginEngine::unload(const QString& id) {
         m_handlers.remove(id);
         m_plugins.removeAt(i);
         delete m_apis.take(id);
+        clearTimers(id);
         return true;
     }
     return false;

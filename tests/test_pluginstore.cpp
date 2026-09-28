@@ -1,6 +1,7 @@
 // Eklenti mağazası testleri: kayıt dizini çözümleme, index ayrıştırma,
 // kimlik doğrulama, kurulum + sürüm okuma. Ağ yok: file:// sahte kayıt.
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QSettings>
@@ -153,6 +154,56 @@ static void testUpdateCheck() {
     CHECK(AboutInfo::isNewer("1.1.0", "1.0.4"));
 }
 
+static void testCacheRoundtrip() {
+    QTemporaryDir cache;
+    CHECK(cache.isValid());
+    qputenv("XDG_CACHE_HOME", cache.path().toUtf8());
+    PluginStore::Entry e;
+    e.id = "deneme";
+    e.name = "Deneme";
+    e.version = "2.0.0";
+    e.description = "d";
+    e.author = "t";
+    e.file = "plugins/deneme/plugin.js";
+    e.minApp = "0.3.2";
+    e.permissions = {"ui", "fs.read"};
+    PluginStore::saveCache({e});
+    QDateTime when;
+    const auto geri = PluginStore::loadCache(&when);
+    CHECK(geri.size() == 1);
+    CHECK(geri[0].id == "deneme");
+    CHECK(geri[0].version == "2.0.0");
+    CHECK(geri[0].permissions == QStringList({"ui", "fs.read"}));
+    CHECK(when.isValid());
+    qunsetenv("XDG_CACHE_HOME");
+}
+
+static void testUpdatesAvailable() {
+    QTemporaryDir dir;
+    CHECK(dir.isValid());
+    auto yaz = [&](const QString& id, const QString& ver) {
+        QFile f(dir.filePath(id + ".js"));
+        CHECK(f.open(QIODevice::WriteOnly));
+        f.write(("// @version " + ver + "\n").toUtf8());
+        f.close();
+    };
+    yaz("eski", "1.0.0");
+    yaz("guncel", "2.0.0");
+    PluginStore::Entry a, b, c;
+    a.id = "eski";
+    a.version = "1.1.0";
+    a.file = "plugins/eski/plugin.js";
+    b.id = "guncel";
+    b.version = "2.0.0";
+    b.file = "plugins/guncel/plugin.js";
+    c.id = "kurulu-degil";
+    c.version = "9.9.9";
+    c.file = "plugins/kurulu-degil/plugin.js";
+    const auto bekleyen = PluginStore::updatesAvailable({a, b, c}, dir.path());
+    CHECK(bekleyen.size() == 1);
+    CHECK(bekleyen[0].id == "eski");
+}
+
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     testRegistryBase();
@@ -161,6 +212,8 @@ int main(int argc, char** argv) {
     testInstallAndVersion();
     testFetchLocalRegistry();
     testUpdateCheck();
+    testCacheRoundtrip();
+    testUpdatesAvailable();
     fprintf(stderr, "PLUGINSTORE: %d passed, %d failed\n", g_pass, g_fail);
     fflush(stderr);
     return g_fail == 0 ? 0 : 1;

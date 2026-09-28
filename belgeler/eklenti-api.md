@@ -37,6 +37,9 @@ kısıtlanabilir (`plugin/perms/<id>` geçersiz kılma).
 | `get/setGlobalState(k, v)` | — | Eklentiye özel kalıcı alan |
 | `get/setWorkspaceState(k, v)` | — | Proje başına alan |
 | `get/setConfig(k, v)` | — | Yönetici diyaloğundan düzenlenebilir ayar |
+| `setTimeout(fn, ms)` / `setInterval(fn, ms)` → id | — | Zamanlayıcı (id ile `clearTimer(id)`); unload'da ölür |
+| `copyText(metin)` / `pasteText()` | `ui` | Sistem panosu (başsız ortamda boş) |
+| `listDir(yol)` | `fs.read` | Kök kapsamlı dizin listesi (JSON: `[{name, dir, size}]`) |
 
 ## Güvenlik
 
@@ -111,6 +114,8 @@ eklentiyi verir. Uygulama içinden `Eklentiler → Mağaza`:
 - Güncelleme rozeti: kayıt sürümü kurulu sürümden yeniyse listede görünür.
 - Kayıt adresi değiştirilebilir: `plugin/registry` ayarı ya da
   `VERSO_PLUGIN_REGISTRY` ortam değişkeni (kurumsal ayna için).
+- Ağ işlemleri eşzamansızdır (arayüz donmaz); son başarılı liste
+  önbelleğe alınır, çevrimdışıyken önbellek gösterilir.
 
 Eklenti ekleme: `packaging/plugins/publish.sh` (`--check` doğrular,
 varsayılan yayınlar, `--unpublish` kayıttan çıkarır). Kural: `@name` +

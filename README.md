@@ -2,7 +2,7 @@
 
 Yerel öncelikli, Qt6 ile yazılmış hızlı kod editörü. Sekmeli editör, LSP, Git, uzak geliştirme ve **çok sağlayıcılı yapay zekâ** (yerel Ollama'dan buluta) tek uygulamada.
 
-Sürüm 1.3.1 · MIT lisansı · Linux (AppImage/pacman) · Windows · macOS (Apple Silicon)
+Sürüm 0.3.2 · MIT lisansı · Linux (AppImage/pacman) · Windows · macOS (Apple Silicon)
 
 ## Kurulum
 
@@ -81,7 +81,7 @@ sudo pacman -Sy verso-coder
   boşluk temizleyici, karmaşıklık, REST, regex, gitignore, snippet,
   pydoc, f-string, header guard, C++ modernleştirme, Java getter/setter,
   HTML, CSS renk, var/arrow dönüşümü, web önizleme
-- **Birlikte çalışma:** yerel ağda oturum barındır/katıl, renkli eş imleçleri (şifresizdir — yalnız güvenilir ağda)
+- **Birlikte çalışma:** yerel ağda oturum barındır/katıl, renkli eş imleçleri, isteğe bağlı uçtan uca şifreleme (davet adresinde `#anahtar`)
 
 ## Klavye (seçmeler)
 
@@ -90,7 +90,7 @@ sudo pacman -Sy verso-coder
 ## Bilinen sınırlamalar (kısa)
 
 - Ücretsiz AI katmanları yukarıdaki kotalarla sınırlıdır.
-- İşbirliği şifresizdir — internette kullanmayın.
+- İşbirliği anahtarsız oturumda şifresizdir — internette anahtar kullanın.
 - macOS yalnız Apple Silicon; imza doğrulama yok; RTL diller kapsam dışı.
 - Tam liste: [docs/LIMITATIONS.md](docs/LIMITATIONS.md) · [pacman deposu](docs/PACMAN-REPO.md) · [retrospektif](docs/RETROSPECTIVE.md)
 

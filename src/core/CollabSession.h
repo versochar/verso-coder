@@ -28,6 +28,11 @@ public:
     // Katıl: ws://host:port (zamanuyumsuz — bağlanınca activeChanged(true))
     bool join(const QString& url, const QString& user);
     void leave();
+    // Ön-paylaşımlı anahtar: boş = şifresiz (eski davranış). Doluysa tüm
+    // trafik ChaCha20+HMAC zarfında gider; anahtarsız/yanlış eş düşer.
+    // Davet adresi anahtarı parçada taşır: ws://host:port#anahtar
+    void setKey(const QString& password);
+    bool hasKey() const { return !m_key.isEmpty(); }
 
     // Giden: belge metni değişti (yerel diff → yayın)
     void publishText(const QString& newText);
@@ -54,6 +59,7 @@ private slots:
 private:
     void handleMessage(QWebSocket* from, const QJsonObject& msg);
     void broadcast(const QJsonObject& msg, QWebSocket* except = nullptr);
+    void sendTo(QWebSocket* s, const QJsonObject& msg); // anahtar varsa mühürler
     QString m_user;
     QString m_role; // "", "host", "peer", "guest"
     bool m_active = false;
@@ -65,4 +71,6 @@ private:
     QMap<QWebSocket*, QString> m_sockUser; // Stage 49: ani kopuşta hayalet temizliği
     QWebSocket* m_client = nullptr; // peer/guest tarafı tek soket
     QString m_pendingUser;
+    QByteArray m_key; // boş = şifresiz
+    QSet<QWebSocket*> m_warned; // anahtar uyarısı verilen soketler (spam yok)
 };

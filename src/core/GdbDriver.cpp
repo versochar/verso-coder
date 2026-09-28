@@ -109,6 +109,13 @@ void GdbDriver::execContinue() { send("-exec-continue", nullptr); }
 void GdbDriver::execNext() { send("-exec-next", nullptr); }
 void GdbDriver::execStep() { send("-exec-step", nullptr); }
 void GdbDriver::execFinish() { send("-exec-finish", nullptr); }
+QString GdbDriver::untilCommand(const QString& file, int line) {
+    return QString("-exec-until %1")
+        .arg(miQuote(file + ":" + QString::number(qMax(1, line))));
+}
+void GdbDriver::execUntil(const QString& file, int line) {
+    send(untilCommand(file, line), nullptr);
+}
 void GdbDriver::interrupt() { send("-exec-interrupt", nullptr); }
 
 void GdbDriver::stackFrames(std::function<void(QList<DebugFrame>)> done) {

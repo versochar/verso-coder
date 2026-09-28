@@ -101,7 +101,9 @@ set(SOURCES
     src/core/PathGuard.cpp
     src/core/VersoPaths.cpp
     src/core/UpdateChecker.cpp
+    src/core/AppUpdater.cpp
     src/core/PluginEngine.cpp
+    src/core/GitWorktree.cpp
     src/core/PluginStore.cpp
     src/core/LeakWatch.cpp
     src/core/RagProgress.cpp
@@ -185,6 +187,7 @@ set(SOURCES
     src/core/PluginEngine.cpp
     src/core/CollabMerge.cpp
     src/core/CollabSession.cpp
+    src/core/CollabCrypt.cpp
     src/core/GitVersionManager.cpp
     src/core/CacheCleaner.cpp
     src/core/ThreadMonitor.cpp
@@ -294,6 +297,7 @@ set(SOURCES
     src/widgets/HexViewDialog.cpp
     src/widgets/GitHistoryDialog.cpp
     src/widgets/GitTagsDialog.cpp
+    src/widgets/WorktreeDialog.cpp
     src/widgets/PluginManagerDialog.cpp
     src/widgets/PluginStoreDialog.cpp
     src/widgets/PluginSidePanel.cpp
@@ -553,6 +557,7 @@ add_executable(test_stage19
     src/core/CommandAudit.cpp
     src/core/CollabMerge.cpp
     src/core/CollabSession.cpp
+    src/core/CollabCrypt.cpp
     src/core/GitVersionManager.cpp
     src/core/CacheCleaner.cpp
     src/core/ai/ModelPool.cpp
@@ -973,11 +978,17 @@ if(Qt6Test_FOUND)
         src/core/ai/providers/ProviderCodec.cpp
         src/core/ai/providers/SseParser.cpp
         src/widgets/SettingsDialog.cpp
+        src/widgets/TestExplorer.cpp
         src/widgets/PluginStoreDialog.cpp
         src/widgets/PluginSidePanel.cpp
+        src/widgets/WorktreeDialog.cpp
         src/core/PluginEngine.cpp
         src/core/PluginStore.cpp
         src/core/AboutInfo.cpp
+        src/core/GitRunner.cpp
+        src/core/GitWorktree.cpp
+        src/core/SshSession.cpp
+        src/core/ConnectionProfile.cpp
     src/core/SetupAdvisor.cpp
     src/core/CacheCleaner.cpp
         src/widgets/ModelArenaDialog.cpp
@@ -1254,6 +1265,7 @@ add_executable(test_stage43
     tests/test_stage43.cpp
     src/core/PluginEngine.cpp
     src/core/GitRunner.cpp
+    src/core/GitWorktree.cpp
     src/core/SshSession.cpp
     src/core/ConnectionProfile.cpp
     src/core/PathGuard.cpp
@@ -1476,6 +1488,7 @@ add_test(NAME stage47 COMMAND test_stage47)
 add_executable(test_stage48
     tests/test_stage48.cpp
     src/core/UpdateChecker.cpp
+    src/core/AppUpdater.cpp
     src/core/StartupArgs.cpp
     src/core/CrashHandler.cpp
 )
@@ -1487,6 +1500,7 @@ add_test(NAME stage48 COMMAND test_stage48)
 add_executable(test_stage49
     tests/test_stage49.cpp
     src/core/CollabSession.cpp
+    src/core/CollabCrypt.cpp
     src/core/CollabMerge.cpp
 )
 target_include_directories(test_stage49 PRIVATE src)
@@ -1510,6 +1524,17 @@ add_executable(test_pluginstore
 target_include_directories(test_pluginstore PRIVATE src)
 target_link_libraries(test_pluginstore PRIVATE Qt6::Core Qt6::Network)
 add_test(NAME pluginstore COMMAND test_pluginstore)
+
+# --- İşbirliği şifreleme: ChaCha20 KAT + zarf + localhost oturumu ---
+add_executable(test_collabcrypt
+    tests/test_collabcrypt.cpp
+    src/core/CollabCrypt.cpp
+    src/core/CollabSession.cpp
+    src/core/CollabMerge.cpp
+)
+target_include_directories(test_collabcrypt PRIVATE src)
+target_link_libraries(test_collabcrypt PRIVATE Qt6::Core Qt6::WebSockets)
+add_test(NAME collabcrypt COMMAND test_collabcrypt)
 
 # --- Mağaza eklentileri: 10 eklenti yüklenir, komutlar başsız çağrılır ---
 add_executable(test_plugins

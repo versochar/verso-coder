@@ -16,8 +16,9 @@ düzeleceğini yazar. Pazarlama dili yok.
 - Oturum izni gevşetmedir (varsayılan kapalı). Yazma/ağ asla listeye giremez.
 - Eklentiye `fs.write` verildiğinde kök içi yazma serbesttir — izin verirken
   yazarı tanıyın.
-- İşbirliği: LAN güveni, **şifreleme ve kimlik doğrulama yok**. İnternette
-  kullanmayın.
+- İşbirliği: anahtarlı oturumlar uçtan uca şifrelidir (ChaCha20+HMAC);
+  anahtarsız oturumlar düz metindir — internette anahtarsız kullanmayın.
+  Anahtar kimlik doğrulamaz (bilen herkes katılır).
 
 ## Ortam bağımlılıkları
 - Salt-okunur kip yalnız `bwrap`/`unshare` kuruluysa. Yoksa onay sorulur.

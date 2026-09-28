@@ -2,6 +2,7 @@
 #include <QJSEngine>
 #include <QMap>
 #include <QObject>
+#include <QTimer>
 #include <functional>
 #include <QString>
 
@@ -51,6 +52,15 @@ public:
     Q_INVOKABLE void setWorkspaceState(const QString& key, const QString& value);
     Q_INVOKABLE QString getConfig(const QString& key, const QString& def = QString());
     Q_INVOKABLE void setConfig(const QString& key, const QString& value);
+    // Zamanlayıcı (izin gerekmez; hata sayacı karantinaya işletir)
+    Q_INVOKABLE int setTimeout(const QJSValue& fn, int ms);
+    Q_INVOKABLE int setInterval(const QJSValue& fn, int ms);
+    Q_INVOKABLE void clearTimer(int id);
+    // Pano ("ui" izni; başsız ortamda sessizce boş)
+    Q_INVOKABLE bool copyText(const QString& text);
+    Q_INVOKABLE QString pasteText();
+    // Dizin listeleme ("fs.read" izni, kök kapsamlı; JSON dizi döner)
+    Q_INVOKABLE QString listDir(const QString& relPath);
 
 signals:
     void apiLog(const QString& id, const QString& msg);
@@ -111,6 +121,10 @@ public:
     // Görünüm içeriğini üret (view komutları için)
     QString renderView(const QString& cmdId);
     // İzin geçersiz kılma (yönetici UI): id → izin listesi (boş = tümü reddet)
+    // Zamanlayıcılar (motor sahiplenir; unload/loadAll temizler)
+    int startTimer(const QString& pluginId, const QJSValue& fn, int ms, bool repeat);
+    void stopTimer(const QString& pluginId, int id);
+    void clearTimers(const QString& pluginId); // boş = tümü
     void setPermOverride(const QString& id, const QStringList& perms);
     QStringList permOverride(const QString& id) const;
     void clearQuarantine(const QString& id);
@@ -152,6 +166,10 @@ private:
     QMap<QString, QString> m_viewOwner;
     QMap<QString, int> m_errors;        // plugin → hata sayacı
     std::function<QString()> m_currentFile; // Stage 41
+    QMap<int, QTimer*> m_timers;        // tanıtıcı → zamanlayıcı
+    QMap<int, QString> m_timerOwner;    // tanıtıcı → plugin id
+    QMap<QString, QJSValue> m_timerFns; // "pid#hid" → fonksiyon (canlı tutar)
+    int m_timerSeq = 0;
     QStringList m_log;                  // son 200 günlük satırı
     void addLog(const QString& id, const QString& msg);
 };

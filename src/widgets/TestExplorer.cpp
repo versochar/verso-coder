@@ -2,6 +2,7 @@
 #include "../core/SettingsManager.h"
 #include <QCheckBox>
 #include <QLabel>
+#include <QLineEdit>
 #include <QProgressBar>
 #include <QSplitter>
 #include <QPlainTextEdit>
@@ -17,6 +18,7 @@ TestExplorer::TestExplorer(QWidget* parent) : QWidget(parent) {
     m_bar = new QToolBar(this);
     m_bar->addAction("🔍 Keşfet", this, &TestExplorer::discoverRequested);
     m_bar->addAction("▶ Tümünü Çalıştır", this, &TestExplorer::runAllRequested);
+    m_bar->addAction("↻ Başarısızlar", this, &TestExplorer::runFailedRequested);
     m_bar->addAction("■ Durdur", this, &TestExplorer::stopRequested);
     // Stage 25: kaydetmede ilgili testi koştur
     auto* bAuto = new QCheckBox("Otomatik (kaydetmede)", this);
@@ -28,6 +30,12 @@ TestExplorer::TestExplorer(QWidget* parent) : QWidget(parent) {
         SettingsManager::instance().save(s);
     });
     m_bar->addWidget(bAuto);
+    m_filter = new QLineEdit(m_bar);
+    m_filter->setPlaceholderText("Süz...");
+    m_filter->setClearButtonEnabled(true);
+    m_filter->setMaximumWidth(160);
+    m_bar->addWidget(m_filter);
+    connect(m_filter, &QLineEdit::textChanged, this, &TestExplorer::applyFilter);
     lay->addWidget(m_bar);
 
     auto* split = new QSplitter(Qt::Vertical, this);
@@ -58,6 +66,7 @@ TestExplorer::TestExplorer(QWidget* parent) : QWidget(parent) {
 
 void TestExplorer::setTests(const QList<TestCase>& tests) {
     m_tests = tests;
+    m_failed.clear();
     m_tree->clear();
     QMap<QString, QTreeWidgetItem*> groups;
     for (const TestCase& t : tests) {
@@ -84,6 +93,7 @@ void TestExplorer::setResults(const QList<TestCase>& results) {
         if (!t.detail.isEmpty()) details[t.id()] = t.detail;
     }
     int pass = 0, fail = 0, skip = 0;
+    m_failed.clear();
     QTreeWidgetItemIterator it(m_tree);
     while (*it) {
         const QString id = (*it)->data(0, Qt::UserRole).toString();
@@ -96,8 +106,10 @@ void TestExplorer::setResults(const QList<TestCase>& results) {
                 (*it)->setText(2, QString("%1 ms").arg(times[id], 0, 'f', 0));
             if (details.contains(id)) (*it)->setToolTip(0, details[id]);
             if (st == "pass") ++pass;
-            else if (st == "fail") ++fail;
-            else ++skip;
+            else if (st == "fail") {
+                ++fail;
+                if (!m_failed.contains(id)) m_failed << id;
+            } else ++skip;
         }
         ++it;
     }
@@ -135,4 +147,31 @@ void TestExplorer::onItemDoubleClicked() {
     if (!it) return;
     const QString id = it->data(0, Qt::UserRole).toString();
     if (!id.isEmpty()) emit runOneRequested(id);
+}
+
+void TestExplorer::applyFilter(const QString& text) {
+    const QString q = text.trimmed().toLower();
+    QTreeWidgetItemIterator it(m_tree);
+    while (*it) {
+        QTreeWidgetItem* item = *it;
+        if (item->childCount() > 0) {
+            // Grup: çocuğu görünen varsa açık tut
+            bool gorunur = q.isEmpty();
+            for (int i = 0; i < item->childCount() && !gorunur; ++i) {
+                QTreeWidgetItem* c = item->child(i);
+                if (c->text(0).toLower().contains(q) ||
+                    c->data(0, Qt::UserRole).toString().toLower().contains(q))
+                    gorunur = true;
+            }
+            if (q.isEmpty() || item->text(0).toLower().contains(q)) gorunur = true;
+            item->setHidden(!gorunur);
+            item->setExpanded(gorunur && !q.isEmpty());
+        } else {
+            const bool gorunur =
+                q.isEmpty() || item->text(0).toLower().contains(q) ||
+                item->data(0, Qt::UserRole).toString().toLower().contains(q);
+            item->setHidden(!gorunur);
+        }
+        ++it;
+    }
 }
