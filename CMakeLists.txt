@@ -9,10 +9,19 @@ set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network Concurrent Svg Qml WebSockets)
 if(WIN32)
-    # Windows: pkg-config yok; vcpkg config paketleri kullanılır
-    find_package(unofficial-hunspell CONFIG REQUIRED)
-    set(HUNSPELL_LIBRARIES unofficial::hunspell::hunspell)
-    set(HUNSPELL_INCLUDE_DIRS "")
+    # Windows: pkg-config yok; vcpkg kurulu ağacından doğrudan alınır.
+    # (config adı vcpkg sürümüne göre değişiyor: hunspell/unofficial-hunspell)
+    find_path(HUNSPELL_INCLUDE_DIRS hunspell/hunspell.hxx
+        PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include"
+              "$ENV{VCPKG_ROOT}/installed/x64-windows/include"
+        NO_DEFAULT_PATH)
+    find_library(HUNSPELL_LIBRARIES NAMES hunspell
+        PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib"
+              "$ENV{VCPKG_ROOT}/installed/x64-windows/lib"
+        NO_DEFAULT_PATH)
+    if(NOT HUNSPELL_INCLUDE_DIRS OR NOT HUNSPELL_LIBRARIES)
+        message(FATAL_ERROR "hunspell bulunamadı (vcpkg install hunspell:x64-windows)")
+    endif()
 else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(HUNSPELL REQUIRED hunspell)
