@@ -14,7 +14,7 @@ optdepends=('clangd: C/C++ dil sunucusu'
             'gopls: Go dil sunucusu'
             'bwrap: ajan salt-okunur kipi')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/versochar/verso-coder/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('646ebd58787f5a2e8cb8a4fdd72a0bd8f763eb071b6a54c43dcfe446d3a445dc')
+sha256sums=('1e43f6e25458f820e602f3d0e38aea205ec1819e6ab3021874a23e800f292839')
 
 build() {
   # Ağaç-içi derleme: test_stage50 kaynak kökü yukarı arar (makepkg düzeni)
