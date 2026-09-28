@@ -145,7 +145,7 @@ QList<SearchHit> SearchPanel::searchInFile(const QString& file, const QString& q
         const QString& ln = lines[i];
         if (useRegex) {
             for (auto m = rx.match(ln); m.hasMatch(); m = rx.match(ln, m.capturedEnd()))
-                out.append({file, i + 1, m.capturedStart() + 1, ln.trimmed().left(160)});
+                out.append({file, i + 1, int(m.capturedStart() + 1), ln.trimmed().left(160)});
         } else {
             Qt::CaseSensitivity c = caseSens ? Qt::CaseSensitive : Qt::CaseInsensitive;
             int idx = ln.indexOf(query, 0, c);

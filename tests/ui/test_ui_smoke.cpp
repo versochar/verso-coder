@@ -333,7 +333,8 @@ void UiSmokeTest::mainWindow_lazyTabsRestoreAndMaterialize() {
     }
     DocSession d;
     d.files = files;
-    d.cursors = {files[0] + "\x1F10", files[1] + "\x1F20", files[2] + "\x1F30"};
+    const QString sep = QString(QChar(0x1F)); // "\x1F10" Clang'te geçersiz (sınırsız hex)
+    d.cursors = {files[0] + sep + "10", files[1] + sep + "20", files[2] + sep + "30"};
     d.active = 0;
     const int editorsBefore = m_win->editorTabCount();
     m_win->applyDocSession(d);
