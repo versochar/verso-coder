@@ -102,6 +102,7 @@ set(SOURCES
     src/core/VersoPaths.cpp
     src/core/UpdateChecker.cpp
     src/core/PluginEngine.cpp
+    src/core/PluginStore.cpp
     src/core/LeakWatch.cpp
     src/core/RagProgress.cpp
     src/core/SetupAdvisor.cpp
@@ -294,6 +295,7 @@ set(SOURCES
     src/widgets/GitHistoryDialog.cpp
     src/widgets/GitTagsDialog.cpp
     src/widgets/PluginManagerDialog.cpp
+    src/widgets/PluginStoreDialog.cpp
     src/widgets/MergeEditorDialog.cpp
     src/widgets/SearchEditorDialog.cpp
     src/widgets/NewProjectDialog.cpp
@@ -970,6 +972,10 @@ if(Qt6Test_FOUND)
         src/core/ai/providers/ProviderCodec.cpp
         src/core/ai/providers/SseParser.cpp
         src/widgets/SettingsDialog.cpp
+        src/widgets/PluginStoreDialog.cpp
+        src/core/PluginEngine.cpp
+        src/core/PluginStore.cpp
+        src/core/AboutInfo.cpp
     src/core/SetupAdvisor.cpp
     src/core/CacheCleaner.cpp
         src/widgets/ModelArenaDialog.cpp
@@ -990,7 +996,7 @@ if(Qt6Test_FOUND)
         src/core/QssBuilder.cpp
     )
     target_include_directories(test_ui_widgets PRIVATE src)
-    target_link_libraries(test_ui_widgets PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Concurrent Qt6::Svg Qt6::Test)
+    target_link_libraries(test_ui_widgets PRIVATE Qt6::Core Qt6::Widgets Qt6::Network Qt6::Concurrent Qt6::Svg Qt6::Qml Qt6::Test)
 
     add_test(NAME ui_widgets COMMAND test_ui_widgets)
     set_tests_properties(ui_widgets PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/ui-home;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/ui-home")
@@ -1492,3 +1498,13 @@ add_executable(test_stage50
 target_include_directories(test_stage50 PRIVATE src)
 target_link_libraries(test_stage50 PRIVATE Qt6::Core)
 add_test(NAME stage50 COMMAND test_stage50)
+
+# --- Eklenti mağazası: kayıt dizini + kurulum (ağ yok, file:// sahte kayıt) ---
+add_executable(test_pluginstore
+    tests/test_pluginstore.cpp
+    src/core/PluginStore.cpp
+    src/core/AboutInfo.cpp
+)
+target_include_directories(test_pluginstore PRIVATE src)
+target_link_libraries(test_pluginstore PRIVATE Qt6::Core Qt6::Network)
+add_test(NAME pluginstore COMMAND test_pluginstore)

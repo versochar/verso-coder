@@ -1,9 +1,9 @@
 // Verso Coder örnek eklentisi: kelime sayacı (Stage 41 referansı)
-// Yalnız "read" + "ui" izni ister: açık dosyanın yolunu ana taraftan alır,
+// Yalnız "fs.read" + "ui" izni ister: açık dosyanın yolunu ana taraftan alır,
 // dosya KÖK İÇİNDEYSE okur, sonucu durum çubuğunda gösterir.
 // @name Kelime Sayacı
 // @version 1.0.0
-// @permission read
+// @permission fs.read
 // @permission ui
 (function () {
     verso.log("kelime sayacı yüklendi");

@@ -48,3 +48,20 @@ kısıtlanabilir (`plugin/perms/<id>` geçersiz kılma).
 
 `resources/plugins/`: `echo.js` (v1), `selam.js` (durum + giriş + sayaç),
 `notal.js` (quickPick + dosya + görünüm). İlk açılışta klasöre kopyalanırlar.
+
+## Mağaza (kayıt deposu)
+
+Resmi kayıt: `github.com/versochar/verso-coder-plugins` (git reposu).
+Kökteki `index.json` listeler, `plugins/<kimlik>/plugin.js` tek dosyalık
+eklentiyi verir. Uygulama içinden `Eklentiler → Mağaza`:
+
+- Yenile → kayıt okunur (çevrimdışıysa hata verir, sessiz geçmez).
+- Kur/Güncelle → izin listesi onaya sunulur, dosya iner, başlıktaki
+  `@version` listedekiyle uyuşmazsa kurulum durur.
+- Güncelleme rozeti: kayıt sürümü kurulu sürümden yeniyse listede görünür.
+- Kayıt adresi değiştirilebilir: `plugin/registry` ayarı ya da
+  `VERSO_PLUGIN_REGISTRY` ortam değişkeni (kurumsal ayna için).
+
+Eklenti ekleme: `packaging/plugins/publish.sh` (`--check` doğrular,
+varsayılan yayınlar, `--unpublish` kayıttan çıkarır). Kural: `@name` +
+`@version` başlığı zorunlu, yalnız bilinen izinler, en az izin ilkesi.

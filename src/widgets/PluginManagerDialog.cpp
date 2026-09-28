@@ -1,4 +1,5 @@
 #include "PluginManagerDialog.h"
+#include "PluginStoreDialog.h"
 #include "../core/PluginEngine.h"
 #include <QDialogButtonBox>
 #include <QDir>
@@ -39,6 +40,7 @@ PluginManagerDialog::PluginManagerDialog(PluginEngine* engine, QWidget* parent)
     auto* bConf = new QPushButton("Ayarlar...", this);
     auto* bQuar = new QPushButton("Karantinayı kaldır", this);
     auto* bLog = new QPushButton("Günlük", this);
+    auto* bStore = new QPushButton("Mağaza...", this);
     row->addWidget(bInstall);
     row->addWidget(bDel);
     row->addWidget(bToggle);
@@ -46,6 +48,7 @@ PluginManagerDialog::PluginManagerDialog(PluginEngine* engine, QWidget* parent)
     row->addWidget(bConf);
     row->addWidget(bQuar);
     row->addWidget(bLog);
+    row->addWidget(bStore);
     lay->addLayout(row);
     auto* box = new QDialogButtonBox(QDialogButtonBox::Close, this);
     connect(box, &QDialogButtonBox::rejected, this, &PluginManagerDialog::reject);
@@ -58,6 +61,7 @@ PluginManagerDialog::PluginManagerDialog(PluginEngine* engine, QWidget* parent)
     connect(bQuar, &QPushButton::clicked, this,
             &PluginManagerDialog::clearQuarantineSel);
     connect(bLog, &QPushButton::clicked, this, &PluginManagerDialog::showLog);
+    connect(bStore, &QPushButton::clicked, this, &PluginManagerDialog::openStore);
     connect(m_list, &QListWidget::currentRowChanged, this,
             &PluginManagerDialog::refreshList);
     refreshList();
@@ -118,9 +122,13 @@ void PluginManagerDialog::installFromFolder() {
         QMessageBox::information(this, "Kur", "Kopyalanacak .js bulunamadı.");
         return;
     }
-    // Yeni kurulanı etkin listesine ekle
+    // Yeni kurulanı etkin listesine ekle (liste yoksa mevcutları koru)
     QSettings q("Verso", "VersoCoder");
     QStringList en = q.value("plugin/enabled").toStringList();
+    if (!q.contains("plugin/enabled") && m_eng) {
+        for (const auto& p : m_eng->plugins())
+            if (!en.contains(p.id)) en << p.id;
+    }
     for (const QFileInfo& fi : d.entryInfoList({"*.js"}, QDir::Files))
         if (!en.contains(fi.completeBaseName())) en << fi.completeBaseName();
     q.setValue("plugin/enabled", en);
@@ -228,4 +236,12 @@ void PluginManagerDialog::editSettings() {
 void PluginManagerDialog::showLog() {
     if (!m_eng) return;
     m_info->setPlainText(m_eng->logLines().join('\n'));
+}
+
+void PluginManagerDialog::openStore() {
+    PluginStoreDialog d(m_eng, this);
+    connect(&d, &PluginStoreDialog::changed, this, &PluginManagerDialog::refreshList);
+    d.exec();
+    if (m_eng) m_eng->loadAll(m_eng->pluginDir());
+    refreshList();
 }

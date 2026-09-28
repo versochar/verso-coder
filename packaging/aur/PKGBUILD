@@ -1,6 +1,6 @@
 # Maintainer: versochar
 pkgname=verso-coder
-pkgver=1.0.4
+pkgver=1.1.0
 pkgrel=1
 pkgdesc="Yerel öncelikli Qt6 kod editörü — çok sağlayıcılı AI, ajan, LSP, Git"
 arch=('x86_64')

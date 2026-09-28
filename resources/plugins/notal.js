@@ -1,7 +1,7 @@
 // Verso Coder örnek eklentisi: hızlı not kaydetme (Stage 29 v2 API)
 // @name Hızlı Not
 // @version 1.0.0
-// @permission ui, fs.write
+// @permission ui, fs.write, fs.read
 (function () {
     verso.log("not eklentisi yüklendi");
     verso.registerCommand("not", "Hızlı Not Kaydet", function () {

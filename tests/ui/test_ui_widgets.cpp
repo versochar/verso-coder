@@ -10,6 +10,7 @@
 #include <QComboBox>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QTabWidget>
@@ -27,6 +28,8 @@
 #include "../src/widgets/AgentPanelDialog.h"
 #include "../src/widgets/ModelArenaDialog.h"
 #include "../src/widgets/SettingsDialog.h"
+#include "../src/core/PluginEngine.h"
+#include "../src/widgets/PluginStoreDialog.h"
 
 class UiWidgetsTest : public QObject {
     Q_OBJECT
@@ -45,6 +48,7 @@ private slots:
     void pathGuard_symlinkEscapeBlocked();
     void pathGuard_allowsNormalPaths();
     void commandAudit_roundTrip();
+    void pluginStoreDialog_buildsAndLists();
 
 private:
     QTemporaryDir m_home;
@@ -346,6 +350,18 @@ void UiWidgetsTest::commandAudit_roundTrip() {
     // Metin dışa aktarım
     const QString txt = CommandAudit::toText(c.last(3));
     QCOMPARE(txt.count(QLatin1Char('\n')), 3);
+}
+
+void UiWidgetsTest::pluginStoreDialog_buildsAndLists() {
+    // Kurulum ağı gerektirmez: liste Yenile'ye basılana dek boştur
+    PluginEngine eng;
+    PluginStoreDialog dlg(&eng);
+    QCOMPARE(dlg.windowTitle(), QString("Eklenti Mağazası"));
+    QVERIFY(dlg.findChild<QPushButton*>());
+    QVERIFY(dlg.findChild<QListWidget*>());
+    dlg.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&dlg, 3000));
+    dlg.close();
 }
 
 QTEST_MAIN(UiWidgetsTest)

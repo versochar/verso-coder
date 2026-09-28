@@ -21,6 +21,7 @@ private slots:
     void clearQuarantineSel();
     void editSettings();
     void showLog();
+    void openStore();
 
 private:
     PluginEngine* m_eng;
