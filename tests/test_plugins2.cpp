@@ -28,18 +28,19 @@ static int g_pass = 0, g_fail = 0;
 static PluginEngine* g_eng = nullptr;
 static QStringList g_cmds;
 
-static const PluginEngine::Plugin* bul(const QString& id) {
+static PluginEngine::Plugin bul(const QString& id) {
+    // Değerle döndür: plugins() geçici liste verir, adresi sarkar (ASan)
     for (const auto& p : g_eng->plugins())
-        if (p.id == id) return &p;
-    return nullptr;
+        if (p.id == id) return p;
+    return {};
 }
 
 static void yuklendi(const QString& id) {
-    const auto* p = bul(id);
-    if (!p || !p->loaded)
+    const auto p = bul(id);
+    if (!p.loaded)
         fprintf(stderr, "PLUGIN %s: %s\n", qUtf8Printable(id),
-                qUtf8Printable(p ? p->error : QString("bulunamadı")));
-    CHECK(p && p->loaded);
+                qUtf8Printable(p.id.isEmpty() ? QString("bulunamad\u0131") : p.error));
+    CHECK(p.loaded);
 }
 
 static QString cagir(const QString& cmd, const QString& arg = QString()) {

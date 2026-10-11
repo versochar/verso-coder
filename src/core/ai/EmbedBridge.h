@@ -34,7 +34,11 @@ public:
     void setModel(const QString& model);
     QString provider() const { return m_provider; }
     QString model() const { return m_model; }
-    void setSecretStore(SecretStore* s) { m_secrets = s; }
+    void setSecretStore(SecretStore* s) {
+        if (m_ownsSecrets) delete m_secrets;
+        m_secrets = s;
+        m_ownsSecrets = false;
+    }
     EmbedCache& cache() { return m_cache; }
 
     // Gömme sağlayıcısı ve modelini otomatik çöz (sohbet sağlayıcısı gömme
@@ -57,5 +61,6 @@ private:
     QString m_provider;
     QString m_model;
     SecretStore* m_secrets = nullptr;
+    bool m_ownsSecrets = false; // true ise yıkıcıda silinir
     EmbedCache m_cache{512};
 };

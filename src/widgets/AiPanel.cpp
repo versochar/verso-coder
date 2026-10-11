@@ -43,6 +43,13 @@ static QString chatDir() {
     return d;
 }
 
+AiPanel::~AiPanel() {
+    // Ham depolama üyeleri (ebeveynsiz): pencere kapanışında bırakma
+    delete m_chatStore;
+    delete m_agentMemory;
+    delete m_runStore;
+}
+
 AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     auto* lay = new QVBoxLayout(this);
     lay->setContentsMargins(0, 0, 0, 0);
@@ -88,6 +95,11 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     m_ctxMode = new QComboBox(this);
     m_ctxMode->addItems({"Açık dosya", "Seçili kod", "Proje (RAG)", "Bağlamsız"});
     m_ctxMode->setToolTip("AI bağlam modu");
+    m_ctxLabel = new QLabel(this);
+    m_ctxLabel->setStyleSheet("color:#858585;font-size:11px;");
+    m_ctxLabel->setToolTip("Gönder'e basınca yapay zekâya eklenecek bağlam");
+    connect(m_ctxMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) { refreshCtxLabel(); });
     m_stream = new QCheckBox("Akış", this);
     m_stream->setToolTip("Token token canlı yanıt (streaming)");
     m_stream->setChecked(true);
@@ -96,6 +108,7 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     cRow->addWidget(m_ctxMode, 1);
     cRow->addWidget(m_stream);
     cRow->addWidget(bIndex);
+    cRow->addWidget(m_ctxLabel);
     // Ajan satırı (Stage 7)
     auto* aRow = new QHBoxLayout();
     m_agentMode = new QCheckBox("Ajan", this);
@@ -151,26 +164,21 @@ AiPanel::AiPanel(QWidget* parent) : QWidget(parent) {
     bExport->setToolTip("Sohbeti markdown olarak dışa aktar");
     bExport->setFixedWidth(36);
     connect(bExport, &QPushButton::clicked, this, &AiPanel::exportChatMarkdown);
-    auto* bCompare = new QPushButton("⇄", this);
+    auto* bCompare = new QPushButton("Karşılaştır", this);
     bCompare->setToolTip("İki modelle karşılaştır (geçerli soru)");
-    bCompare->setFixedWidth(36);
     connect(bCompare, &QPushButton::clicked, this, &AiPanel::sendCompare);
-    auto* bUndo = new QPushButton("↩", this);
+    auto* bUndo = new QPushButton("Geri al", this);
     bUndo->setToolTip("Son yanıtı geri al (dallan)");
-    bUndo->setFixedWidth(36);
     connect(bUndo, &QPushButton::clicked, this, &AiPanel::undoLastAnswer);
-    // Stage 33: görsel ek / arena / dallar
-    auto* bImg = new QPushButton("🖼", this);
+    // Stage 33: görsel ek / arena / dallar (sembol yerine yazı: fontlarda bozuk çıkıyordu)
+    auto* bImg = new QPushButton("Görsel", this);
     bImg->setToolTip("Görsel ekle (vision destekli modeller için)");
-    bImg->setFixedWidth(36);
     connect(bImg, &QPushButton::clicked, this, &AiPanel::attachImages);
-    auto* bArena = new QPushButton("⚔", this);
+    auto* bArena = new QPushButton("Arena", this);
     bArena->setToolTip("Çok-modelli arena: aynı istemi modellere koştur");
-    bArena->setFixedWidth(36);
     connect(bArena, &QPushButton::clicked, this, &AiPanel::sendArena);
-    auto* bBranch = new QPushButton("⑂", this);
+    auto* bBranch = new QPushButton("Dallar", this);
     bBranch->setToolTip("Sohbet dallanma ağacı");
-    bBranch->setFixedWidth(36);
     connect(bBranch, &QPushButton::clicked, this, &AiPanel::showBranches);
     for (auto* b : {bExplain, bFix, bTest, bCommit, bApply}) qRow->addWidget(b);
     qRow->addWidget(bExport);
@@ -647,8 +655,32 @@ QJsonObject AiPanel::currentOptions() const {
     return opts;
 }
 
-QString AiPanel::buildContext(const QString& question) {
-    int mode = m_ctxMode->currentIndex(); // 0 dosya, 1 seçim, 2 rag, 3 yok
+void AiPanel::refreshCtxLabel() {
+    if (!m_ctxLabel) return;
+    const int mode = m_ctxMode ? m_ctxMode->currentIndex() : 3;
+    if (mode == 0) {
+        QString path, content;
+        emit currentFileRequested(path, content);
+        if (content.isEmpty())
+            m_ctxLabel->setText("Bağlam: açık dosya yok");
+        else
+            m_ctxLabel->setText(QString("Bağlam: %1 (%2 satır)")
+                                    .arg(QFileInfo(path).fileName())
+                                    .arg(content.count('\n') + 1));
+    } else if (mode == 1) {
+        QString sel;
+        int st = 0, ln = 0;
+        emit selectionRequested(sel, st, ln);
+        m_ctxLabel->setText(sel.isEmpty() ? "Bağlam: seçim yok"
+                                          : QString("Bağlam: seçim (%1 karakter)").arg(sel.size()));
+    } else if (mode == 2) {
+        m_ctxLabel->setText("Bağlam: proje (RAG)");
+    } else {
+        m_ctxLabel->setText("Bağlam: yok");
+    }
+}
+
+QString AiPanel::buildContext(const QString& question) {    int mode = m_ctxMode->currentIndex(); // 0 dosya, 1 seçim, 2 rag, 3 yok
     QString base;
     if (mode == 1) {
         QString sel; int st = 0, ln = 0;
@@ -735,6 +767,7 @@ void AiPanel::send(const QString& preset) {
     QString model = m_models->currentText().trimmed();
     if (model.isEmpty()) { m_view->append("<i>Önce model seç.</i>"); return; }
     m_activeModel = model;
+    refreshCtxLabel();
 
     QString prompt;
     if (preset.isEmpty())

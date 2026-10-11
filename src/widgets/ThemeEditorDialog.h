@@ -1,5 +1,6 @@
 #pragma once
 #include "../core/ThemeTokens.h"
+#include "../core/ai/SecretStore.h"
 #include <QDialog>
 #include <QMap>
 
@@ -50,5 +51,5 @@ private:
     QPushButton* m_generate;
     // Stage 37: tema üretimi de sağlayıcı-duyarsız (AiRunner)
     class AiRunner* m_runner = nullptr;
-    class SecretStore* m_secrets = nullptr;
+    SecretStore m_secrets; // değer üye: diyalogla ölür, sızdırmaz
 };

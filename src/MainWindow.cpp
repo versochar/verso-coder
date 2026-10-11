@@ -197,6 +197,15 @@
 #include <QVBoxLayout>
 #include <utility>
 
+MainWindow::~MainWindow() {
+    // Ebeveynsiz ham üyeler (testte pencere silinir; uygulamada çıkışta)
+    delete m_gitIgnore;
+    delete m_trash;
+    delete m_sessions;
+    delete m_backups;
+    delete m_secrets;
+}
+
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     AppSettings s = SettingsManager::instance().load();
     LanguageManager::instance().setLanguage(s.language);
@@ -3111,6 +3120,14 @@ void MainWindow::loadPluginsDeferred() {
                 [this](const QString& id, const QString& title) {
                     m_pluginCmds[id] = title;
                     m_pluginViews[id] = title;
+                    // İlk kez görülen görünümde açılış yolunu göster
+                    QSettings q("Verso", "VersoCoder");
+                    QStringList seen = q.value("plugin/seenViews").toStringList();
+                    if (!seen.contains(id)) {
+                        seen << id;
+                        q.setValue("plugin/seenViews", seen);
+                        toast(1, QString("Görünüm eklendi: %1 — Eklentiler panelinden çift tıkla aç").arg(title));
+                    }
                     if (m_pluginPanel) {
                         m_pluginPanel->setViews(m_pluginViews);
                         m_pluginPanel->refresh();

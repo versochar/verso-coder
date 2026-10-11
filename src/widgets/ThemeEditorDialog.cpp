@@ -114,9 +114,8 @@ ThemeEditorDialog::ThemeEditorDialog(const QString& baseTheme, QWidget* parent)
 
     // Stage 37: model listesi etkin sağlayıcıdan gelir (tüm sağlayıcılar)
     AppSettings s = SettingsManager::instance().load();
-    m_secrets = new SecretStore();
     m_runner = new AiRunner(this);
-    m_runner->setSecretStore(m_secrets);
+    m_runner->setSecretStore(&m_secrets);
     m_model->addItem(s.ollamaModel);
     m_model->setCurrentText(ProviderPrefs::modelFor(ProviderPrefs::activeProvider(),
                                                    s.ollamaModel));

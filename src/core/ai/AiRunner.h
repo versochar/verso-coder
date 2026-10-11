@@ -63,7 +63,11 @@ public:
     explicit AiRunner(QObject* parent = nullptr);
     ~AiRunner() override;
 
-    void setSecretStore(SecretStore* s) { m_secrets = s; }
+    void setSecretStore(SecretStore* s) {
+        if (m_ownsSecrets) delete m_secrets;
+        m_secrets = s;
+        m_ownsSecrets = false; // dışarıdan verildi, silme
+    }
     void setRecordUsage(bool on) { m_recordUsage = on; }
 
     // Seçenekleri göreve göre doldurur (sıcaklık/token/sistem tonu)
@@ -127,6 +131,7 @@ private:
     LlmClient* m_active = nullptr;
     QHash<QString, LlmClient*> m_pool;
     SecretStore* m_secrets = nullptr;
+    bool m_ownsSecrets = false; // true ise yıkıcıda silinir
     bool m_recordUsage = true;
     bool m_inside = false;
 };

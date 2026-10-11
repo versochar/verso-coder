@@ -69,6 +69,7 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget* parent = nullptr);
+    ~MainWindow() override;
     void applyStartupOptions(const StartupOptions& opts); // Stage 8: CLI / tek örnek
     void checkStartupBudget(int budgetMs); // Stage 32: başlangıç bütçesi bildirimi
     // Stage 46: test edilebilirlik (tembel sekme sayımı)

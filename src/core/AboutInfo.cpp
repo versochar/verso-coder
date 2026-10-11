@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <QtGlobal>
 
-QString AboutInfo::version() { return "0.3.3"; }
+QString AboutInfo::version() { return "0.3.4"; }
 QString AboutInfo::appName() { return "Verso Coder"; }
 
 QString AboutInfo::buildInfo() {
@@ -23,6 +23,9 @@ QString AboutInfo::buildInfo() {
 
 QString AboutInfo::changelog() {
     return QString(
+        "0.3.4\n"
+        "  • Pardus/Debian 12 uyumu: Linux derlemesi eski tabana alındı\n"
+        "    (glibc ≤2.35; 2.38 isteyen gömülü kütüphaneler bitti)\n"
         "0.3.3\n"
         "  • Mağaza/Yönetici tıklama donması bitti (özyineleme kilidi)\n"
         "  • Çoklu imleçle satır taşıma (ek imleçler korunur)\n"

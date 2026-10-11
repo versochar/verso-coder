@@ -2,7 +2,7 @@
 
 Yerel öncelikli, Qt6 ile yazılmış hızlı kod editörü. Sekmeli editör, LSP, Git, uzak geliştirme ve **çok sağlayıcılı yapay zekâ** (yerel Ollama'dan buluta) tek uygulamada.
 
-Sürüm 0.3.3 · MIT lisansı · Linux (AppImage/pacman) · Windows · macOS (Apple Silicon)
+Sürüm 0.3.4 · MIT lisansı · Linux (AppImage/pacman) · Windows · macOS (Apple Silicon)
 
 ## Kurulum
 

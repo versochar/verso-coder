@@ -8,12 +8,17 @@
 EmbedBridge::EmbedBridge(QObject* parent) {
     // Kasa bağlanmasa da anahtar bulunabilsin (aksi halde istek 401 alır ve
     // "anahtar eksik" yerine sunucu hatası görünür)
-    if (!m_secrets) m_secrets = new SecretStore();
+    if (!m_secrets) {
+        m_secrets = new SecretStore();
+        m_ownsSecrets = true;
+    }
     m_provider = resolveProvider();
     m_model = resolveModel(m_provider);
 }
 
-EmbedBridge::~EmbedBridge() = default;
+EmbedBridge::~EmbedBridge() {
+    if (m_ownsSecrets) delete m_secrets;
+}
 
 LlmClient& EmbedBridge::client() { return m_client; }
 

@@ -10,3 +10,5 @@
 *.dmg
 *-windows-*.zip
 build-pkg/
+/build-dbg/
+/build-asan/

@@ -19,10 +19,16 @@ QMutex g_activeMutex;
 
 AiRunner::AiRunner(QObject* parent) : QObject(parent) {
     // Çağıran kasa bağlamayı unutsa bile anahtar bulunabilsin
-    if (!m_secrets) m_secrets = new SecretStore();
+    if (!m_secrets) {
+        m_secrets = new SecretStore();
+        m_ownsSecrets = true;
+    }
 }
 
-AiRunner::~AiRunner() { leave(); }
+AiRunner::~AiRunner() {
+    leave();
+    if (m_ownsSecrets) delete m_secrets;
+}
 
 bool AiRunner::busy() {
     QMutexLocker lk(&g_activeMutex);

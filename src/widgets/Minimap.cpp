@@ -87,7 +87,8 @@ void Minimap::paintEvent(QPaintEvent*) {
     if (n <= 0) return;
     int step = n > 15000 ? (n / 8000 + 1) : 1; // büyük dosyada örnekle
     double h = (double)height() / qMax(1, n);
-    double barH = qMax(1.5, h * 0.8 * step);
+    // Minyatür görünüm: çubuklar satır yüksekliğini geçmesin (az satırda dev blok olmasın)
+    double barH = qBound(1.5, h * 0.8 * step, 4.0);
     int curLine = m_editor->textCursor().blockNumber();
     // Stage 32: çubuk katmanını önbelleğe al — kaydırma/cursor sadece üstte çizer
     if (m_barCache.isNull() || m_barSize != size() || m_barDrawn != m_barRev ||

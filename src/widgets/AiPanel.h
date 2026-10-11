@@ -54,6 +54,7 @@ class AiPanel : public QWidget {
     Q_OBJECT
 public:
     explicit AiPanel(QWidget* parent = nullptr);
+    ~AiPanel() override;
     void reloadSettings();
     void setAgentMode(bool on); // Stage 7: komut paletinden ajan modu
     bool agentMode() const;
@@ -128,6 +129,7 @@ private:
     QStringList currentImageBase64() const;
     void refreshImageChips();
     QString conversationContext();
+    void refreshCtxLabel();      // bağlı bağlam göstergesini günceller
     void configureProvider();    // Stage 35: sağlayıcıyı uygula + modelleri getir
     void refreshEmbedRoute();   // Stage 36: gömme sağlayıcısı/modelini güncelle
     void requestLlmSummary(const QList<ConvTurn>& turns); // Stage 37: LLM özeti
@@ -155,6 +157,7 @@ private:
     QSpinBox* m_agentSteps;   // Stage 7
     QLabel* m_ragLabel;
     QLabel* m_tokenLabel;     // Stage 7
+    QLabel* m_ctxLabel = nullptr; // bağlı bağlam göstergesi
     QTextBrowser* m_view;
     QLineEdit* m_input;
     QPushButton* m_send;
